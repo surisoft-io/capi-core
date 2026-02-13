@@ -1,22 +1,22 @@
 package io.surisoft.capi.tracer;
 
 import io.opentelemetry.api.OpenTelemetry;
+import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
+import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator;
 import io.opentelemetry.context.propagation.ContextPropagators;
-import io.opentelemetry.exporter.zipkin.ZipkinSpanExporter;
-import io.opentelemetry.extension.trace.propagation.B3Propagator;
+import io.opentelemetry.exporter.otlp.http.trace.OtlpHttpSpanExporter;
 import io.opentelemetry.sdk.OpenTelemetrySdk;
 import io.opentelemetry.sdk.resources.Resource;
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
-import io.opentelemetry.sdk.trace.export.BatchSpanProcessor;
-import io.opentelemetry.semconv.resource.attributes.ResourceAttributes;
+import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
 
 
 public class TracingBootstrap {
 
     public static OpenTelemetry init(String serviceEndpoint, String serviceName) {
 
-        // Identify THIS process
+        /*
         Resource resource = Resource.getDefault().merge(
                 Resource.create(
                         Attributes.of(
@@ -28,7 +28,7 @@ public class TracingBootstrap {
         // Export to OTEL / Zipkin endpoint
         ZipkinSpanExporter exporter =
                 ZipkinSpanExporter.builder()
-                        .setEndpoint(serviceEndpoint + "/api/v2/spans")
+                        .setEndpoint(serviceEndpoint + "/v1/spans")
                       .build();
 
         SdkTracerProvider tracerProvider =
@@ -45,7 +45,22 @@ public class TracingBootstrap {
                         ContextPropagators.create(
                                 B3Propagator.injectingSingleHeader()
                         )
-                ).buildAndRegisterGlobal();
+                ).buildAndRegisterGlobal();*/
+        OtlpHttpSpanExporter exporter = OtlpHttpSpanExporter.builder()
+                .setEndpoint(serviceEndpoint + "/v1/traces")
+                .build();
+
+        SdkTracerProvider tracerProvider = SdkTracerProvider.builder()
+                .addSpanProcessor(SimpleSpanProcessor.create(exporter))
+                .setResource(Resource.getDefault().merge(
+                        Resource.create(Attributes.of(
+                                AttributeKey.stringKey("service.name"), serviceName))))
+                .build();
+
+        return OpenTelemetrySdk.builder()
+                .setTracerProvider(tracerProvider)
+                .setPropagators(ContextPropagators.create(W3CTraceContextPropagator.getInstance()))
+                .buildAndRegisterGlobal();
 
     }
 }

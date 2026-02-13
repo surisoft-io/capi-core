@@ -30,9 +30,12 @@ public class ErrorRoute extends RouteBuilder {
                         if(exchange.getIn().getHeader(Constants.ROUTE_ID_HEADER) != null) {
                             capiRestError.setRouteID(exchange.getIn().getHeader(Constants.ROUTE_ID_HEADER, String.class));
                         }
-                        if(exchange.getIn().getHeader("x-b3-traceid") != null || exchange.getIn().getHeader("X-B3-Traceid", String.class) != null) {
-                            capiRestError.setTraceID(exchange.getIn().getHeader(Constants.TRACE_ID_HEADER, String.class));
+
+                        String spanId = exchange.getProperty(Constants.CAPI_EXCHANGE_INTERNAL_TRACE_ID, String.class);
+                        if(spanId != null) {
+                            capiRestError.setTraceID(spanId);
                         }
+
                         if(exchange.getIn().getHeader(Constants.REASON_MESSAGE_HEADER) != null && exchange.getIn().getHeader(Constants.REASON_CODE_HEADER) != null) {
                             exchange.setProperty(SERVICE_RESPONSE_CODE, exchange.getIn().getHeader(Constants.REASON_CODE_HEADER));
                             capiRestError.setErrorMessage(exchange.getIn().getHeader(Constants.REASON_MESSAGE_HEADER, String.class));

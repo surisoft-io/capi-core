@@ -122,4 +122,5 @@ public class Constants {
     public static final String CAPI_META_THROTTLE_DURATION = "Capi-Meta-Throttle-Duration";
     public static final String CAPI_META_THROTTLE_TOTAL_CALLS_ALLOWED = "Capi-Meta-Throttle-Total-Calls-Allowed";
     public static final String CAPI_META_THROTTLE_CURRENT_CALL_NUMBER = "Capi-Meta-Throttle-Current-Call-Number";
+    public static final String CAPI_EXCHANGE_INTERNAL_TRACE_ID = "CapiSpanId";
 }

@@ -17,6 +17,7 @@ public class CAPIConfiguration {
     private Ssl ssl;
     private Rest rest;
     private Websocket websocket;
+    private String publicEndpoint;
 
     public String getVersion() {
         return version;
@@ -351,6 +352,12 @@ public class CAPIConfiguration {
     }
     public void setWebsocket(Websocket websocket) {
         this.websocket = websocket;
+    }
+    public String getPublicEndpoint() {
+        return publicEndpoint;
+    }
+    public void setPublicEndpoint(String publicEndpoint) {
+        this.publicEndpoint = publicEndpoint;
     }
 
 
