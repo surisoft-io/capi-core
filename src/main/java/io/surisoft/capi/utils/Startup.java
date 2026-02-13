@@ -5,10 +5,7 @@ import com.nimbusds.jwt.proc.DefaultJWTProcessor;
 import io.micrometer.core.instrument.composite.CompositeMeterRegistry;
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import io.surisoft.capi.CAPIMain;
-import io.surisoft.capi.configuration.CAPIConfiguration;
-import io.surisoft.capi.configuration.CapiSslContextHolder;
-import io.surisoft.capi.configuration.LocalCacheConfiguration;
-import io.surisoft.capi.configuration.MetricsConfiguration;
+import io.surisoft.capi.configuration.*;
 import io.surisoft.capi.kafka.CapiInstance;
 import io.surisoft.capi.oidc.Oauth2Provider;
 import io.surisoft.capi.processor.*;
@@ -93,6 +90,9 @@ public class Startup {
         startRouteUtils();
         startServiceUtils();
         startConsulNodeDiscoveryService();
+        if(configuration.isCorsEnabled()) {
+            bindCapCorsFilterStrategy(camelContext);
+        }
     }
 
     private void configureUndertowSsl() {
@@ -283,5 +283,9 @@ public class Startup {
 
     public @Nullable SSLContext getUndertowSslContext() {
         return undertowSslContext;
+    }
+
+    private void bindCapCorsFilterStrategy(CamelContext camelContext) {
+        camelContext.getRegistry().bind("corsFilterStrategy", new CapiCorsFilterStrategy(configuration.getAllowedHeaders()));
     }
 }
