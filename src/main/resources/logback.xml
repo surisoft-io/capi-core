@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+<!-- Camel noise control -->
+<logger name="org.apache.camel" level="INFO"/>
+<logger name="org.apache.camel.impl.engine" level="WARN"/>
+<logger name="org.apache.camel.component" level="INFO"/>
+<logger name="org.apache.camel.main" level="INFO"/>
+<!-- Undertow -->
+<logger name="io.undertow" level="WARN"/>
+<!-- Kafka -->
+<logger name="org.apache.kafka" level="WARN"/>
+<!-- OpenTelemetry -->
+<logger name="io.opentelemetry" level="WARN"/>
+<logger name="io.swagger.v3" level="error"/>
+<!-- CAPI -->
+<logger name="io.surisoft.capi" level="WARN"/>
+
+<!-- CAPI Logs properties -->
+<property name="logsEnabled"
+                source="logging.logback.logs.enabled"
+                defaultValue="false"/>
+<property name="logsTenant"
+                source="logging.logback.logs.tenant"/>
+<property name="logsAppName"
+                source="logging.logback.logs.appName"/>
+<property name="logsAppEnvironment"
+                source="logging.logback.logs.appEnvironment"/>
+<property name="logsDestination"
+                source="logging.logback.logs.destination"/>
+
+<!-- Access Logs properties -->
+<property name="accessLogsEnabled"
+                source="logging.logback.access.enabled"
+                defaultValue="false"/>
+<property name="accessLogsTenant"
+                source="logging.logback.access.tenant"/>
+<property name="accessLogsService"
+                source="logging.logback.access.service"/>
+<property name="accessLogsDestination"
+                source="logging.logback.access.destination"/>
+
+<property name="logstashDestination" source="logstash-destination"/>
+
+<!-- LOGSTASH appender (only created when logs are enabled) -->
+<condition class="ch.qos.logback.core.boolex.PropertyEqualityCondition">
+    <key>logsEnabled</key>
+    <value>true</value>
+</condition>
+<if>
+    <then>
+        <appender name="LOGSTASH" class="net.logstash.logback.appender.LogstashTcpSocketAppender">
+            <destination>${logsDestination}</destination>
+            <keepAliveDuration>5 minutes</keepAliveDuration>
+            <connectionTimeout>5s</connectionTimeout>
+            <writeTimeout>5s</writeTimeout>
+            <reconnectionDelay>10s</reconnectionDelay>
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <customFields>
+                    {
+                    "tenant":"${logsTenant}",
+                    "appName":"${logsAppName}",
+                    "appEnvironment":"${logsAppEnvironment}",
+                    "host":"${accessLogsDestination}"
+                    }
+                </customFields>
+                <includeMdc>true</includeMdc>
+                <includeContext>true</includeContext>
+                <includeStructuredArguments>true</includeStructuredArguments>
+            </encoder>
+        </appender>
+    </then>
+</if>
+
+<!-- ACCESS-LOGSTASH appender (only created when access logs are enabled) -->
+<condition class="ch.qos.logback.core.boolex.PropertyEqualityCondition">
+    <key>accessLogsEnabled</key>
+    <value>true</value>
+</condition>
+<if>
+    <then>
+        <appender name="ACCESS-LOGSTASH"
+                  class="net.logstash.logback.appender.LogstashTcpSocketAppender">
+            <destination>${accessLogsDestination}</destination>
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <customFields>
+                    {
+                    "log_type":"access",
+                    "service":"${accessLogsService}",
+                    "tenant": "${accessLogsTenant}"
+                    }
+                </customFields>
+            </encoder>
+        </appender>
+        <appender name="ASYNC-ACCESS" class="ch.qos.logback.classic.AsyncAppender">
+            <queueSize>16384</queueSize>
+            <neverBlock>true</neverBlock>
+            <appender-ref ref="ACCESS-LOGSTASH"/>
+        </appender>
+    </then>
+</if>
+    <!-- Pattern with trace/span support -->
+    <property name="LOG_PATTERN"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"/>
+
+    <!-- Console appender -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+        </encoder>
+    </appender>
+
+
+
+    <!-- Root logger -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+
+</configuration>
