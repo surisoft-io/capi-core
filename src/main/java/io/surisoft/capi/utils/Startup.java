@@ -1,0 +1,287 @@
+package io.surisoft.capi.utils;
+
+import com.nimbusds.jose.proc.SecurityContext;
+import com.nimbusds.jwt.proc.DefaultJWTProcessor;
+import io.micrometer.core.instrument.composite.CompositeMeterRegistry;
+import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
+import io.surisoft.capi.CAPIMain;
+import io.surisoft.capi.configuration.CAPIConfiguration;
+import io.surisoft.capi.configuration.CapiSslContextHolder;
+import io.surisoft.capi.configuration.LocalCacheConfiguration;
+import io.surisoft.capi.configuration.MetricsConfiguration;
+import io.surisoft.capi.kafka.CapiInstance;
+import io.surisoft.capi.oidc.Oauth2Provider;
+import io.surisoft.capi.processor.*;
+import io.surisoft.capi.schema.Service;
+import io.surisoft.capi.schema.WebsocketClient;
+import io.surisoft.capi.service.ConsulNodeDiscovery;
+import io.surisoft.capi.service.OpaService;
+import io.surisoft.capi.tracer.CapiTracer;
+import io.surisoft.capi.tracer.TracingBootstrap;
+import jakarta.annotation.Nullable;
+import org.apache.camel.CamelContext;
+import org.apache.camel.component.undertow.UndertowComponent;
+import org.apache.camel.support.jsse.KeyManagersParameters;
+import org.apache.camel.support.jsse.KeyStoreParameters;
+import org.apache.camel.support.jsse.SSLContextParameters;
+import org.apache.hc.core5.ssl.SSLContextBuilder;
+import org.apache.hc.core5.ssl.TrustStrategy;
+import org.cache2k.Cache;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
+import java.io.FileInputStream;
+import java.security.KeyManagementException;
+import java.security.KeyStore;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.X509Certificate;
+import java.util.*;
+
+public class Startup {
+
+    private static final Logger log = LoggerFactory.getLogger(CAPIMain.class);
+    private final CAPIConfiguration configuration;
+    private final CamelContext camelContext;
+    private ServiceUtils serviceUtils;
+    private RouteUtils routeUtils;
+    private Cache<String, Service> serviceCache;
+    private HttpUtils httpUtils;
+    private ConsulNodeDiscovery consulNodeDiscovery;
+    private MetricsProcessor metricsProcessor;
+    private ContentTypeValidator contentTypeValidator;
+    private ThrottleProcessor throttleProcessor;
+
+    @Nullable
+    private Oauth2Provider oauth2Provider;
+    @Nullable
+    private List<DefaultJWTProcessor<SecurityContext>> jwtProcessorList;
+    @Nullable
+    private CapiSslContextHolder capiSslContextHolder;
+    @Nullable
+    private CapiTracer capiTracer;
+    @Nullable
+    private AuthorizationProcessor authorizationProcessor;
+    @Nullable
+    private OpaService opaService;
+    @Nullable
+    private WebsocketUtils websocketUtils;
+    private Map<String, WebsocketClient> webSocketClientMap = new HashMap<>();
+    @Nullable
+    private SSLContext undertowSslContext;
+
+    private CompositeMeterRegistry meterRegistry;
+    private PrometheusMeterRegistry prometheusRegistry;
+
+    public Startup(CAPIConfiguration capiConfiguration, CamelContext camelContext) {
+        this.configuration = capiConfiguration;
+        this.camelContext = camelContext;
+    }
+
+    public void start() {
+        log.info("Starting CAPI Gateway version {}", configuration.getVersion());
+        startMetrics();
+        createServiceCache();
+        createSslContextHolder();
+        configureUndertowSsl();
+        startOauth2Service();
+        startHttpUtils();
+        startTraceService();
+        startWebsocketUtils();
+        createRouteProcessors();
+        startRouteUtils();
+        startServiceUtils();
+        startConsulNodeDiscoveryService();
+    }
+
+    private void configureUndertowSsl() {
+        CAPIConfiguration.Ssl ssl = configuration.getSsl();
+        if(ssl == null || !ssl.isEnabled()) {
+            return;
+        }
+        log.info("Configuring Undertow SSL");
+
+        // Configure Camel's undertow component
+        KeyStoreParameters keyStoreParameters = new KeyStoreParameters();
+        keyStoreParameters.setResource(ssl.getPath());
+        keyStoreParameters.setPassword(ssl.getPassword());
+        keyStoreParameters.setType(ssl.getKeyStoreType());
+
+        KeyManagersParameters keyManagersParameters = new KeyManagersParameters();
+        keyManagersParameters.setKeyStore(keyStoreParameters);
+        keyManagersParameters.setKeyPassword(ssl.getPassword());
+
+        SSLContextParameters sslContextParameters = new SSLContextParameters();
+        sslContextParameters.setKeyManagers(keyManagersParameters);
+
+        UndertowComponent undertowComponent = (UndertowComponent) camelContext.getComponent("undertow");
+        undertowComponent.setSslContextParameters(sslContextParameters);
+
+        // Build SSLContext for non-Camel Undertow servers (AdminGateway, etc.)
+        try {
+            KeyStore keyStore = KeyStore.getInstance(ssl.getKeyStoreType());
+            try(FileInputStream fis = new FileInputStream(ssl.getPath())) {
+                keyStore.load(fis, ssl.getPassword().toCharArray());
+            }
+            KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+            kmf.init(keyStore, ssl.getPassword().toCharArray());
+            undertowSslContext = SSLContext.getInstance("TLS");
+            undertowSslContext.init(kmf.getKeyManagers(), null, null);
+        } catch(Exception e) {
+            throw new RuntimeException("Failed to create SSL context for Undertow", e);
+        }
+    }
+
+    private void startMetrics() {
+        log.info("Configuring CAPI Metrics");
+        meterRegistry = MetricsConfiguration.createMetricsRegistry();
+        prometheusRegistry = MetricsConfiguration.createPrometheusMeterRegistry(meterRegistry);
+    }
+
+    private void startWebsocketUtils() {
+        if(configuration.getWebsocket() != null && configuration.getWebsocket().isEnabled()) {
+            websocketUtils = new WebsocketUtils(configuration.getWebsocket(), oauth2Provider.getJwtProcessorList(), false, null, null, null);
+        }
+    }
+
+    private void startConsulNodeDiscoveryService() {
+        consulNodeDiscovery = new ConsulNodeDiscovery(camelContext, capiSslContextHolder, configuration.getConsulHosts(), serviceUtils, serviceCache, routeUtils, websocketUtils);
+        consulNodeDiscovery.setThrottleProcessor(throttleProcessor);
+        consulNodeDiscovery.setContentTypeValidator(contentTypeValidator);
+        consulNodeDiscovery.setMetricsProcessor(metricsProcessor);
+        consulNodeDiscovery.setOpaService(opaService);
+        consulNodeDiscovery.setCapiRunningMode(configuration.getRunningMode());
+        if(configuration.getRest() != null && configuration.getRest().getContextPath() != null && !configuration.getRest().getContextPath().isEmpty()) {
+            consulNodeDiscovery.setCapiContext(configuration.getRest().getContextPath());
+        }
+
+
+        if(configuration.getTraces().getExtraMetadataPrefix() != null) {
+            consulNodeDiscovery.setServiceMetaExtrasPrefix(configuration.getTraces().getExtraMetadataPrefix());
+        }
+
+        if(websocketUtils != null) {
+            consulNodeDiscovery.setWebsocketClientMap(webSocketClientMap);
+        }
+
+    }
+
+    private void createServiceCache() {
+        log.info("Creating Service Cache");
+        serviceCache = LocalCacheConfiguration.serviceCache();
+    }
+
+    private void startHttpUtils() {
+        log.info("Configuring HTTP Utils");
+        httpUtils = new HttpUtils(configuration.getOauth2().getCookieName(), jwtProcessorList);
+    }
+
+    private void startOauth2Service() {
+        if(configuration.getOauth2().isEnabled()) {
+            log.info("Configuring oauth2 Support");
+            oauth2Provider = new Oauth2Provider(configuration.getOauth2().getKeys());
+            jwtProcessorList = oauth2Provider.getJwtProcessor(capiSslContextHolder);
+        }
+    }
+
+    private void createSslContextHolder() {
+        if(configuration.getTrustStore().isEnabled()) {
+            log.info("Configuring CAPI TrustStore");
+            TrustStrategy trustStrategy = (X509Certificate[] chain, String authType) -> false;
+            SSLContext sslContext = null;
+            try {
+                sslContext = SSLContextBuilder
+                        .create()
+                        //.loadTrustMaterial(capiTrustManager.getKeyStore(), trustStrategy)
+                        .build();
+            } catch (NoSuchAlgorithmException | KeyManagementException e) {
+                throw new RuntimeException(e);
+            }
+            capiSslContextHolder = new CapiSslContextHolder(sslContext);
+        }
+    }
+
+    private void startTraceService() {
+        if(configuration.getTraces().isEnabled()) {
+            camelContext.setUseMDCLogging(true);
+
+            TracingBootstrap.init(configuration.getTraces().getEndpoint(), configuration.getTraces().getServiceName());
+            capiTracer = new CapiTracer(httpUtils, configuration.getInstanceName(), serviceCache);
+            List<String> excludePatterns = new ArrayList<>();
+            excludePatterns.add("timer://");
+            excludePatterns.add("timer");
+            excludePatterns.add("bean://consulNodeDiscovery");
+            excludePatterns.add("bean://consistencyChecker");
+            excludePatterns.add("direct://");
+            excludePatterns.add("error");
+            capiTracer.setExcludePatterns(excludePatterns);
+            capiTracer.init(camelContext);
+
+
+        }
+    }
+
+    private void startRouteUtils() {
+        routeUtils = new RouteUtils(new HttpErrorProcessor(),
+                httpUtils,
+                meterRegistry,
+                capiTracer,
+                camelContext,
+                authorizationProcessor,
+                configuration.isCorsEnabled(),
+                capiSslContextHolder,
+                configuration.getRest().getResponseTimeout(),
+                configuration.getRest().getConnectionRequestTimeout(),
+                configuration.getRest().getRequestTimeout());
+    }
+
+    private void startServiceUtils() {
+        serviceUtils = new ServiceUtils(httpUtils, null, null, routeUtils, camelContext, null, configuration.getRunningMode());
+    }
+
+    private void createRouteProcessors() {
+        metricsProcessor = new MetricsProcessor(meterRegistry);
+        contentTypeValidator = new ContentTypeValidator();
+        throttleProcessor = new ThrottleProcessor(serviceCache, httpUtils, "topic", new CapiInstance(UUID.randomUUID().toString()));
+        if(configuration.getOauth2().isEnabled()) {
+            authorizationProcessor = new AuthorizationProcessor(httpUtils, serviceCache, opaService);
+        }
+    }
+
+    public PrometheusMeterRegistry getPrometheusRegistry() {
+        return prometheusRegistry;
+    }
+
+    public Cache<String, Service> getServiceCache() {
+        return serviceCache;
+    }
+
+    public HttpUtils getHttpUtils() {
+        return httpUtils;
+    }
+
+    public ConsulNodeDiscovery getConsulNodeDiscovery() {
+        return consulNodeDiscovery;
+    }
+
+    public RouteUtils getRouteUtils() {
+        return routeUtils;
+    }
+
+    public @Nullable Oauth2Provider getOauth2Provider() {
+        return oauth2Provider;
+    }
+
+    public @Nullable WebsocketUtils getWebsocketUtils() {
+        return websocketUtils;
+    }
+
+    public Map<String, WebsocketClient> getWebSocketClientMap() {
+        return webSocketClientMap;
+    }
+
+    public @Nullable SSLContext getUndertowSslContext() {
+        return undertowSslContext;
+    }
+}

@@ -1,0 +1,49 @@
+capi:
+  version: 1.0.0
+  instanceName: default
+  runningMode: full
+  adminPort: 8381
+  rest:
+    enabled: true
+    port: 8380
+    listeningAddress: 0.0.0.0
+    contextPath: /api
+    connectionRequestTimeout: 5000
+    requestTimeout: 5000
+    responseTimeout: 120000
+  websocket:
+    enabled: true
+    port: 8382
+    listeningAddress: 0.0.0.0
+    contextPath: /api/*
+  ssl:
+    enabled: false
+    keyStoreType: PKCS12
+    path:
+    password:
+  trustStore:
+    enabled: false
+    path: /some/path
+    encoded:
+    password:
+  consulHosts:
+    - endpoint: http://localhost:8500
+      token:
+  oauth2:
+    enabled: true
+    cookieName:
+    keys:
+      - http://localhost:8080/realms/capi/protocol/openid-connect/certs
+  traces:
+    enabled: true
+    serviceName: capi
+    endpoint: http://localhost:4318
+    extraMetadataPrefix: ec-
+  corsEnabled: true
+  allowedHeaders:
+    - Origin
+    - Accept
+    - X-Requested-With
+    - Content-Type
+    - Access-Control-Request-Method
+    - Authorization
