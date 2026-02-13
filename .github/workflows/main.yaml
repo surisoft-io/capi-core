@@ -1,0 +1,28 @@
+name: capi-core
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up JDK 23
+        uses: actions/setup-java@v1.4.4
+        with:
+          java-version: 23
+      - uses: actions/checkout@v3.5.3
+      - name: Docker login
+        run: |
+          docker login -u surisoft -p ${{ secrets.DOCKER_HUB_PWD }}
+      - name: Build and push multi-platform image
+        run: |
+          docker buildx create --use
+          docker buildx build . \
+            --platform linux/amd64,linux/arm64 \
+            --build-arg "CAPI_VERSION=${{ env.RELEASE_VERSION }}" \
+            --file Dockerfile \
+            --tag surisoft/capi-core:${{ env.RELEASE_VERSION }} \
+            --tag surisoft/capi-core:latest \
+            --push
