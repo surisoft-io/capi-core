@@ -12,6 +12,9 @@ jobs:
         uses: actions/setup-java@v1.4.4
         with:
           java-version: 23
+      - name: Set Release version env variable
+        run: |
+          echo "RELEASE_VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)" >> $GITHUB_ENV
       - uses: actions/checkout@v3.5.3
       - name: Docker login
         run: |
