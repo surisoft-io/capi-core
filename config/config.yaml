@@ -1,6 +1,7 @@
 capi:
   version: 1.0.0
   instanceName: default
+  strictToInstanceName: false
   publicEndpoint: http://localhost:8380/api/
   runningMode: full
   adminPort: 8381
@@ -27,6 +28,7 @@ capi:
     path: /some/path
     encoded:
     password:
+  consulCatalogDiscoverInterval: 60000
   consulHosts:
     - endpoint: http://localhost:8500
       token:

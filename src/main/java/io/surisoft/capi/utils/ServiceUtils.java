@@ -19,6 +19,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ServiceUtils {
 
@@ -308,5 +309,15 @@ public class ServiceUtils {
             return serviceCapiInstances.getInstances().get(capiInstanceName);
         }
         return null;
+    }
+
+    public boolean isTheServiceRegisteredForOtherInstances(ConsulObject consulObject, String capiInstanceName) {
+        AtomicBoolean multipleCapiInstances = new AtomicBoolean(false);
+        consulObject.getServiceMeta().getUnknownProperties().forEach((unknownKey, unknownValue) -> {
+            if(unknownKey.startsWith(ServiceCapiInstanceMapper.SERVICE_CAPI_INSTANCE_PREFIX)) {
+                multipleCapiInstances.set(true);
+            }
+        });
+        return multipleCapiInstances.get();
     }
 }

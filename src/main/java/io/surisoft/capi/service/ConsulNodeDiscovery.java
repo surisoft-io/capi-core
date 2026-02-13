@@ -39,8 +39,8 @@ public class ConsulNodeDiscovery {
     private HttpClient client;
     private CapiSslContextHolder capiSslContextHolder;
     private List<CAPIConfiguration.HostConfig> consulHosts;
-    private final String capiNamespace = "local";
-    private final boolean strictNamespace = false;
+    private String capiInstanceName;
+    private boolean strictToInstanceName;
     private final ServiceUtils serviceUtils;
     private final Cache<String, Service> serviceCache;
     private final RouteUtils routeUtils;
@@ -135,7 +135,7 @@ public class ConsulNodeDiscovery {
                     }
                 });
 
-                ServiceCapiInstances.Instance thisInstance = serviceUtils.getServiceCapiInstance(consulObject, capiNamespace);
+                ServiceCapiInstances.Instance thisInstance = serviceUtils.getServiceCapiInstance(consulObject, capiInstanceName);
 
                 if(thisInstance != null) {
                     if(thisInstance.isRouteGroupFirst()) {
@@ -190,18 +190,51 @@ public class ConsulNodeDiscovery {
             TypeReference<List<ConsulObject>> typeRef = new TypeReference<>() {};
             List<ConsulObject> temporaryList = objectMapper.readValue(response.body(), typeRef);
             temporaryList.forEach(o -> {
-                ServiceCapiInstances.Instance thisInstance = serviceUtils.getServiceCapiInstance(o, capiNamespace);
-                if(capiNamespace == null) {
+                //CAPI Supports Services to declare availability to multiple capi instances
+                ServiceCapiInstances.Instance instanceDeclared = serviceUtils.getServiceCapiInstance(o, capiInstanceName);
+                boolean serviceAdded = false;
+                if(instanceDeclared != null) {
+                    //The service has declared this instance as multi instance support
+                    //ex.: For an instance named "default".
+                    // Service meta: capi-instance-default-route-group-first
                     servicesToDeploy.add(o);
+                    serviceAdded = true;
                 } else {
-                    if(o.getServiceMeta().getNamespace() == null && thisInstance == null) {
-                        if(!strictNamespace) {
-                            servicesToDeploy.add(o);
+                    //The service has declared another instance as multi instance support
+                    //ex.: For an instance named "default".
+                    // Service meta: capi-instance-other-route-group-first
+                    log.trace("Service is declared as multi instance, but not for this instance");
+                }
+
+                if(o.getServiceMeta() != null && o.getServiceMeta().getCapiNamespace() != null && o.getServiceMeta().getCapiNamespace().equals(capiInstanceName)) {
+                    if(!serviceAdded) {
+                        //The service has declared as single instance do this instance
+                        //ex.: For an instance named "default".
+                        // Service meta: capi-instance: default
+                        servicesToDeploy.add(o);
+                    }
+                } else if(o.getServiceMeta() != null && o.getServiceMeta().getCapiNamespace() != null && !o.getServiceMeta().getCapiNamespace().equals(capiInstanceName)) {
+                    if(!serviceAdded) {
+                        //The service has declared as single instance but to a different instance
+                        //ex.: For an instance named "default".
+                        // Service meta: capi-instance: other
+                        log.trace("this service is declared this instance as single, but not to this instance");
+                    }
+                } else {
+                    if(!strictToInstanceName) {
+                        if(!serviceAdded) {
+                            //We need to check if there are other instances declared in the service
+                            if(serviceUtils.isTheServiceRegisteredForOtherInstances(o, capiInstanceName)) {
+                                log.trace("this service is declared for other instances, but not to this instance");
+                            } else {
+                                //This CAPI instance is not stric so it will accept the service
+                                servicesToDeploy.add(o);
+                            }
                         }
-                    } else if(o.getServiceMeta().getNamespace() != null && o.getServiceMeta().getNamespace().equals(capiNamespace)) {
-                        servicesToDeploy.add(o);
-                    } else if(thisInstance != null) {
-                        servicesToDeploy.add(o);
+                    } else {
+                        if(!serviceAdded) {
+                            log.trace("This CAPI is strict so it will not accept the service");
+                        }
                     }
                 }
             });
@@ -225,7 +258,7 @@ public class ConsulNodeDiscovery {
                 if(existingService == null) {
                     boolean createRoute = true;
                     if(incomingService.getServiceCapiInstances() != null) {
-                        if(!incomingService.getServiceCapiInstances().getInstances().containsKey(capiNamespace)) {
+                        if(!incomingService.getServiceCapiInstances().getInstances().containsKey(capiInstanceName)) {
                             createRoute = false;
                         }
                     }
@@ -238,7 +271,7 @@ public class ConsulNodeDiscovery {
                     if(serviceUtils.updateExistingService(existingService, incomingService, serviceCache)) {
                         boolean createRoute = true;
                         if(incomingService.getServiceCapiInstances() != null) {
-                            if(!incomingService.getServiceCapiInstances().getInstances().containsKey(capiNamespace)) {
+                            if(!incomingService.getServiceCapiInstances().getInstances().containsKey(capiInstanceName)) {
                                 createRoute = false;
                             }
                         }
@@ -351,7 +384,7 @@ public class ConsulNodeDiscovery {
 
     private void updateServiceWithSpecificInstance(Service incomingService) {
         if(incomingService.getServiceCapiInstances() != null && incomingService.getServiceCapiInstances().getInstances() != null) {
-            ServiceCapiInstances.Instance thisInstance = incomingService.getServiceCapiInstances().getInstances().get(capiNamespace);
+            ServiceCapiInstances.Instance thisInstance = incomingService.getServiceCapiInstances().getInstances().get(capiInstanceName);
             if(thisInstance != null) {
                 if(!thisInstance.isAssumeParentSecured()) {
                     incomingService.getServiceMeta().setSecured(thisInstance.isSecured());
@@ -481,5 +514,13 @@ public class ConsulNodeDiscovery {
 
     public void setCapiContext(String capiContext) {
         this.capiContext = capiContext;
+    }
+
+    public void setStrictToInstanceName(boolean strictToInstanceName) {
+        this.strictToInstanceName = strictToInstanceName;
+    }
+
+    public void setCapiInstanceNamespace(String capiInstanceName) {
+        this.capiInstanceName = capiInstanceName;
     }
 }

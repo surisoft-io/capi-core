@@ -158,6 +158,11 @@ public class Startup {
             consulNodeDiscovery.setCapiContext(configuration.getRest().getContextPath());
         }
 
+        if(configuration.getInstanceName() != null) {
+            consulNodeDiscovery.setCapiInstanceNamespace(configuration.getInstanceName());
+        }
+
+        consulNodeDiscovery.setStrictToInstanceName(configuration.isStrictToInstanceName());
 
         if(configuration.getTraces().getExtraMetadataPrefix() != null) {
             consulNodeDiscovery.setServiceMetaExtrasPrefix(configuration.getTraces().getExtraMetadataPrefix());
