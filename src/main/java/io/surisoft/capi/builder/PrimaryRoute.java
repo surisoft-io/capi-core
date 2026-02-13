@@ -1,12 +1,16 @@
 package io.surisoft.capi.builder;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.RouteUtils;
+import io.undertow.util.Headers;
 import jakarta.servlet.http.HttpServletResponse;
 import org.apache.camel.Exchange;
 import org.apache.camel.Route;
 import org.apache.camel.builder.RouteBuilder;
+import org.apache.camel.util.json.JsonObject;
 import org.cache2k.Cache;
 
 import java.net.MalformedURLException;
@@ -26,6 +30,7 @@ public class PrimaryRoute extends RouteBuilder {
     private final boolean gatewayCorsManagementEnabled;
     private final Map<String, String> managedHeaders;
     private final Cache<String, Service> serviceCache;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public PrimaryRoute(RouteUtils routeUtils, int capiRestPort, String capiRestListeningAddress, String capiRestPath, boolean sslEnabled, boolean gatewayCorsManagementEnabled, Map<String, String> managedHeaders, Cache<String, Service> serviceCache) {
         this.routeUtils = routeUtils;
@@ -60,8 +65,10 @@ public class PrimaryRoute extends RouteBuilder {
 
                     // We need at least 2 segments for the service ID (name:group)
                     if(segments.length < 2) {
+                        String error = buildError(404, "The requested route was not found, please try again later on.");
+                        exchange.getIn().setHeader(String.valueOf(Headers.CONTENT_TYPE), "application/json");
                         exchange.getIn().setHeader(Exchange.HTTP_RESPONSE_CODE, 404);
-                        exchange.getIn().setBody("{\"error\":\"Route not found\"}");
+                        exchange.getIn().setBody(error);
                         exchange.setRouteStop(true);
                         return;
                     }
@@ -81,8 +88,10 @@ public class PrimaryRoute extends RouteBuilder {
                     // Check the CamelContext for the actual running route
                     Route route = getContext().getRoute(routeId);
                     if(route == null) {
+                        String error = buildError(404, "The requested route was not found, please try again later on.");
+                        exchange.getIn().setHeader(String.valueOf(Headers.CONTENT_TYPE), "application/json");
                         exchange.getIn().setHeader(Exchange.HTTP_RESPONSE_CODE, 404);
-                        exchange.getIn().setBody("{\"error\":\"Route not found\"}");
+                        exchange.getIn().setBody(error);
                         exchange.setRouteStop(true);
                     } else {
                         exchange.getIn().setHeader("CamelHttpPath", remainingPath.toString());
@@ -151,5 +160,12 @@ public class PrimaryRoute extends RouteBuilder {
         } catch (MalformedURLException | URISyntaxException e) {
             return false;
         }
+    }
+
+    private String buildError(int statusCode, String message) throws JsonProcessingException {
+        JsonObject jsonObject = new JsonObject();
+        jsonObject.put("error", message);
+        jsonObject.put("status", statusCode);
+        return objectMapper.writeValueAsString(jsonObject);
     }
 }

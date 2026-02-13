@@ -4,6 +4,7 @@ import com.nimbusds.jose.proc.SecurityContext;
 import com.nimbusds.jwt.proc.DefaultJWTProcessor;
 import io.micrometer.core.instrument.composite.CompositeMeterRegistry;
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
+import io.opentelemetry.api.OpenTelemetry;
 import io.surisoft.capi.CAPIMain;
 import io.surisoft.capi.configuration.*;
 import io.surisoft.capi.kafka.CapiInstance;
@@ -18,6 +19,7 @@ import io.surisoft.capi.tracer.TracingBootstrap;
 import jakarta.annotation.Nullable;
 import org.apache.camel.CamelContext;
 import org.apache.camel.component.undertow.UndertowComponent;
+import org.apache.camel.opentelemetry.OpenTelemetryTracer;
 import org.apache.camel.support.jsse.KeyManagersParameters;
 import org.apache.camel.support.jsse.KeyStoreParameters;
 import org.apache.camel.support.jsse.SSLContextParameters;
@@ -206,8 +208,8 @@ public class Startup {
         if(configuration.getTraces().isEnabled()) {
             camelContext.setUseMDCLogging(true);
 
-            TracingBootstrap.init(configuration.getTraces().getEndpoint(), configuration.getTraces().getServiceName());
-            capiTracer = new CapiTracer(httpUtils, configuration.getInstanceName(), serviceCache);
+            OpenTelemetry openTelemetry = TracingBootstrap.init(configuration.getTraces().getEndpoint(), configuration.getTraces().getServiceName());
+            capiTracer = new CapiTracer(httpUtils, configuration.getInstanceName(), serviceCache, openTelemetry.getTracer(configuration.getTraces().getServiceName()));
             List<String> excludePatterns = new ArrayList<>();
             excludePatterns.add("timer://");
             excludePatterns.add("timer");
@@ -286,6 +288,6 @@ public class Startup {
     }
 
     private void bindCapCorsFilterStrategy(CamelContext camelContext) {
-        camelContext.getRegistry().bind("corsFilterStrategy", new CapiCorsFilterStrategy(configuration.getAllowedHeaders()));
+        camelContext.getRegistry().bind("capiCorsFilterStrategy", new CapiCorsFilterStrategy(configuration.getAllowedHeaders()));
     }
 }

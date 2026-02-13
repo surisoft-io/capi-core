@@ -6,6 +6,7 @@ import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.baggage.Baggage;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanBuilder;
+import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.propagation.ContextPropagators;
 import io.surisoft.capi.exception.AuthorizationException;
@@ -14,6 +15,7 @@ import io.surisoft.capi.utils.HttpUtils;
 import org.apache.camel.*;
 import org.apache.camel.api.management.ManagedAttribute;
 import org.apache.camel.opentelemetry.NoopTracingStrategy;
+import org.apache.camel.opentelemetry.OpenTelemetryTracer;
 import org.apache.camel.opentelemetry.SpanCustomizer;
 import org.apache.camel.opentelemetry.propagators.OpenTelemetryGetter;
 import org.apache.camel.opentelemetry.propagators.OpenTelemetrySetter;
@@ -67,10 +69,11 @@ public class CapiTracer extends ServiceSupport implements CamelTracingService, R
         });
     }
 
-    public CapiTracer(HttpUtils httpUtils, String capiInstanceName, Cache<String, io.surisoft.capi.schema.Service> serviceCache) {
+    public CapiTracer(HttpUtils httpUtils, String capiInstanceName, Cache<String, io.surisoft.capi.schema.Service> serviceCache, Tracer tracer) {
         this.httpUtils = httpUtils;
         this.capiInstanceName = capiInstanceName;
         this.serviceCache = serviceCache;
+        this.tracer = tracer;
     }
 
     public void initTracer() {
@@ -303,6 +306,7 @@ public class CapiTracer extends ServiceSupport implements CamelTracingService, R
         }
 
         String endpointUri = endpoint.getEndpointUri();
+
         for(String pattern : excludePatterns) {
             if(endpointUri == null || endpointUri.isEmpty()) {
                 return true;
@@ -397,6 +401,11 @@ public class CapiTracer extends ServiceSupport implements CamelTracingService, R
         @Override
         public void onExchangeBegin(Route route, Exchange exchange) {
             try {
+                if(route.getEndpoint().getEndpointUri().startsWith("direct://error")) {
+                    SpanAdapter parent = ActiveSpanManager.getSpan(exchange);
+                    exchange.setProperty(Constants.CAPI_EXCHANGE_INTERNAL_TRACE_ID, parent.traceId());
+                }
+
                 if (isExcluded(exchange, route.getEndpoint())) {
                     return;
                 }

@@ -1,6 +1,7 @@
 capi:
   version: 1.0.0
   instanceName: default
+  publicEndpoint: http://localhost:8380/api/
   runningMode: full
   adminPort: 8381
   rest:

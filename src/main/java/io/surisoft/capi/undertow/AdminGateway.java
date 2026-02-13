@@ -5,21 +5,22 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import io.surisoft.capi.configuration.CAPIConfiguration;
 import io.surisoft.capi.metrics.Info;
+import io.surisoft.capi.metrics.OpenAPIDefinition;
 import io.surisoft.capi.metrics.Routes;
 import io.surisoft.capi.schema.Service;
-import io.surisoft.capi.utils.Startup;
+import io.surisoft.capi.utils.Constants;
 import io.undertow.Undertow;
 import io.undertow.server.HttpServerExchange;
 import io.undertow.server.handlers.PathHandler;
 import io.undertow.util.Headers;
 import io.undertow.util.StatusCodes;
 import org.apache.camel.CamelContext;
+import org.apache.camel.util.json.JsonObject;
 import org.cache2k.Cache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.net.ssl.SSLContext;
-
 
 public class AdminGateway {
 
@@ -48,7 +49,8 @@ public class AdminGateway {
                 .addExactPath("/info/health", this::handleHealth)
                 .addExactPath("/info/capi", this::handleCapiInfo)
                 .addExactPath("/info/routes", this::handleRoutesInfo)
-                .addPrefixPath("/info/routes/", this::handleRouteById);
+                .addPrefixPath("/info/routes/", this::handleRouteById)
+                .addPrefixPath("/info/openapi/", this::handleOpenApi);
 
 
         Undertow.Builder builder = Undertow.builder();
@@ -93,18 +95,21 @@ public class AdminGateway {
     }
 
     private void handleRouteById(HttpServerExchange exchange) {
-        String serviceId = exchange.getRelativePath().substring(1);
-        if(serviceId.isEmpty()) {
-            handleRoutesInfo(exchange);
-            return;
-        }
         try {
+            exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+            String serviceId = exchange.getRelativePath().substring(1);
+            if(serviceId.isEmpty()) {
+                exchange.setStatusCode(StatusCodes.NOT_FOUND);
+                exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.NOT_FOUND, "Service not found")));
+                return;
+            }
+
             Routes routes = new Routes(camelContext, serviceCache);
             Service service = routes.getCachedService(serviceId);
-            exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
             if(service == null) {
                 exchange.setStatusCode(StatusCodes.NOT_FOUND);
-                exchange.getResponseSender().send("{\"error\":\"Service not found\"}");
+                exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.NOT_FOUND, "Service not found")));
+                return;
             } else {
                 exchange.setStatusCode(StatusCodes.OK);
                 exchange.getResponseSender().send(objectMapper.writeValueAsString(service));
@@ -123,5 +128,40 @@ public class AdminGateway {
         }catch (JsonProcessingException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private void handleOpenApi(HttpServerExchange exchange) {
+        exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+        try {
+            String serviceId = exchange.getRelativePath().substring(1);
+            if(serviceId.isEmpty()) {
+                exchange.setStatusCode(StatusCodes.NOT_FOUND);
+                exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.NOT_FOUND, "Service not found")));
+                return;
+            }
+            OpenAPIDefinition openAPIDefinition = new OpenAPIDefinition(serviceCache, capiConfiguration.getPublicEndpoint());
+            Service service = openAPIDefinition.getCachedService(serviceId);
+            if(service == null) {
+                exchange.setStatusCode(StatusCodes.NOT_FOUND);
+                exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.NOT_FOUND, "Service not found")));
+                return;
+            }
+            JsonObject openApiObject = openAPIDefinition.getCacheOpenApiDefinition(service, objectMapper, serviceId);
+            if(openApiObject == null) {
+                exchange.setStatusCode(StatusCodes.NOT_FOUND);
+                exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.NOT_FOUND, "Open API not found for given Service")));
+                return;
+            }
+            exchange.getResponseSender().send(objectMapper.writeValueAsString(openApiObject));
+        }catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public JsonObject buildError(int statusCode, String message) {
+        JsonObject jsonObject = new JsonObject();
+        jsonObject.put(Constants.ERROR_MESSAGE, message);
+        jsonObject.put(Constants.ERROR_CODE, statusCode);
+        return jsonObject;
     }
 }
