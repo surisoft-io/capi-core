@@ -8,6 +8,10 @@ target/
 .idea/modules.xml
 .idea/jarRepositories.xml
 .idea/compiler.xml
+.idea/encodings.xml
+.idea/misc.xml
+.idea/vcs.xml
+.idea/workspace.xml
 .idea/libraries/
 *.iws
 *.iml
@@ -49,3 +53,4 @@ build/
 *.key
 *.crt
 *.cer
+/.idea/
