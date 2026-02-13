@@ -12,14 +12,12 @@ public class CamelStartupListener implements ExtendedStartupListener {
 
     private static final Logger log = LoggerFactory.getLogger(CamelStartupListener.class);
     private final long consulTimerInterval;
-    private final boolean capiConsulEnabled;
 
     @BeanInject("consulNodeDiscovery")
     private ConsulNodeDiscovery consulNodeDiscovery;
 
-    public CamelStartupListener(long consulTimerInterval, boolean capiConsulEnabled) {
+    public CamelStartupListener(long consulTimerInterval) {
         this.consulTimerInterval = consulTimerInterval;
-        this.capiConsulEnabled = capiConsulEnabled;
     }
 
     @Override
@@ -28,9 +26,7 @@ public class CamelStartupListener implements ExtendedStartupListener {
 
     @Override
     public void onCamelContextFullyStarted(CamelContext context, boolean alreadyStarted) throws Exception {
-        if(capiConsulEnabled) {
-            context.addRoutes(routeBuilder());
-        }
+        context.addRoutes(routeBuilder());
     }
 
     public RouteBuilder routeBuilder() {

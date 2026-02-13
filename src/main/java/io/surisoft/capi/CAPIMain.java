@@ -49,10 +49,14 @@ public class CAPIMain {
             Constructor constructor = new Constructor(CAPIConfiguration.class, options);
             Yaml capiYaml = new Yaml(constructor);
             capiConfiguration = capiYaml.load(yaml.dump(root.get("capi")));
+            if(capiConfiguration.getConsulHosts() == null || capiConfiguration.getConsulHosts().isEmpty()) {
+                throw new RuntimeException("Failed to start CAPI, it needs at least one Consul instance.");
+            } else if(capiConfiguration.getConsulHosts().getFirst().getEndpoint() == null || capiConfiguration.getConsulHosts().getFirst().getEndpoint().isEmpty()) {
+                throw new RuntimeException("Failed to start CAPI, it needs at least one Consul instance.");
+            }
         } catch (IOException e) {
+            log.error(e.getMessage(), e);
             throw new RuntimeException("Failed to load CAPI Configuration File");
-            //log.error(e.getMessage(), e);
-            //agentState.addAgentError("Problem with Agent Configuration File: " + e.getMessage());
         }
 
         log.info("Starting CAPI Camel Context");
@@ -86,7 +90,7 @@ public class CAPIMain {
                 camelContext.addRoutes(new PrimaryRoute(startup.getRouteUtils(), capiConfiguration.getRest().getPort(), capiConfiguration.getRest().getListeningAddress(), capiConfiguration.getRest().getContextPath(), sslEnabled, capiConfiguration.isCorsEnabled(), managedHeaders, startup.getServiceCache()));
             }
 
-            camelContext.addStartupListener(new CamelStartupListener(20000, true));
+            camelContext.addStartupListener(new CamelStartupListener(capiConfiguration.getConsulCatalogDiscoverInterval()));
             camelContext.start();
 
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {

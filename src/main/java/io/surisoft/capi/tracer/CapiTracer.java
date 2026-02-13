@@ -15,7 +15,6 @@ import io.surisoft.capi.utils.HttpUtils;
 import org.apache.camel.*;
 import org.apache.camel.api.management.ManagedAttribute;
 import org.apache.camel.opentelemetry.NoopTracingStrategy;
-import org.apache.camel.opentelemetry.OpenTelemetryTracer;
 import org.apache.camel.opentelemetry.SpanCustomizer;
 import org.apache.camel.opentelemetry.propagators.OpenTelemetryGetter;
 import org.apache.camel.opentelemetry.propagators.OpenTelemetrySetter;

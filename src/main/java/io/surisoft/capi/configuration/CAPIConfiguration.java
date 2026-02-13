@@ -6,8 +6,10 @@ public class CAPIConfiguration {
 
     private String version;
     private String instanceName;
+    private boolean strictToInstanceName;
     private String runningMode;
     private TrustStore trustStore;
+    private int consulCatalogDiscoverInterval;
     private List<HostConfig> consulHosts;
     private Oauth2 oauth2;
     private Traces traces;
@@ -33,11 +35,25 @@ public class CAPIConfiguration {
         this.instanceName = instanceName;
     }
 
+    public boolean isStrictToInstanceName() {
+        return strictToInstanceName;
+    }
+    public void setStrictToInstanceName(boolean strictToInstanceName) {
+        this.strictToInstanceName = strictToInstanceName;
+    }
+
     public String getRunningMode() {
         return runningMode;
     }
     public void setRunningMode(String runningMode) {
         this.runningMode = runningMode;
+    }
+
+    public int getConsulCatalogDiscoverInterval() {
+        return consulCatalogDiscoverInterval;
+    }
+    public void setConsulCatalogDiscoverInterval(int consulCatalogDiscoverInterval) {
+        this.consulCatalogDiscoverInterval = consulCatalogDiscoverInterval;
     }
 
 
