@@ -86,6 +86,7 @@ public class CAPIMain {
             if(capiConfiguration.getConsulStore() != null && capiConfiguration.getConsulStore().isEnabled()) {
                 camelContext.getRegistry().bind("consulStore", startup.getConsulStore());
             }
+            camelContext.getRegistry().bind("routeConsistencyChecker", startup.getRouteConsistencyChecker());
             camelContext.addRoutes(new ErrorRoute(startup.getHttpUtils()));
 
             if(capiConfiguration.getRest() != null
@@ -96,7 +97,7 @@ public class CAPIMain {
                 camelContext.addRoutes(new PrimaryRoute(startup.getRouteUtils(), capiConfiguration.getRest().getPort(), capiConfiguration.getRest().getListeningAddress(), capiConfiguration.getRest().getContextPath(), sslEnabled, capiConfiguration.isCorsEnabled(), managedHeaders, startup.getServiceCache()));
             }
 
-            camelContext.addStartupListener(new CamelStartupListener(capiConfiguration.getConsulCatalogDiscoverInterval(), capiConfiguration.getConsulStore().isEnabled()));
+            camelContext.addStartupListener(new CamelStartupListener(capiConfiguration.getConsulCatalogDiscoverInterval(), capiConfiguration.getConsulStore().isEnabled(), capiConfiguration.getTrustStore().isEnabled()));
             camelContext.start();
 
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {

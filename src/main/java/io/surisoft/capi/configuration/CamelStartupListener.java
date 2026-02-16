@@ -13,13 +13,15 @@ public class CamelStartupListener implements ExtendedStartupListener {
     private static final Logger log = LoggerFactory.getLogger(CamelStartupListener.class);
     private final long consulTimerInterval;
     private final boolean consulStoreEnabled;
+    private final boolean trustStoreEnabled;
 
     @BeanInject("consulNodeDiscovery")
     private ConsulNodeDiscovery consulNodeDiscovery;
 
-    public CamelStartupListener(long consulTimerInterval, boolean consulStoreEnabled) {
+    public CamelStartupListener(long consulTimerInterval, boolean consulStoreEnabled, boolean trustStoreEnabled) {
         this.consulTimerInterval = consulTimerInterval;
         this.consulStoreEnabled = consulStoreEnabled;
+        this.trustStoreEnabled = trustStoreEnabled;
     }
 
     @Override
@@ -29,9 +31,10 @@ public class CamelStartupListener implements ExtendedStartupListener {
     @Override
     public void onCamelContextFullyStarted(CamelContext context, boolean alreadyStarted) throws Exception {
         context.addRoutes(consulDiscoveryRouteBuilder());
-        if(consulStoreEnabled) {
+        if(consulStoreEnabled && trustStoreEnabled) {
             context.addRoutes(consulStoreRouteBuilder());
         }
+        context.addRoutes(consistencyCheckRouteBuilder());
 
     }
 
@@ -55,6 +58,18 @@ public class CamelStartupListener implements ExtendedStartupListener {
                 from("timer:consul-inspect?period=" + consulTimerInterval)
                         .to("bean:consulStore?method=process")
                         .routeId("consul-store-service");
+            }
+        };
+    }
+
+    public RouteBuilder consistencyCheckRouteBuilder() {
+        return new RouteBuilder() {
+            @Override
+            public void configure() {
+                log.debug("Creating CAPI Route Consistency Checker");
+                from("timer:consistency-checker?period=60000")
+                        .to("bean:routeConsistencyChecker?method=process")
+                        .routeId("route-consistency-checker-service");
             }
         };
     }
