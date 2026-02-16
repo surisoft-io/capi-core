@@ -9,6 +9,7 @@ import io.surisoft.capi.utils.RouteUtils;
 import org.apache.camel.CamelContext;
 import org.apache.camel.component.http.HttpComponent;
 import org.apache.hc.core5.ssl.SSLContextBuilder;
+import org.apache.hc.core5.ssl.TrustStrategy;
 import org.cache2k.Cache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,57 +27,43 @@ import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
-import java.util.Arrays;
 import java.util.Base64;
-import java.util.List;
-import org.apache.hc.core5.ssl.TrustStrategy;
 
 public class ConsulStore {
 
     private static final Logger log = LoggerFactory.getLogger(ConsulStore.class);
-    //private final Cache<String, List<String>> corsHeadersCache;
     private final Cache<String, ConsulKeyStoreEntry> consulTrustStoreCache;
     private final RouteUtils routeUtils;
     private final String consulKvHost;
     private final String consulKvToken;
     private final String capiTrustStorePassword;
-    private CapiSslContextHolder capiSslContextHolder;
-    private CamelContext camelContext;
-    //private OpaService opaService;
+    private final CapiSslContextHolder capiSslContextHolder;
+    private final CamelContext camelContext;
     private HttpClient httpClient;
 
     private ObjectMapper objectMapper = new ObjectMapper();
 
-    public ConsulStore(//Cache<String, List<String>> corsHeadersCache,
-                       Cache<String, ConsulKeyStoreEntry> consulTrustStoreCache,
+    public ConsulStore(Cache<String, ConsulKeyStoreEntry> consulTrustStoreCache,
                        RouteUtils routeUtils,
                        String consulKvHost,
                        String consulKvToken,
                        String capiTrustStorePassword,
-                       //ConsulNodeDiscovery consulNodeDiscovery,
                        CapiSslContextHolder capiSslContextHolder,
                        CamelContext camelContext,
                        HttpClient httpClient
-                       //OpaService opaService
     ) {
-        //this.corsHeadersCache = corsHeadersCache;
         this.consulTrustStoreCache = consulTrustStoreCache;
         this.routeUtils = routeUtils;
         this.consulKvHost = consulKvHost;
         this.consulKvToken = consulKvToken;
         this.capiTrustStorePassword = capiTrustStorePassword;
-        //this.consulNodeDiscovery = consulNodeDiscovery;
         this.capiSslContextHolder = capiSslContextHolder;
         this.camelContext = camelContext;
-        //this.opaService = opaService;
         this.httpClient = httpClient;
-
-
     }
 
     public void process() {
         log.debug("Looking for key values...");
-        //capiCorsHeadersKVCall();
         syncTrustStore();
     }
 
@@ -146,15 +133,10 @@ public class ConsulStore {
                         .build();
             capiSslContextHolder.setSslContext(sslContext);
 
-            //if(opaService != null) {
-            //    opaService.reloadHttpClient();
-            //}
-
             //Reload HTTP Client Used By both Consul Node discovery and this Consul Store
             HttpClient.Builder httpClientBuilder = HttpClient.newBuilder();
-            if(capiSslContextHolder != null) {
-                httpClientBuilder.sslContext(capiSslContextHolder.getSslContext());
-            }
+            httpClientBuilder.sslContext(capiSslContextHolder.getSslContext());
+
             httpClientBuilder.connectTimeout(Duration.ofSeconds(10));
             httpClient = httpClientBuilder.build();
 

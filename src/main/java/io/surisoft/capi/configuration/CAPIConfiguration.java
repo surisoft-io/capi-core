@@ -22,6 +22,7 @@ public class CAPIConfiguration {
     private String publicEndpoint;
     private String reverseProxyHost;
     private ConsulStore consulStore;
+    private Opa opa;
 
     public String getVersion() {
         return version;
@@ -328,6 +329,21 @@ public class CAPIConfiguration {
         }
     }
 
+    public static class Opa {
+        private boolean enabled;
+        private String endpoint;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+        public String getEndpoint() {
+            return endpoint;
+        }
+        public void setEndpoint(String endpoint) {}
+    }
 
 
     public TrustStore getTrustStore() {
@@ -414,5 +430,12 @@ public class CAPIConfiguration {
     }
     public void setConsulStore(ConsulStore consulKVStore) {
         this.consulStore = consulKVStore;
+    }
+
+    public Opa getOpa() {
+        return opa;
+    }
+    public void setOpa(Opa opa) {
+        this.opa = opa;
     }
 }

@@ -109,6 +109,7 @@ public class Startup {
             startConsulStore();
         }
         startRouteConsistencyChecker();
+        startOpaService();
     }
 
     private void configureUndertowSsl() {
@@ -309,6 +310,12 @@ public class Startup {
         }
     }
 
+    private void startOpaService() {
+        if(configuration.getOpa().isEnabled()) {
+            opaService = new OpaService(configuration.getOpa().getEndpoint(), consulHttpClient);
+        }
+    }
+
     public PrometheusMeterRegistry getPrometheusRegistry() {
         return prometheusRegistry;
     }
@@ -355,6 +362,10 @@ public class Startup {
 
     public @Nullable ConsulStore getConsulStore() {
         return consulStore;
+    }
+
+    public @Nullable OpaService getOpaService() {
+        return opaService;
     }
 
     public RouteConsistencyChecker getRouteConsistencyChecker() {
