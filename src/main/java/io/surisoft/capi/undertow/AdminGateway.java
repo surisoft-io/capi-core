@@ -4,11 +4,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import io.surisoft.capi.configuration.CAPIConfiguration;
-import io.surisoft.capi.metrics.Info;
-import io.surisoft.capi.metrics.OpenAPIDefinition;
-import io.surisoft.capi.metrics.Routes;
-import io.surisoft.capi.metrics.Truststore;
+import io.surisoft.capi.metrics.*;
 import io.surisoft.capi.schema.Service;
+import io.surisoft.capi.schema.WebsocketClient;
 import io.surisoft.capi.service.CapiTrustManager;
 import io.surisoft.capi.utils.Constants;
 import io.undertow.Undertow;
@@ -23,6 +21,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.net.ssl.SSLContext;
+import java.util.Map;
 
 public class AdminGateway {
 
@@ -36,6 +35,7 @@ public class AdminGateway {
     private final SSLContext sslContext;
     ObjectMapper objectMapper = new ObjectMapper();
     private final CapiTrustManager capiTrustManager;
+    private Map<String, WebsocketClient> websocketClients;
 
     public AdminGateway(int port, PrometheusMeterRegistry prometheusRegistry, CAPIConfiguration capiConfiguration, CamelContext camelContext, Cache<String, Service> serviceCache, SSLContext sslContext, CapiTrustManager capiTrustManager) {
         this.port = port;
@@ -55,7 +55,8 @@ public class AdminGateway {
                 .addExactPath("/info/routes", this::handleRoutesInfo)
                 .addPrefixPath("/info/routes/", this::handleRouteById)
                 .addPrefixPath("/info/openapi/", this::handleOpenApi)
-                .addExactPath("/info/truststore", this::handleTruststore);
+                .addExactPath("/info/truststore", this::handleTruststore)
+                .addExactPath("/info/wsroutes", this::handleWsRoutes);
 
 
         Undertow.Builder builder = Undertow.builder();
@@ -181,10 +182,32 @@ public class AdminGateway {
         }
     }
 
+    private void handleWsRoutes(HttpServerExchange exchange) {
+        exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+        try {
+            if(websocketClients != null && capiConfiguration.getWebsocket().isEnabled()) {
+                WSRoutes wsRoutes = new WSRoutes(websocketClients);
+                exchange.setStatusCode(StatusCodes.OK);
+                exchange.getResponseSender().send(objectMapper.writeValueAsString(wsRoutes.getAllWebsocketRoutesInfo()));
+                return;
+            } else {
+                exchange.setStatusCode(StatusCodes.NOT_FOUND);
+                exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.NOT_FOUND, "Websocket Gateway not enabled")));
+                return;
+            }
+        }catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     public JsonObject buildError(int statusCode, String message) {
         JsonObject jsonObject = new JsonObject();
         jsonObject.put(Constants.ERROR_MESSAGE, message);
         jsonObject.put(Constants.ERROR_CODE, statusCode);
         return jsonObject;
+    }
+
+    public void setWebsocketClients(Map<String, WebsocketClient> websocketClients) {
+        this.websocketClients = websocketClients;
     }
 }
