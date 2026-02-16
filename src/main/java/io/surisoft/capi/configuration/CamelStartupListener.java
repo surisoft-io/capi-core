@@ -12,12 +12,14 @@ public class CamelStartupListener implements ExtendedStartupListener {
 
     private static final Logger log = LoggerFactory.getLogger(CamelStartupListener.class);
     private final long consulTimerInterval;
+    private final boolean consulStoreEnabled;
 
     @BeanInject("consulNodeDiscovery")
     private ConsulNodeDiscovery consulNodeDiscovery;
 
-    public CamelStartupListener(long consulTimerInterval) {
+    public CamelStartupListener(long consulTimerInterval, boolean consulStoreEnabled) {
         this.consulTimerInterval = consulTimerInterval;
+        this.consulStoreEnabled = consulStoreEnabled;
     }
 
     @Override
@@ -26,10 +28,14 @@ public class CamelStartupListener implements ExtendedStartupListener {
 
     @Override
     public void onCamelContextFullyStarted(CamelContext context, boolean alreadyStarted) throws Exception {
-        context.addRoutes(routeBuilder());
+        context.addRoutes(consulDiscoveryRouteBuilder());
+        if(consulStoreEnabled) {
+            context.addRoutes(consulStoreRouteBuilder());
+        }
+
     }
 
-    public RouteBuilder routeBuilder() {
+    public RouteBuilder consulDiscoveryRouteBuilder() {
         log.debug("Creating Capi Consul Node Discovery");
         return new RouteBuilder() {
             @Override
@@ -37,6 +43,18 @@ public class CamelStartupListener implements ExtendedStartupListener {
                 from("timer:consul-inspect?period=" + consulTimerInterval)
                         .to("bean:consulNodeDiscovery?method=processInfo")
                         .routeId("consul-discovery-service");
+            }
+        };
+    }
+
+    public RouteBuilder consulStoreRouteBuilder() {
+        log.debug("Creating Capi Consul Store");
+        return new RouteBuilder() {
+            @Override
+            public void configure() {
+                from("timer:consul-inspect?period=" + consulTimerInterval)
+                        .to("bean:consulStore?method=process")
+                        .routeId("consul-store-service");
             }
         };
     }

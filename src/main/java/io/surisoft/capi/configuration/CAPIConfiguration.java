@@ -21,6 +21,7 @@ public class CAPIConfiguration {
     private Websocket websocket;
     private String publicEndpoint;
     private String reverseProxyHost;
+    private ConsulStore consulStore;
 
     public String getVersion() {
         return version;
@@ -300,7 +301,31 @@ public class CAPIConfiguration {
         public void setContextPath(String contextPath) {
             this.contextPath = contextPath;
         }
+    }
 
+    public static class ConsulStore {
+        private boolean enabled;
+        private String endpoint;
+        private String token;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+        public String getEndpoint() {
+            return endpoint;
+        }
+        public void setEndpoint(String endpoint) {
+            this.endpoint = endpoint;
+        }
+        public String getToken() {
+            return token;
+        }
+        public void setToken(String token) {
+            this.token = token;
+        }
     }
 
 
@@ -384,5 +409,10 @@ public class CAPIConfiguration {
         this.publicEndpoint = publicEndpoint;
     }
 
-
+    public ConsulStore getConsulStore() {
+        return consulStore;
+    }
+    public void setConsulStore(ConsulStore consulKVStore) {
+        this.consulStore = consulKVStore;
+    }
 }

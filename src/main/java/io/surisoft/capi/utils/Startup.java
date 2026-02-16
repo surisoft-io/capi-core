@@ -10,19 +10,23 @@ import io.surisoft.capi.configuration.*;
 import io.surisoft.capi.kafka.CapiInstance;
 import io.surisoft.capi.oidc.Oauth2Provider;
 import io.surisoft.capi.processor.*;
+import io.surisoft.capi.schema.ConsulKeyStoreEntry;
 import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.schema.WebsocketClient;
 import io.surisoft.capi.service.CapiTrustManager;
+import io.surisoft.capi.service.ConsulStore;
 import io.surisoft.capi.service.ConsulNodeDiscovery;
 import io.surisoft.capi.service.OpaService;
 import io.surisoft.capi.tracer.CapiTracer;
 import io.surisoft.capi.tracer.TracingBootstrap;
 import jakarta.annotation.Nullable;
 import org.apache.camel.CamelContext;
+import org.apache.camel.component.http.HttpComponent;
 import org.apache.camel.component.undertow.UndertowComponent;
 import org.apache.camel.support.jsse.KeyManagersParameters;
 import org.apache.camel.support.jsse.KeyStoreParameters;
 import org.apache.camel.support.jsse.SSLContextParameters;
+import org.apache.camel.support.jsse.TrustManagersParameters;
 import org.apache.hc.core5.ssl.SSLContextBuilder;
 import org.apache.hc.core5.ssl.TrustStrategy;
 import org.cache2k.Cache;
@@ -32,10 +36,10 @@ import org.slf4j.LoggerFactory;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import java.io.*;
-import java.security.KeyManagementException;
+import java.net.http.HttpClient;
 import java.security.KeyStore;
-import java.security.NoSuchAlgorithmException;
 import java.security.cert.X509Certificate;
+import java.time.Duration;
 import java.util.*;
 
 public class Startup {
@@ -51,6 +55,7 @@ public class Startup {
     private MetricsProcessor metricsProcessor;
     private ContentTypeValidator contentTypeValidator;
     private ThrottleProcessor throttleProcessor;
+    private HttpClient consulHttpClient;
 
     @Nullable
     private Oauth2Provider oauth2Provider;
@@ -71,6 +76,10 @@ public class Startup {
     private SSLContext undertowSslContext;
     @Nullable
     private CapiTrustManager capiTrustManager;
+    @Nullable
+    private Cache<String, ConsulKeyStoreEntry> consulStoreCache;
+    @Nullable
+    private ConsulStore consulStore;
 
     private CompositeMeterRegistry meterRegistry;
     private PrometheusMeterRegistry prometheusRegistry;
@@ -85,6 +94,7 @@ public class Startup {
         startMetrics();
         createServiceCache();
         createSslContextHolder();
+        startConsulHttpClient();
         configureUndertowSsl();
         startOauth2Service();
         startHttpUtils();
@@ -96,6 +106,9 @@ public class Startup {
         startConsulNodeDiscoveryService();
         if(configuration.isCorsEnabled()) {
             bindCapCorsFilterStrategy(camelContext);
+        }
+        if(configuration.getConsulStore() != null && configuration.getConsulStore().isEnabled()) {
+            startConsulStore();
         }
     }
 
@@ -149,8 +162,14 @@ public class Startup {
         }
     }
 
+    private void startConsulStore() {
+        if(configuration.getConsulStore() != null && configuration.getConsulStore().isEnabled() && configuration.getTrustStore().isEnabled()) {
+            consulStore = new ConsulStore(consulStoreCache, routeUtils, configuration.getConsulStore().getEndpoint(), configuration.getConsulStore().getToken(), configuration.getTrustStore().getPassword(), capiSslContextHolder, camelContext, consulHttpClient);
+        }
+    }
+
     private void startConsulNodeDiscoveryService() {
-        consulNodeDiscovery = new ConsulNodeDiscovery(camelContext, capiSslContextHolder, configuration.getConsulHosts(), serviceUtils, serviceCache, routeUtils, websocketUtils);
+        consulNodeDiscovery = new ConsulNodeDiscovery(camelContext, capiSslContextHolder, configuration.getConsulHosts(), serviceUtils, serviceCache, routeUtils, websocketUtils, consulHttpClient);
         consulNodeDiscovery.setThrottleProcessor(throttleProcessor);
         consulNodeDiscovery.setContentTypeValidator(contentTypeValidator);
         consulNodeDiscovery.setMetricsProcessor(metricsProcessor);
@@ -182,6 +201,9 @@ public class Startup {
     private void createServiceCache() {
         log.info("Creating Service Cache");
         serviceCache = LocalCacheConfiguration.serviceCache();
+        if(configuration.getConsulStore() != null && configuration.getConsulStore().isEnabled()) {
+            consulStoreCache = LocalCacheConfiguration.consulStoreCache();
+        }
     }
 
     private void startHttpUtils() {
@@ -219,6 +241,18 @@ public class Startup {
                             .build();
 
                 capiSslContextHolder = new CapiSslContextHolder(sslContext);
+
+                HttpComponent httpComponent = (HttpComponent) camelContext.getComponent("https");
+
+                TrustManagersParameters trustManagersParameters = new TrustManagersParameters();
+                trustManagersParameters.setTrustManager(capiTrustManager);
+
+                SSLContextParameters sslContextParameters = new SSLContextParameters();
+                sslContextParameters.setTrustManagers(trustManagersParameters);
+                sslContextParameters.setSessionTimeout("1");
+
+                sslContextParameters.createSSLContext(camelContext);
+                httpComponent.setSslContextParameters(sslContextParameters);
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
@@ -314,5 +348,18 @@ public class Startup {
 
     public @Nullable CapiTrustManager getCapiTrustManager() {
         return capiTrustManager;
+    }
+
+    public @Nullable ConsulStore getConsulStore() {
+        return consulStore;
+    }
+
+    private void startConsulHttpClient() {
+        HttpClient.Builder httpClientBuilder = HttpClient.newBuilder();
+        if(capiSslContextHolder != null) {
+            httpClientBuilder.sslContext(capiSslContextHolder.getSslContext());
+        }
+        httpClientBuilder.connectTimeout(Duration.ofSeconds(10));
+        consulHttpClient = httpClientBuilder.build();
     }
 }
