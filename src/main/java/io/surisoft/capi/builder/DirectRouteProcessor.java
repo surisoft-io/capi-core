@@ -14,6 +14,7 @@ import org.apache.camel.model.RouteDefinition;
 import org.apache.camel.model.rest.RestDefinition;
 import org.apache.camel.model.rest.VerbDefinition;
 import org.apache.camel.opentelemetry.SpanCustomizer;
+import org.apache.hc.core5.http.NoHttpResponseException;
 import org.cache2k.Cache;
 
 import javax.net.ssl.SSLHandshakeException;
@@ -151,7 +152,7 @@ public class DirectRouteProcessor extends RouteBuilder {
                     })
                 .to(routeUtils.buildEndpoints(service))
                     .endDoTry()
-                    .doCatch(SSLHandshakeException.class, SocketException.class, UnknownHostException.class, AuthorizationException.class)
+                    .doCatch(SSLHandshakeException.class, SocketException.class, UnknownHostException.class, AuthorizationException.class, NoHttpResponseException.class)
                     .setHeader(Constants.ERROR_API_SHOW_TRACE_ID, constant(service.getServiceMeta().isB3TraceId()))
                     .process(routeUtils.getHttpErrorProcessor())
                     .setHeader(Constants.ROUTE_ID_HEADER, constant(routeId))

@@ -61,7 +61,11 @@ public class Constants {
             "/swagger/**"
     };
     public static final List<String> CAPI_INTERNAL_ROUTES_PREFIX = List.of("consul-discovery-service",
-                                                                           "consistency-checker-service");
+                                                                           "route-consistency-checker-service",
+                                                                           "error-route",
+                                                                           "consul-store-service",
+                                                                           "primary-route"
+    );
     public static final String CAMEL_HTTP_SERVLET_REQUEST = "CamelHttpServletRequest";
     public static final String CAMEL_CLIENT_ENDPOINT_URL = "capi.client.endpoint.url";
     public static final String CAMEL_SERVER_ENDPOINT_URL = "capi.server.endpoint.url";

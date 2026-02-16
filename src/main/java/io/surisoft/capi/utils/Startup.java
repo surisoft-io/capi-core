@@ -13,10 +13,7 @@ import io.surisoft.capi.processor.*;
 import io.surisoft.capi.schema.ConsulKeyStoreEntry;
 import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.schema.WebsocketClient;
-import io.surisoft.capi.service.CapiTrustManager;
-import io.surisoft.capi.service.ConsulStore;
-import io.surisoft.capi.service.ConsulNodeDiscovery;
-import io.surisoft.capi.service.OpaService;
+import io.surisoft.capi.service.*;
 import io.surisoft.capi.tracer.CapiTracer;
 import io.surisoft.capi.tracer.TracingBootstrap;
 import jakarta.annotation.Nullable;
@@ -80,6 +77,7 @@ public class Startup {
     private Cache<String, ConsulKeyStoreEntry> consulStoreCache;
     @Nullable
     private ConsulStore consulStore;
+    private RouteConsistencyChecker routeConsistencyChecker;
 
     private CompositeMeterRegistry meterRegistry;
     private PrometheusMeterRegistry prometheusRegistry;
@@ -110,6 +108,7 @@ public class Startup {
         if(configuration.getConsulStore() != null && configuration.getConsulStore().isEnabled()) {
             startConsulStore();
         }
+        startRouteConsistencyChecker();
     }
 
     private void configureUndertowSsl() {
@@ -166,6 +165,10 @@ public class Startup {
         if(configuration.getConsulStore() != null && configuration.getConsulStore().isEnabled() && configuration.getTrustStore().isEnabled()) {
             consulStore = new ConsulStore(consulStoreCache, routeUtils, configuration.getConsulStore().getEndpoint(), configuration.getConsulStore().getToken(), configuration.getTrustStore().getPassword(), capiSslContextHolder, camelContext, consulHttpClient);
         }
+    }
+
+    private void startRouteConsistencyChecker() {
+        routeConsistencyChecker = new RouteConsistencyChecker(camelContext, routeUtils, serviceCache);
     }
 
     private void startConsulNodeDiscoveryService() {
@@ -352,6 +355,10 @@ public class Startup {
 
     public @Nullable ConsulStore getConsulStore() {
         return consulStore;
+    }
+
+    public RouteConsistencyChecker getRouteConsistencyChecker() {
+        return routeConsistencyChecker;
     }
 
     private void startConsulHttpClient() {

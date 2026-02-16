@@ -5,6 +5,7 @@ import io.surisoft.capi.utils.Constants;
 import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
 import org.apache.hc.client5.http.HttpHostConnectException;
+import org.apache.hc.core5.http.NoHttpResponseException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,6 +44,10 @@ public class HttpErrorProcessor implements Processor {
             exchange.setProperty(Constants.REASON_MESSAGE_HEADER, cause.getMessage());
             exchange.getIn().setHeader(Constants.REASON_MESSAGE_HEADER, cause.getMessage());
             exchange.getIn().setHeader(Constants.REASON_CODE_HEADER, 401);
+        } else if(cause instanceof NoHttpResponseException) {
+            exchange.setProperty(Constants.REASON_MESSAGE_HEADER, "Remote server is not responding, or it has a configuration issue");
+            exchange.getIn().setHeader(Constants.REASON_MESSAGE_HEADER, "Remote server is not responding, or it has a configuration issue");
+            exchange.getIn().setHeader(Constants.REASON_CODE_HEADER, 502);
         }
         exchange.getIn().setHeader(Constants.CAPI_URI_IN_ERROR, exchange.getIn().getHeader(Exchange.HTTP_URI).toString());
         exchange.getIn().setHeader(Constants.CAPI_URL_IN_ERROR, exchange.getIn().getHeader(Exchange.HTTP_URL).toString());
