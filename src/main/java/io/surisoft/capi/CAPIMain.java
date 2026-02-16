@@ -83,6 +83,9 @@ public class CAPIMain {
             adminGateway.start();
 
             camelContext.getRegistry().bind("consulNodeDiscovery", startup.getConsulNodeDiscovery());
+            if(capiConfiguration.getConsulStore() != null && capiConfiguration.getConsulStore().isEnabled()) {
+                camelContext.getRegistry().bind("consulStore", startup.getConsulStore());
+            }
             camelContext.addRoutes(new ErrorRoute(startup.getHttpUtils()));
 
             if(capiConfiguration.getRest() != null
@@ -93,7 +96,7 @@ public class CAPIMain {
                 camelContext.addRoutes(new PrimaryRoute(startup.getRouteUtils(), capiConfiguration.getRest().getPort(), capiConfiguration.getRest().getListeningAddress(), capiConfiguration.getRest().getContextPath(), sslEnabled, capiConfiguration.isCorsEnabled(), managedHeaders, startup.getServiceCache()));
             }
 
-            camelContext.addStartupListener(new CamelStartupListener(capiConfiguration.getConsulCatalogDiscoverInterval()));
+            camelContext.addStartupListener(new CamelStartupListener(capiConfiguration.getConsulCatalogDiscoverInterval(), capiConfiguration.getConsulStore().isEnabled()));
             camelContext.start();
 
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {

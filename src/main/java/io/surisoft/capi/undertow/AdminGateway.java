@@ -189,12 +189,11 @@ public class AdminGateway {
                 WSRoutes wsRoutes = new WSRoutes(websocketClients);
                 exchange.setStatusCode(StatusCodes.OK);
                 exchange.getResponseSender().send(objectMapper.writeValueAsString(wsRoutes.getAllWebsocketRoutesInfo()));
-                return;
             } else {
                 exchange.setStatusCode(StatusCodes.NOT_FOUND);
                 exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.NOT_FOUND, "Websocket Gateway not enabled")));
-                return;
             }
+            return;
         }catch (JsonProcessingException e) {
             throw new RuntimeException(e);
         }

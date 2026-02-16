@@ -35,8 +35,8 @@ public class ConsulNodeDiscovery {
 
     private static boolean connectedToConsul = false;
     private static final Logger log = LoggerFactory.getLogger(ConsulNodeDiscovery.class);
-    private CamelContext camelContext;
-    private HttpClient client;
+    private final CamelContext camelContext;
+    private HttpClient httpClient;
     private CapiSslContextHolder capiSslContextHolder;
     private List<CAPIConfiguration.HostConfig> consulHosts;
     private String capiInstanceName;
@@ -64,7 +64,10 @@ public class ConsulNodeDiscovery {
 
     ObjectMapper objectMapper = new ObjectMapper();
 
-    public ConsulNodeDiscovery(CamelContext camelContext, @Nullable CapiSslContextHolder capiSslContextHolder, List<CAPIConfiguration.HostConfig> consulHosts, ServiceUtils serviceUtils, Cache<String, Service> serviceCache, RouteUtils routeUtils, WebsocketUtils websocketUtils) {
+    public ConsulNodeDiscovery(CamelContext camelContext, @Nullable CapiSslContextHolder capiSslContextHolder,
+                               List<CAPIConfiguration.HostConfig> consulHosts,
+                               ServiceUtils serviceUtils, Cache<String, Service> serviceCache,
+                               RouteUtils routeUtils, WebsocketUtils websocketUtils, HttpClient httpClient) {
         this.camelContext = camelContext;
         this.capiSslContextHolder = capiSslContextHolder;
         this.consulHosts = consulHosts;
@@ -72,14 +75,7 @@ public class ConsulNodeDiscovery {
         this.serviceCache = serviceCache;
         this.routeUtils = routeUtils;
         this.websocketUtils = websocketUtils;
-
-        HttpClient.Builder httpClientBuilder = HttpClient.newBuilder();
-        if(capiSslContextHolder != null) {
-            httpClientBuilder.sslContext(capiSslContextHolder.getSslContext());
-        }
-        httpClientBuilder.connectTimeout(Duration.ofSeconds(10));
-        client = httpClientBuilder.build();
-
+        this.httpClient = httpClient;
     }
 
     public void processInfo() {
@@ -100,7 +96,7 @@ public class ConsulNodeDiscovery {
 
         for(CAPIConfiguration.HostConfig consulHost : consulHosts) {
             log.trace("Querying Consul {} for new services", consulHost);
-            response = client.send(buildServicesHttpRequest(consulHost), HttpResponse.BodyHandlers.ofString());
+            response = httpClient.send(buildServicesHttpRequest(consulHost), HttpResponse.BodyHandlers.ofString());
             JsonObject responseObject = objectMapper.readValue(response.body(), JsonObject.class);
             //We want to ignore the consul array
             responseObject.remove("consul");
@@ -183,7 +179,7 @@ public class ConsulNodeDiscovery {
         log.trace("Getting service name: {} at consul host: {}", serviceName, consulHost);
         List<ConsulObject> servicesToDeploy = new ArrayList<>();
         try {
-            HttpResponse<String> response = client.send(buildServiceNameHttpRequest(consulHost, serviceName), HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = httpClient.send(buildServiceNameHttpRequest(consulHost, serviceName), HttpResponse.BodyHandlers.ofString());
             ObjectMapper objectMapper = new ObjectMapper();
             TypeReference<List<ConsulObject>> typeRef = new TypeReference<>() {};
             List<ConsulObject> temporaryList = objectMapper.readValue(response.body(), typeRef);
@@ -261,7 +257,7 @@ public class ConsulNodeDiscovery {
                         }
                     }
                     if(createRoute) {
-                        if(serviceUtils.checkIfOpenApiIsEnabled(incomingService, client)) {
+                        if(serviceUtils.checkIfOpenApiIsEnabled(incomingService, httpClient)) {
                             createRoute(incomingService);
                         }
                     }
@@ -274,7 +270,7 @@ public class ConsulNodeDiscovery {
                             }
                         }
                         if(createRoute) {
-                            if(serviceUtils.checkIfOpenApiIsEnabled(incomingService, client)) {
+                            if(serviceUtils.checkIfOpenApiIsEnabled(incomingService, httpClient)) {
                                 createRoute(incomingService);
                             }
                         }
