@@ -1,7 +1,6 @@
 package io.surisoft.capi.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.surisoft.capi.configuration.CapiSslContextHolder;
 import io.surisoft.capi.schema.OpaResult;
 import org.apache.camel.util.json.JsonObject;
 import org.slf4j.Logger;
@@ -14,26 +13,19 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.Optional;
 
 import static java.time.temporal.ChronoUnit.SECONDS;
 
-//@ConditionalOnProperty(prefix = "capi.opa", name = "enabled", havingValue = "true")
 public class OpaService {
 
     private static final Logger log = LoggerFactory.getLogger(OpaService.class);
     private final String opaEndpoint;
     private HttpClient httpClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final Optional<CapiSslContextHolder> capiSslContextHolder;
 
-    public OpaService(String opaEndpoint, Optional<CapiSslContextHolder> capiSslContextHolder) {
+    public OpaService(String opaEndpoint, HttpClient httpClient) {
         this.opaEndpoint = opaEndpoint;
-        this.capiSslContextHolder = capiSslContextHolder;
-        HttpClient.Builder httpClientBuilder = HttpClient.newBuilder();
-        capiSslContextHolder.ifPresent(sslContextHolder -> httpClientBuilder.sslContext(sslContextHolder.getSslContext()));
-        httpClientBuilder.connectTimeout(Duration.ofSeconds(10));
-        httpClient = httpClientBuilder.build();
+        this.httpClient = httpClient;
     }
 
     public OpaResult callOpa(String opaRego, String value, boolean isAccessToken) {
@@ -69,12 +61,5 @@ public class OpaService {
         JsonObject inputObject = new JsonObject();
         inputObject.put("input", tokenObject);
         return inputObject.toJson();
-    }
-
-    public void reloadHttpClient() {
-        HttpClient.Builder httpClientBuilder = HttpClient.newBuilder();
-        capiSslContextHolder.ifPresent(sslContextHolder -> httpClientBuilder.sslContext(sslContextHolder.getSslContext()));
-        httpClientBuilder.connectTimeout(Duration.ofSeconds(10));
-        httpClient = httpClientBuilder.build();
     }
 }

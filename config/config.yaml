@@ -7,7 +7,7 @@ capi:
   adminPort: 8381
   reverseProxyHost:
   rest:
-    enabled: true
+    enabled: false
     port: 8380
     listeningAddress: 0.0.0.0
     contextPath: /api
@@ -26,15 +26,15 @@ capi:
     password:
   trustStore:
     enabled: false
-    path: /Users/rodrigo/projects/capi-core/truststore.jks
+    path:
     encoded:
-    password: AibCXbW9v1MeuvcK6uMu
+    password:
   consulCatalogDiscoverInterval: 60000
   consulHosts:
     - endpoint: http://localhost:8500
       token:
   consulStore:
-    enabled: true
+    enabled: false
     endpoint: http://localhost:8500
     token:
   oauth2:
@@ -42,12 +42,15 @@ capi:
     cookieName:
     keys:
       - http://localhost:8080/realms/capi/protocol/openid-connect/certs
+  opa:
+    enabled: false
+    endpoint: http://localhost:8181
   traces:
-    enabled: true
+    enabled: false
     serviceName: capi
     endpoint: http://localhost:4318
-    extraMetadataPrefix: ec-
-  corsEnabled: true
+    extraMetadataPrefix:
+  corsEnabled: false
   allowedHeaders:
     - Origin
     - Accept
