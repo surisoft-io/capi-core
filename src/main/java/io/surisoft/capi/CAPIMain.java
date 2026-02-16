@@ -77,6 +77,9 @@ public class CAPIMain {
             WebsocketGateway websocketGateway = getWebsocketGateway(startup);
 
             AdminGateway adminGateway = new AdminGateway(capiConfiguration.getAdminPort(), startup.getPrometheusRegistry(), capiConfiguration, camelContext, startup.getServiceCache(), startup.getUndertowSslContext(), startup.getCapiTrustManager());
+            if(startup.getWebSocketClientMap() != null) {
+                adminGateway.setWebsocketClients(startup.getWebSocketClientMap());
+            }
             adminGateway.start();
 
             camelContext.getRegistry().bind("consulNodeDiscovery", startup.getConsulNodeDiscovery());
