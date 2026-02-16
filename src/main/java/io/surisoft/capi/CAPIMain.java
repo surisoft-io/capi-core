@@ -83,14 +83,13 @@ public class CAPIMain {
             adminGateway.start();
 
             camelContext.getRegistry().bind("consulNodeDiscovery", startup.getConsulNodeDiscovery());
-            if(capiConfiguration.getConsulStore() != null && capiConfiguration.getConsulStore().isEnabled()) {
+            if(capiConfiguration.getConsulStore().isEnabled()) {
                 camelContext.getRegistry().bind("consulStore", startup.getConsulStore());
             }
             camelContext.getRegistry().bind("routeConsistencyChecker", startup.getRouteConsistencyChecker());
             camelContext.addRoutes(new ErrorRoute(startup.getHttpUtils()));
 
-            if(capiConfiguration.getRest() != null
-                    && capiConfiguration.getRest().isEnabled()
+            if(capiConfiguration.getRest().isEnabled()
                     && capiConfiguration.getRest().getContextPath() != null
                     && !capiConfiguration.getRest().getContextPath().isEmpty()) {
                 boolean sslEnabled = capiConfiguration.getSsl() != null && capiConfiguration.getSsl().isEnabled();
@@ -120,8 +119,7 @@ public class CAPIMain {
 
     private @Nullable WebsocketGateway getWebsocketGateway(Startup startup) {
         WebsocketGateway websocketGateway = null;
-        if(capiConfiguration.getWebsocket() != null
-                && capiConfiguration.getWebsocket().isEnabled()
+        if(capiConfiguration.getWebsocket().isEnabled()
                 && capiConfiguration.getWebsocket().getContextPath() != null
                 && !capiConfiguration.getWebsocket().getContextPath().isEmpty()) {
             websocketGateway = new WebsocketGateway(capiConfiguration.getWebsocket().getPort(), startup.getWebSocketClientMap(), startup.getWebsocketUtils(), startup.getUndertowSslContext(), new ArrayList<>(), "cookiw");

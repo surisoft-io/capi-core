@@ -105,7 +105,7 @@ public class Startup {
         if(configuration.isCorsEnabled()) {
             bindCapCorsFilterStrategy(camelContext);
         }
-        if(configuration.getConsulStore() != null && configuration.getConsulStore().isEnabled()) {
+        if(configuration.getConsulStore().isEnabled()) {
             startConsulStore();
         }
         startRouteConsistencyChecker();
@@ -157,13 +157,13 @@ public class Startup {
     }
 
     private void startWebsocketUtils() {
-        if(configuration.getWebsocket() != null && configuration.getWebsocket().isEnabled()) {
+        if(configuration.getWebsocket().isEnabled()) {
             websocketUtils = new WebsocketUtils(configuration.getWebsocket(), oauth2Provider.getJwtProcessorList(), false, null, null, null);
         }
     }
 
     private void startConsulStore() {
-        if(configuration.getConsulStore() != null && configuration.getConsulStore().isEnabled() && configuration.getTrustStore().isEnabled()) {
+        if(configuration.getConsulStore().isEnabled() && configuration.getTrustStore().isEnabled()) {
             consulStore = new ConsulStore(consulStoreCache, routeUtils, configuration.getConsulStore().getEndpoint(), configuration.getConsulStore().getToken(), configuration.getTrustStore().getPassword(), capiSslContextHolder, camelContext, consulHttpClient);
         }
     }
@@ -179,7 +179,7 @@ public class Startup {
         consulNodeDiscovery.setMetricsProcessor(metricsProcessor);
         consulNodeDiscovery.setOpaService(opaService);
         consulNodeDiscovery.setCapiRunningMode(configuration.getRunningMode());
-        if(configuration.getRest() != null && configuration.getRest().getContextPath() != null && !configuration.getRest().getContextPath().isEmpty()) {
+        if(configuration.getRest().getContextPath() != null && !configuration.getRest().getContextPath().isEmpty()) {
             consulNodeDiscovery.setCapiContext(configuration.getRest().getContextPath());
         }
 
@@ -205,7 +205,7 @@ public class Startup {
     private void createServiceCache() {
         log.info("Creating Service Cache");
         serviceCache = LocalCacheConfiguration.serviceCache();
-        if(configuration.getConsulStore() != null && configuration.getConsulStore().isEnabled()) {
+        if(configuration.getConsulStore().isEnabled()) {
             consulStoreCache = LocalCacheConfiguration.consulStoreCache();
         }
     }
