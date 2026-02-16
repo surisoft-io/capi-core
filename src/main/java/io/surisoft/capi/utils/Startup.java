@@ -12,6 +12,7 @@ import io.surisoft.capi.oidc.Oauth2Provider;
 import io.surisoft.capi.processor.*;
 import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.schema.WebsocketClient;
+import io.surisoft.capi.service.CapiTrustManager;
 import io.surisoft.capi.service.ConsulNodeDiscovery;
 import io.surisoft.capi.service.OpaService;
 import io.surisoft.capi.tracer.CapiTracer;
@@ -19,7 +20,6 @@ import io.surisoft.capi.tracer.TracingBootstrap;
 import jakarta.annotation.Nullable;
 import org.apache.camel.CamelContext;
 import org.apache.camel.component.undertow.UndertowComponent;
-import org.apache.camel.opentelemetry.OpenTelemetryTracer;
 import org.apache.camel.support.jsse.KeyManagersParameters;
 import org.apache.camel.support.jsse.KeyStoreParameters;
 import org.apache.camel.support.jsse.SSLContextParameters;
@@ -31,7 +31,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
-import java.io.FileInputStream;
+import java.io.*;
 import java.security.KeyManagementException;
 import java.security.KeyStore;
 import java.security.NoSuchAlgorithmException;
@@ -69,6 +69,8 @@ public class Startup {
     private Map<String, WebsocketClient> webSocketClientMap = new HashMap<>();
     @Nullable
     private SSLContext undertowSslContext;
+    @Nullable
+    private CapiTrustManager capiTrustManager;
 
     private CompositeMeterRegistry meterRegistry;
     private PrometheusMeterRegistry prometheusRegistry;
@@ -158,6 +160,10 @@ public class Startup {
             consulNodeDiscovery.setCapiContext(configuration.getRest().getContextPath());
         }
 
+        if(configuration.getReverseProxyHost() != null && !configuration.getReverseProxyHost().isEmpty()) {
+            consulNodeDiscovery.setReverseProxyHost(configuration.getReverseProxyHost());
+        }
+
         if(configuration.getInstanceName() != null) {
             consulNodeDiscovery.setCapiInstanceNamespace(configuration.getInstanceName());
         }
@@ -171,7 +177,6 @@ public class Startup {
         if(websocketUtils != null) {
             consulNodeDiscovery.setWebsocketClientMap(webSocketClientMap);
         }
-
     }
 
     private void createServiceCache() {
@@ -194,18 +199,29 @@ public class Startup {
 
     private void createSslContextHolder() {
         if(configuration.getTrustStore().isEnabled()) {
-            log.info("Configuring CAPI TrustStore");
-            TrustStrategy trustStrategy = (X509Certificate[] chain, String authType) -> false;
-            SSLContext sslContext = null;
             try {
-                sslContext = SSLContextBuilder
-                        .create()
-                        //.loadTrustMaterial(capiTrustManager.getKeyStore(), trustStrategy)
-                        .build();
-            } catch (NoSuchAlgorithmException | KeyManagementException e) {
+                log.info("Configuring CAPI TrustStore");
+
+                if(configuration.getTrustStore().getEncoded() != null && !configuration.getTrustStore().getEncoded().isEmpty()) {
+                    InputStream trusStoreInputStream = new ByteArrayInputStream(Base64.getDecoder().decode(configuration.getTrustStore().getEncoded().getBytes()));
+                    capiTrustManager = new CapiTrustManager(trusStoreInputStream, null, configuration.getTrustStore().getPassword());
+                } else {
+                    File filePath = new File(configuration.getTrustStore().getPath());
+                    capiTrustManager = new CapiTrustManager(null, filePath.getAbsolutePath(), configuration.getTrustStore().getPassword());
+                }
+
+                TrustStrategy trustStrategy = (X509Certificate[] chain, String authType) -> false;
+                SSLContext sslContext = null;
+
+                    sslContext = SSLContextBuilder
+                            .create()
+                            .loadTrustMaterial(capiTrustManager.getKeyStore(), trustStrategy)
+                            .build();
+
+                capiSslContextHolder = new CapiSslContextHolder(sslContext);
+            } catch (Exception e) {
                 throw new RuntimeException(e);
             }
-            capiSslContextHolder = new CapiSslContextHolder(sslContext);
         }
     }
 
@@ -294,5 +310,9 @@ public class Startup {
 
     private void bindCapCorsFilterStrategy(CamelContext camelContext) {
         camelContext.getRegistry().bind("capiCorsFilterStrategy", new CapiCorsFilterStrategy(configuration.getAllowedHeaders()));
+    }
+
+    public @Nullable CapiTrustManager getCapiTrustManager() {
+        return capiTrustManager;
     }
 }
