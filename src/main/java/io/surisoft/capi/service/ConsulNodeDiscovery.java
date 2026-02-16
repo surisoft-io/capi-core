@@ -83,7 +83,6 @@ public class ConsulNodeDiscovery {
     }
 
     public void processInfo() {
-        //System.out.println("Consul Node Discovery running");
         try {
             Map<String, List<ConsulObject>> serviceListObjects = getAllServices();
             lookForRemovedServices(serviceListObjects);
@@ -99,7 +98,6 @@ public class ConsulNodeDiscovery {
         Map<String, List<ConsulObject>> serviceListObjects = new HashMap<>();
         HttpResponse<String> response;
 
-        //List<ConsulHosts.HostConfig> hostConfigs = consulHosts.getHosts();
         for(CAPIConfiguration.HostConfig consulHost : consulHosts) {
             log.trace("Querying Consul {} for new services", consulHost);
             response = client.send(buildServicesHttpRequest(consulHost), HttpResponse.BodyHandlers.ofString());

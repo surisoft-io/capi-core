@@ -7,7 +7,9 @@ import io.surisoft.capi.configuration.CAPIConfiguration;
 import io.surisoft.capi.metrics.Info;
 import io.surisoft.capi.metrics.OpenAPIDefinition;
 import io.surisoft.capi.metrics.Routes;
+import io.surisoft.capi.metrics.Truststore;
 import io.surisoft.capi.schema.Service;
+import io.surisoft.capi.service.CapiTrustManager;
 import io.surisoft.capi.utils.Constants;
 import io.undertow.Undertow;
 import io.undertow.server.HttpServerExchange;
@@ -33,14 +35,16 @@ public class AdminGateway {
     private final Cache<String, Service> serviceCache;
     private final SSLContext sslContext;
     ObjectMapper objectMapper = new ObjectMapper();
+    private final CapiTrustManager capiTrustManager;
 
-    public AdminGateway(int port, PrometheusMeterRegistry prometheusRegistry, CAPIConfiguration capiConfiguration, CamelContext camelContext, Cache<String, Service> serviceCache, SSLContext sslContext) {
+    public AdminGateway(int port, PrometheusMeterRegistry prometheusRegistry, CAPIConfiguration capiConfiguration, CamelContext camelContext, Cache<String, Service> serviceCache, SSLContext sslContext, CapiTrustManager capiTrustManager) {
         this.port = port;
         this.prometheusRegistry = prometheusRegistry;
         this.capiConfiguration = capiConfiguration;
         this.camelContext = camelContext;
         this.serviceCache = serviceCache;
         this.sslContext = sslContext;
+        this.capiTrustManager = capiTrustManager;
     }
 
     public void start() {
@@ -50,7 +54,8 @@ public class AdminGateway {
                 .addExactPath("/info/capi", this::handleCapiInfo)
                 .addExactPath("/info/routes", this::handleRoutesInfo)
                 .addPrefixPath("/info/routes/", this::handleRouteById)
-                .addPrefixPath("/info/openapi/", this::handleOpenApi);
+                .addPrefixPath("/info/openapi/", this::handleOpenApi)
+                .addExactPath("/info/truststore", this::handleTruststore);
 
 
         Undertow.Builder builder = Undertow.builder();
@@ -153,6 +158,24 @@ public class AdminGateway {
                 return;
             }
             exchange.getResponseSender().send(objectMapper.writeValueAsString(openApiObject));
+        }catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void handleTruststore(HttpServerExchange exchange) {
+        exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+        try {
+            if(capiConfiguration.getTrustStore().isEnabled() && capiTrustManager != null) {
+                Truststore truststore = new Truststore(true, capiTrustManager);
+                exchange.setStatusCode(StatusCodes.OK);
+                exchange.getResponseSender().send(objectMapper.writeValueAsString(truststore.getTruststore()));
+                return;
+            } else {
+                exchange.setStatusCode(StatusCodes.NOT_FOUND);
+                exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.NOT_FOUND, "Trust Store not enabled")));
+                return;
+            }
         }catch (JsonProcessingException e) {
             throw new RuntimeException(e);
         }

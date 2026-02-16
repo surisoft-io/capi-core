@@ -20,6 +20,7 @@ public class CAPIConfiguration {
     private Rest rest;
     private Websocket websocket;
     private String publicEndpoint;
+    private String reverseProxyHost;
 
     public String getVersion() {
         return version;
@@ -54,6 +55,13 @@ public class CAPIConfiguration {
     }
     public void setConsulCatalogDiscoverInterval(int consulCatalogDiscoverInterval) {
         this.consulCatalogDiscoverInterval = consulCatalogDiscoverInterval;
+    }
+
+    public String getReverseProxyHost() {
+        return reverseProxyHost;
+    }
+    public void setReverseProxyHost(String reverseProxyHost) {
+        this.reverseProxyHost = reverseProxyHost;
     }
 
 
