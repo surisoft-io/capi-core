@@ -7,6 +7,7 @@ import io.surisoft.capi.builder.ErrorRoute;
 import io.surisoft.capi.builder.PrimaryRoute;
 import io.surisoft.capi.configuration.CAPIConfiguration;
 import io.surisoft.capi.configuration.CamelStartupListener;
+import io.surisoft.capi.service.CamelProxyPeerAddressHandler;
 import io.surisoft.capi.service.CapiAccessLogReceiver;
 import io.surisoft.capi.undertow.AdminGateway;
 import io.surisoft.capi.undertow.WebsocketGateway;
@@ -102,10 +103,13 @@ public class CAPIMain {
             if(capiConfiguration.getSsl().isEnabled()) {
                 scheme = "https";
             }
+            CamelProxyPeerAddressHandler proxyPeerAddressHandler = new CamelProxyPeerAddressHandler();
+            camelContext.getRegistry().bind("camelProxyPeerAddressHandler", proxyPeerAddressHandler);
+
             if(capiConfiguration.getAccessLogs().isEnabled()) {
                 CapiAccessLogReceiver capiAccessLogReceiver = new CapiAccessLogReceiver();
                 camelContext.getRegistry().bind("capiAccessLogReceiver", capiAccessLogReceiver);
-                primaryEndpoint = "undertow:" + scheme + "://" + capiConfiguration.getRest().getListeningAddress() + ":" + capiConfiguration.getRest().getPort() + capiConfiguration.getRest().getContextPath() + "?accessLog=true&accessLogReceiver=#capiAccessLogReceiver&matchOnUriPrefix=true&optionsEnabled=true&httpMethodRestrict=GET,POST,PUT,DELETE,OPTIONS,PATCH";
+                primaryEndpoint = "undertow:" + scheme + "://" + capiConfiguration.getRest().getListeningAddress() + ":" + capiConfiguration.getRest().getPort() + capiConfiguration.getRest().getContextPath() + "?accessLog=true&accessLogReceiver=#capiAccessLogReceiver&handlers=#camelProxyPeerAddressHandler&matchOnUriPrefix=true&optionsEnabled=true&httpMethodRestrict=GET,POST,PUT,DELETE,OPTIONS,PATCH";
             } else {
                 primaryEndpoint = "undertow:" + scheme + "://" + capiConfiguration.getRest().getListeningAddress() + ":" + capiConfiguration.getRest().getPort() + capiConfiguration.getRest().getContextPath() + "?matchOnUriPrefix=true&optionsEnabled=true&httpMethodRestrict=GET,POST,PUT,DELETE,OPTIONS,PATCH";
             }
