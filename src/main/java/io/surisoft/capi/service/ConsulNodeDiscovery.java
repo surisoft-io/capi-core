@@ -84,9 +84,11 @@ public class ConsulNodeDiscovery {
             lookForRemovedServices(serviceListObjects);
             processServices(serviceListObjects);
         } catch (InterruptedException e) {
-            throw new RuntimeException(e);
+            log.error(ErrorMessage.ERROR_CONNECTING_TO_CONSUL);
+            //throw new RuntimeException(e);
         } catch (IOException e) {
-            throw new RuntimeException(e);
+            log.error(ErrorMessage.ERROR_CONNECTING_TO_CONSUL);
+            //throw new RuntimeException(e);
         }
     }
 

@@ -13,33 +13,31 @@
 <logger name="io.opentelemetry" level="WARN"/>
 <logger name="io.swagger.v3" level="error"/>
 <!-- CAPI -->
-<logger name="io.surisoft.capi" level="WARN"/>
+<logger name="io.surisoft.capi" level="INFO"/>
 
 <!-- CAPI Logs properties -->
 <property name="logsEnabled"
-                source="logging.logback.logs.enabled"
-                defaultValue="false"/>
+                value="${logging.logback.logs.enabled}" />
 <property name="logsTenant"
-                source="logging.logback.logs.tenant"/>
+                value="${logging.logback.logs.tenant}"/>
 <property name="logsAppName"
-                source="logging.logback.logs.appName"/>
+                value="${logging.logback.logs.appName}"/>
 <property name="logsAppEnvironment"
-                source="logging.logback.logs.appEnvironment"/>
+                value="${logging.logback.logs.appEnvironment}"/>
 <property name="logsDestination"
-                source="logging.logback.logs.destination"/>
+                value="${logging.logback.logs.destination}"/>
 
 <!-- Access Logs properties -->
 <property name="accessLogsEnabled"
-                source="logging.logback.access.enabled"
-                defaultValue="false"/>
+                value="${logging.logback.access.enabled}" />
 <property name="accessLogsTenant"
-                source="logging.logback.access.tenant"/>
+                value="${logging.logback.access.tenant}"/>
 <property name="accessLogsService"
-                source="logging.logback.access.service"/>
+                value="${logging.logback.access.service}"/>
 <property name="accessLogsDestination"
-                source="logging.logback.access.destination"/>
+                value="${logging.logback.access.destination}"/>
 
-<property name="logstashDestination" source="logstash-destination"/>
+<property name="logstashDestination" value="${logstash-destination}"/>
 
 <!-- LOGSTASH appender (only created when logs are enabled) -->
 <condition class="ch.qos.logback.core.boolex.PropertyEqualityCondition">
@@ -48,6 +46,27 @@
 </condition>
 <if>
     <then>
+        <!--appender name="LOGSTASH" class="io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender">
+            <destination>${logsDestination}</destination>
+            <keepAliveDuration>5 minutes</keepAliveDuration>
+            <connectionTimeout>5s</connectionTimeout>
+            <writeTimeout>5s</writeTimeout>
+            <reconnectionDelay>10s</reconnectionDelay>
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <customFields>
+                    {
+                    "tenant":"${logsTenant}",
+                    "appName":"${logsAppName}",
+                    "appEnvironment":"${logsAppEnvironment}",
+                    "host":"${accessLogsDestination}"
+                    }
+                </customFields>
+                <includeMdc>true</includeMdc>
+                <includeContext>true</includeContext>
+                <includeStructuredArguments>true</includeStructuredArguments>
+            </encoder>
+
+        </appender-->
         <appender name="LOGSTASH" class="net.logstash.logback.appender.LogstashTcpSocketAppender">
             <destination>${logsDestination}</destination>
             <keepAliveDuration>5 minutes</keepAliveDuration>
@@ -114,7 +133,19 @@
     <!-- Root logger -->
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="LOGSTASH"/>
     </root>
+    <!--logger name="io.surisoft.capi" additivity="false" level="TRACE">
+        <appender-ref ref="LOGSTASH"/>
+    </logger-->
+
+    <if condition='Boolean.parseBoolean(property("accessLogsEnabled"))'>
+        <then>
+            <logger name="capi.access" level="INFO" additivity="false">
+                <appender-ref ref="ASYNC-ACCESS"/>
+            </logger>
+        </then>
+    </if>
 
 
 </configuration>

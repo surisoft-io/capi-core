@@ -1,9 +1,13 @@
 package io.surisoft.capi;
 
+import ch.qos.logback.classic.LoggerContext;
+import ch.qos.logback.classic.joran.JoranConfigurator;
+import ch.qos.logback.core.joran.spi.JoranException;
 import io.surisoft.capi.builder.ErrorRoute;
 import io.surisoft.capi.builder.PrimaryRoute;
 import io.surisoft.capi.configuration.CAPIConfiguration;
 import io.surisoft.capi.configuration.CamelStartupListener;
+import io.surisoft.capi.service.CapiAccessLogReceiver;
 import io.surisoft.capi.undertow.AdminGateway;
 import io.surisoft.capi.undertow.WebsocketGateway;
 import io.surisoft.capi.utils.Constants;
@@ -23,10 +27,11 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 
 public class CAPIMain {
 
-    private static final Logger log = LoggerFactory.getLogger(CAPIMain.class);
+    private static Logger log;
     private final CAPIConfiguration capiConfiguration;
 
     public static void main(String[] args) {
@@ -36,7 +41,6 @@ public class CAPIMain {
     public CAPIMain() {
 
         //General configuration
-        log.info("Getting CAPI Configuration");
         String configurationPath = System.getenv().get("CAPI_CONFIG_FILE");
         if(configurationPath == null) {
             throw new RuntimeException("CAPI_CONFIG_FILE environment variable is not set");
@@ -54,12 +58,15 @@ public class CAPIMain {
             } else if(capiConfiguration.getConsulHosts().getFirst().getEndpoint() == null || capiConfiguration.getConsulHosts().getFirst().getEndpoint().isEmpty()) {
                 throw new RuntimeException("Failed to start CAPI, it needs at least one Consul instance.");
             }
+
+            //Initialize Logging
+            initializeLogs(capiConfiguration);
         } catch (IOException e) {
-            log.error(e.getMessage(), e);
+            //log.error(e.getMessage(), e);
             throw new RuntimeException("Failed to load CAPI Configuration File");
         }
 
-        log.info("Starting CAPI Camel Context");
+        //log.info("Starting CAPI Camel Context");
         CamelContext camelContext = new DefaultCamelContext();
 
         Startup startup = new Startup(capiConfiguration, camelContext);
@@ -89,11 +96,25 @@ public class CAPIMain {
             camelContext.getRegistry().bind("routeConsistencyChecker", startup.getRouteConsistencyChecker());
             camelContext.addRoutes(new ErrorRoute(startup.getHttpUtils()));
 
+
+            String primaryEndpoint;
+            String scheme = "http";
+            if(capiConfiguration.getSsl().isEnabled()) {
+                scheme = "https";
+            }
+            if(capiConfiguration.getAccessLogs().isEnabled()) {
+                CapiAccessLogReceiver capiAccessLogReceiver = new CapiAccessLogReceiver();
+                camelContext.getRegistry().bind("capiAccessLogReceiver", capiAccessLogReceiver);
+                primaryEndpoint = "undertow:" + scheme + "://" + capiConfiguration.getRest().getListeningAddress() + ":" + capiConfiguration.getRest().getPort() + capiConfiguration.getRest().getContextPath() + "?accessLog=true&accessLogReceiver=#capiAccessLogReceiver&matchOnUriPrefix=true&optionsEnabled=true&httpMethodRestrict=GET,POST,PUT,DELETE,OPTIONS,PATCH";
+            } else {
+                primaryEndpoint = "undertow:" + scheme + "://" + capiConfiguration.getRest().getListeningAddress() + ":" + capiConfiguration.getRest().getPort() + capiConfiguration.getRest().getContextPath() + "?matchOnUriPrefix=true&optionsEnabled=true&httpMethodRestrict=GET,POST,PUT,DELETE,OPTIONS,PATCH";
+            }
+
             if(capiConfiguration.getRest().isEnabled()
                     && capiConfiguration.getRest().getContextPath() != null
                     && !capiConfiguration.getRest().getContextPath().isEmpty()) {
                 boolean sslEnabled = capiConfiguration.getSsl() != null && capiConfiguration.getSsl().isEnabled();
-                camelContext.addRoutes(new PrimaryRoute(startup.getRouteUtils(), capiConfiguration.getRest().getPort(), capiConfiguration.getRest().getListeningAddress(), capiConfiguration.getRest().getContextPath(), sslEnabled, capiConfiguration.isCorsEnabled(), managedHeaders, startup.getServiceCache()));
+                camelContext.addRoutes(new PrimaryRoute(startup.getRouteUtils(), capiConfiguration.getRest().getPort(), capiConfiguration.getRest().getListeningAddress(), capiConfiguration.getRest().getContextPath(), sslEnabled, capiConfiguration.isCorsEnabled(), managedHeaders, startup.getServiceCache(), primaryEndpoint));
             }
 
             camelContext.addStartupListener(new CamelStartupListener(capiConfiguration.getConsulCatalogDiscoverInterval(), capiConfiguration.getConsulStore().isEnabled(), capiConfiguration.getTrustStore().isEnabled()));
@@ -126,5 +147,35 @@ public class CAPIMain {
             websocketGateway.runProxy();
         }
         return websocketGateway;
+    }
+
+    private void initializeLogs(CAPIConfiguration configuration) {
+        if(configuration.getLoggingTraces().isEnabled()) {
+            System.setProperty("logging.logback.logs.enabled", Boolean.toString(true));
+            System.setProperty("logging.logback.logs.tenant", configuration.getLoggingTraces().getTenant());
+            System.setProperty("logging.logback.logs.appName", configuration.getLoggingTraces().getAppName());
+            System.setProperty("logging.logback.logs.appEnvironment", configuration.getLoggingTraces().getAppEnvironment());
+            System.setProperty("logging.logback.logs.destination", configuration.getLoggingTraces().getDestination());
+        }
+
+        if(configuration.getAccessLogs().isEnabled()) {
+            System.setProperty("logging.logback.access.enabled", Boolean.toString(true));
+            System.setProperty("logging.logback.access.tenant", configuration.getAccessLogs().getTenant());
+            System.setProperty("logging.logback.access.service", configuration.getAccessLogs().getService());
+            System.setProperty("logging.logback.access.destination", configuration.getAccessLogs().getDestination());
+        }
+
+        LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
+        context.reset();
+        JoranConfigurator configurator = new JoranConfigurator();
+        configurator.setContext(context);
+        try {
+            configurator.doConfigure(
+                    Objects.requireNonNull(CAPIMain.class.getClassLoader().getResource("logback.xml")));
+            log = LoggerFactory.getLogger(CAPIMain.class);
+            log.info("Logback configuration loaded successfully");
+        } catch (JoranException e) {
+            throw new RuntimeException("Failed to load logback configuration file");
+        }
     }
 }
