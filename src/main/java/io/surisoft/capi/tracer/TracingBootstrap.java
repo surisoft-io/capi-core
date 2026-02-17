@@ -16,36 +16,6 @@ public class TracingBootstrap {
 
     public static OpenTelemetry init(String serviceEndpoint, String serviceName) {
 
-        /*
-        Resource resource = Resource.getDefault().merge(
-                Resource.create(
-                        Attributes.of(
-                                ResourceAttributes.SERVICE_NAME, serviceName
-                        )
-                )
-        );
-
-        // Export to OTEL / Zipkin endpoint
-        ZipkinSpanExporter exporter =
-                ZipkinSpanExporter.builder()
-                        .setEndpoint(serviceEndpoint + "/v1/spans")
-                      .build();
-
-        SdkTracerProvider tracerProvider =
-                SdkTracerProvider.builder()
-                        .setResource(resource)
-                        .addSpanProcessor(
-                                BatchSpanProcessor.builder(exporter).build()
-                        )
-                        .build();
-
-        return OpenTelemetrySdk.builder()
-                .setTracerProvider(tracerProvider)
-                .setPropagators(
-                        ContextPropagators.create(
-                                B3Propagator.injectingSingleHeader()
-                        )
-                ).buildAndRegisterGlobal();*/
         OtlpHttpSpanExporter exporter = OtlpHttpSpanExporter.builder()
                 .setEndpoint(serviceEndpoint + "/v1/traces")
                 .build();

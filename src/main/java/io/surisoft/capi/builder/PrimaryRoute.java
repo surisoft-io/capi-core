@@ -2,6 +2,7 @@ package io.surisoft.capi.builder;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.surisoft.capi.service.CapiAccessLogReceiver;
 import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.RouteUtils;
@@ -31,8 +32,9 @@ public class PrimaryRoute extends RouteBuilder {
     private final Map<String, String> managedHeaders;
     private final Cache<String, Service> serviceCache;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final String primaryEndpoint;
 
-    public PrimaryRoute(RouteUtils routeUtils, int capiRestPort, String capiRestListeningAddress, String capiRestPath, boolean sslEnabled, boolean gatewayCorsManagementEnabled, Map<String, String> managedHeaders, Cache<String, Service> serviceCache) {
+    public PrimaryRoute(RouteUtils routeUtils, int capiRestPort, String capiRestListeningAddress, String capiRestPath, boolean sslEnabled, boolean gatewayCorsManagementEnabled, Map<String, String> managedHeaders, Cache<String, Service> serviceCache, String primaryEndpoint) {
         this.routeUtils = routeUtils;
         this.capiRestPort = capiRestPort;
         this.capiRestListeningAddress = capiRestListeningAddress;
@@ -41,12 +43,12 @@ public class PrimaryRoute extends RouteBuilder {
         this.gatewayCorsManagementEnabled = gatewayCorsManagementEnabled;
         this.managedHeaders = managedHeaders;
         this.serviceCache = serviceCache;
+        this.primaryEndpoint = primaryEndpoint;
     }
 
     @Override
     public void configure() throws Exception {
-        String scheme = sslEnabled ? "https" : "http";
-        from("undertow:" + scheme + "://" + capiRestListeningAddress + ":" + capiRestPort + capiRestPath + "?matchOnUriPrefix=true&optionsEnabled=true&httpMethodRestrict=GET,POST,PUT,DELETE,OPTIONS,PATCH")
+        from(primaryEndpoint)
                 .choice()
                 .when(header(Exchange.HTTP_METHOD).isEqualTo("OPTIONS"))
                 .process(exchange -> {

@@ -23,6 +23,8 @@ public class CAPIConfiguration {
     private String reverseProxyHost;
     private ConsulStore consulStore;
     private Opa opa;
+    private LoggingTraces loggingTraces;
+    private AccessLogs accessLogs;
 
     public String getVersion() {
         return version;
@@ -345,6 +347,78 @@ public class CAPIConfiguration {
         public void setEndpoint(String endpoint) {}
     }
 
+    public static class LoggingTraces {
+        private boolean enabled;
+        private String tenant;
+        private String appName;
+        private String appEnvironment;
+        private String destination;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+        public String getTenant() {
+            return tenant;
+        }
+        public void setTenant(String tenant) {
+            this.tenant = tenant;
+        }
+        public String getAppName() {
+            return appName;
+        }
+        public void setAppName(String appName) {
+            this.appName = appName;
+        }
+        public String getAppEnvironment() {
+            return appEnvironment;
+        }
+        public void setAppEnvironment(String appEnvironment) {
+            this.appEnvironment = appEnvironment;
+        }
+        public String getDestination() {
+            return destination;
+        }
+        public void setDestination(String destination) {
+            this.destination = destination;
+        }
+    }
+
+    public static class AccessLogs {
+        private boolean enabled;
+        private String tenant;
+        private String service;
+        private String destination;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+        public String getTenant() {
+            return tenant;
+        }
+        public void setTenant(String tenant) {
+            this.tenant = tenant;
+        }
+        public String getService() {
+            return service;
+        }
+        public void setService(String service) {
+            this.service = service;
+        }
+        public String getDestination() {
+            return destination;
+        }
+        public void setDestination(String destination) {
+            this.destination = destination;
+        }
+    }
+
+
 
     public TrustStore getTrustStore() {
         return trustStore;
@@ -437,5 +511,17 @@ public class CAPIConfiguration {
     }
     public void setOpa(Opa opa) {
         this.opa = opa;
+    }
+    public LoggingTraces getLoggingTraces() {
+        return loggingTraces;
+    }
+    public void setLoggingTraces(LoggingTraces loggingTraces) {
+        this.loggingTraces = loggingTraces;
+    }
+    public AccessLogs getAccessLogs() {
+        return accessLogs;
+    }
+    public void setAccessLogs(AccessLogs accessLogs) {
+        this.accessLogs = accessLogs;
     }
 }
