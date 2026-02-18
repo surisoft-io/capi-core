@@ -255,7 +255,7 @@ public class ServiceUtils {
 
             HttpRequest request =  HttpRequest.newBuilder()
                     .uri(uri)
-                    .timeout(Duration.ofMinutes(2))
+                    .timeout(Duration.ofSeconds(10))
                     .build();
 
             log.trace("Calling Remote Open API Spec: {}", openApiEndpoint);
@@ -282,6 +282,50 @@ public class ServiceUtils {
             service.setOpenAPI(openAPI);
             return true;
         } catch(Exception e) {
+            log.warn(e.getMessage(), e);
+            log.warn("Open API specification is invalid for service {}", service.getId());
+            return false;
+        }
+    }
+
+    public boolean needsOpenApiFetch(Service service) {
+        return capiRunningMode.equalsIgnoreCase(Constants.FULL_TYPE) && serviceHasOpenApiEndpoint(service);
+    }
+
+    public HttpRequest buildOpenApiRequest(Service service) {
+        String openApiEndpoint = service.getServiceMeta().getOpenApiEndpoint();
+        URI uri = URI.create(openApiEndpoint);
+        if (uri.getPath() != null && uri.getPath().contains("..")) {
+            throw new IllegalArgumentException("Path traversal detected in URI path: " + uri.getPath());
+        }
+        return HttpRequest.newBuilder()
+                .uri(uri)
+                .timeout(Duration.ofSeconds(10))
+                .build();
+    }
+
+    public boolean processOpenApiSpec(Service service, HttpResponse<String> response) {
+        try {
+            if (response.statusCode() != 200) {
+                log.warn("Open API specification is invalid for service {}, response code: {}", service.getId(), response.statusCode());
+                return false;
+            }
+
+            assert response.body() != null;
+            SwaggerParseResult swaggerParseResult = new OpenAPIV3Parser().readContents(response.body());
+            if (swaggerParseResult.getMessages() != null) {
+                swaggerParseResult.getMessages().forEach(log::warn);
+            }
+
+            OpenAPI openAPI = swaggerParseResult.getOpenAPI();
+            if (openAPI == null) {
+                log.warn("Open API specification is null for service {}", service.getId());
+                return false;
+            }
+
+            service.setOpenAPI(openAPI);
+            return true;
+        } catch (Exception e) {
             log.warn(e.getMessage(), e);
             log.warn("Open API specification is invalid for service {}", service.getId());
             return false;

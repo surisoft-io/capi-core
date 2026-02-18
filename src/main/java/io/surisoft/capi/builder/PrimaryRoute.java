@@ -15,12 +15,10 @@ import org.apache.camel.builder.RouteBuilder;
 import org.apache.camel.util.json.JsonObject;
 import org.cache2k.Cache;
 
-import java.net.MalformedURLException;
-import java.net.URISyntaxException;
-import java.net.URL;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 public class PrimaryRoute extends RouteBuilder {
 
@@ -32,6 +30,7 @@ public class PrimaryRoute extends RouteBuilder {
     private final boolean gatewayCorsManagementEnabled;
     private final Map<String, String> managedHeaders;
     private final Cache<String, Service> serviceCache;
+    private static final Pattern VALID_ORIGIN_PATTERN = Pattern.compile("^https?://[^\\s]+$");
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final String primaryEndpoint;
 
@@ -55,7 +54,7 @@ public class PrimaryRoute extends RouteBuilder {
                 .process(exchange -> {
                     processControlledHeaders(exchange);
                     exchange.getIn().setHeader("Access-Control-Max-Age", Constants.ACCESS_CONTROL_MAX_AGE_VALUE);
-                    exchange.getIn().setHeader(Exchange.HTTP_RESPONSE_CODE, HttpServletResponse.SC_ACCEPTED);
+                    exchange.getIn().setHeader(Exchange.HTTP_RESPONSE_CODE, HttpServletResponse.SC_NO_CONTENT);
                 })
                 .otherwise()
                 .process(exchange -> {
@@ -171,12 +170,7 @@ public class PrimaryRoute extends RouteBuilder {
     }
 
     private boolean isValidOrigin(String origin) {
-        try {
-            new URL(origin).toURI();
-            return true;
-        } catch (MalformedURLException | URISyntaxException e) {
-            return false;
-        }
+        return origin != null && !origin.isEmpty() && VALID_ORIGIN_PATTERN.matcher(origin).matches();
     }
 
     private String buildError(int statusCode, String message) throws JsonProcessingException {
