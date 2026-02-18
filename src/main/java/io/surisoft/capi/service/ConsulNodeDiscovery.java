@@ -27,13 +27,15 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 
 public class ConsulNodeDiscovery {
 
     private static final String GET_ALL_SERVICES = "/v1/catalog/services";
     private static final String GET_SERVICE_BY_NAME = "/v1/catalog/service/";
 
-    private static boolean connectedToConsul = false;
+    private static volatile boolean connectedToConsul = false;
     private static final Logger log = LoggerFactory.getLogger(ConsulNodeDiscovery.class);
     private final CamelContext camelContext;
     private HttpClient httpClient;
@@ -62,7 +64,7 @@ public class ConsulNodeDiscovery {
     private String reverseProxyHost;
     private String capiContext;
 
-    ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ConsulNodeDiscovery(CamelContext camelContext, @Nullable CapiSslContextHolder capiSslContextHolder,
                                List<CAPIConfiguration.HostConfig> consulHosts,
@@ -103,14 +105,31 @@ public class ConsulNodeDiscovery {
             //We want to ignore the consul array
             responseObject.remove("consul");
             Set<String> services = responseObject.keySet();
+
+            // Fire all per-service lookups in parallel
+            Map<String, CompletableFuture<HttpResponse<String>>> futures = new LinkedHashMap<>();
             for(String serviceName : services) {
-                List<ConsulObject> consulInstanceObjectList = getServiceByName(consulHost, serviceName);
-                if(consulInstanceObjectList != null) {
-                    if(serviceListObjects.containsKey(serviceName)) {
-                        serviceListObjects.get(serviceName).addAll(consulInstanceObjectList);
-                    } else {
-                        serviceListObjects.put(serviceName, consulInstanceObjectList);
+                futures.put(serviceName, httpClient.sendAsync(
+                    buildServiceNameHttpRequest(consulHost, serviceName),
+                    HttpResponse.BodyHandlers.ofString()
+                ));
+            }
+
+            // Collect results
+            for(Map.Entry<String, CompletableFuture<HttpResponse<String>>> entry : futures.entrySet()) {
+                String serviceName = entry.getKey();
+                try {
+                    HttpResponse<String> serviceResponse = entry.getValue().join();
+                    List<ConsulObject> consulInstanceObjectList = processServiceByNameResponse(serviceName, serviceResponse);
+                    if(consulInstanceObjectList != null) {
+                        if(serviceListObjects.containsKey(serviceName)) {
+                            serviceListObjects.get(serviceName).addAll(consulInstanceObjectList);
+                        } else {
+                            serviceListObjects.put(serviceName, consulInstanceObjectList);
+                        }
                     }
+                } catch(CompletionException e) {
+                    log.error("Failed to fetch service {}: {}", serviceName, e.getMessage());
                 }
             }
         }
@@ -173,78 +192,48 @@ public class ConsulNodeDiscovery {
         }
         return builder
                 .uri(uri)
-                .timeout(Duration.ofMinutes(2))
+                .timeout(Duration.ofSeconds(10))
                 .build();
     }
 
-    private List<ConsulObject> getServiceByName(CAPIConfiguration.HostConfig consulHost, String serviceName) {
-        log.trace("Getting service name: {} at consul host: {}", serviceName, consulHost);
+    private List<ConsulObject> processServiceByNameResponse(String serviceName, HttpResponse<String> response) {
+        log.trace("Processing service name: {}", serviceName);
         List<ConsulObject> servicesToDeploy = new ArrayList<>();
         try {
-            HttpResponse<String> response = httpClient.send(buildServiceNameHttpRequest(consulHost, serviceName), HttpResponse.BodyHandlers.ofString());
-            ObjectMapper objectMapper = new ObjectMapper();
             TypeReference<List<ConsulObject>> typeRef = new TypeReference<>() {};
             List<ConsulObject> temporaryList = objectMapper.readValue(response.body(), typeRef);
             temporaryList.forEach(o -> {
                 //CAPI Supports Services to declare availability to multiple capi instances
-                ServiceCapiInstances.Instance instanceDeclared = serviceUtils.getServiceCapiInstance(o, capiInstanceName);
-                boolean serviceAdded = false;
-                if(instanceDeclared != null) {
-                    //The service has declared this instance as multi instance support
-                    //ex.: For an instance named "default".
-                    // Service meta: capi-instance-default-route-group-first
-                    servicesToDeploy.add(o);
-                    serviceAdded = true;
-                } else {
-                    //The service has declared another instance as multi instance support
-                    //ex.: For an instance named "default".
-                    // Service meta: capi-instance-other-route-group-first
-                    log.trace("Service is declared as multi instance, but not for this instance");
-                }
+                boolean hasMultiForThis = serviceUtils.getServiceCapiInstance(o, capiInstanceName) != null;
+                boolean hasSingleForThis = o.getServiceMeta() != null
+                        && o.getServiceMeta().getCapiNamespace() != null
+                        && o.getServiceMeta().getCapiNamespace().equals(capiInstanceName);
 
-                if(o.getServiceMeta() != null && o.getServiceMeta().getCapiNamespace() != null && o.getServiceMeta().getCapiNamespace().equals(capiInstanceName)) {
-                    if(!serviceAdded) {
-                        //The service has declared as single instance do this instance
-                        //ex.: For an instance named "default".
-                        // Service meta: capi-instance: default
-                        servicesToDeploy.add(o);
-                    }
-                } else if(o.getServiceMeta() != null && o.getServiceMeta().getCapiNamespace() != null && !o.getServiceMeta().getCapiNamespace().equals(capiInstanceName)) {
-                    if(!serviceAdded) {
-                        //The service has declared as single instance but to a different instance
-                        //ex.: For an instance named "default".
-                        // Service meta: capi-instance: other
-                        log.trace("this service is declared this instance as single, but not to this instance");
-                    }
+                if(hasMultiForThis || hasSingleForThis) {
+                    // Service is declared for this instance (multi or single)
+                    servicesToDeploy.add(o);
+                } else if(serviceUtils.isTheServiceRegisteredForOtherInstances(o, capiInstanceName)
+                        || (o.getServiceMeta() != null && o.getServiceMeta().getCapiNamespace() != null)) {
+                    // Service is declared for other instances only
+                    log.trace("Service is declared for other instances, not for this one");
+                } else if(!strictToInstanceName) {
+                    // No instance declared at all, non-strict mode accepts it
+                    servicesToDeploy.add(o);
                 } else {
-                    if(!strictToInstanceName) {
-                        if(!serviceAdded) {
-                            //We need to check if there are other instances declared in the service
-                            if(serviceUtils.isTheServiceRegisteredForOtherInstances(o, capiInstanceName)) {
-                                log.trace("this service is declared for other instances, but not to this instance");
-                            } else {
-                                //This CAPI instance is not stric so it will accept the service
-                                servicesToDeploy.add(o);
-                            }
-                        }
-                    } else {
-                        if(!serviceAdded) {
-                            log.trace("This CAPI is strict so it will not accept the service");
-                        }
-                    }
+                    // No instance declared, strict mode rejects it
+                    log.trace("Strict mode: service has no instance declaration, will not deploy");
                 }
             });
             return servicesToDeploy;
         } catch (IOException e) {
-            log.error(ErrorMessage.ERROR_CONNECTING_TO_CONSUL);
-        } catch (InterruptedException e) {
-            log.error(ErrorMessage.ERROR_CONNECTING_TO_CONSUL);
-            Thread.currentThread().interrupt();
+            log.error("Error processing service {}: {}", serviceName, e.getMessage());
         }
         return null;
     }
 
     private void processServices(Map<String, List<ConsulObject>> serviceListObjects) {
+        // Phase 1: Identify services that need route creation and pre-fetch OpenAPI specs in parallel
+        List<Service> servicesToDeploy = new ArrayList<>();
         serviceListObjects.forEach((serviceName, objectList) -> {
             log.trace("Processing service name: {}", serviceName);
             Map<String, Set<Mapping>> servicesStructure = groupByServiceId(objectList);
@@ -252,34 +241,55 @@ public class ConsulNodeDiscovery {
                 Service incomingService = createServiceObject(serviceName, entry.getKey(), entry.getValue(), objectList);
                 Service existingService = serviceCache.peek(incomingService.getId());
                 if(existingService == null) {
-                    boolean createRoute = true;
-                    if(incomingService.getServiceCapiInstances() != null) {
-                        if(!incomingService.getServiceCapiInstances().getInstances().containsKey(capiInstanceName)) {
-                            createRoute = false;
-                        }
-                    }
-                    if(createRoute) {
-                        if(serviceUtils.checkIfOpenApiIsEnabled(incomingService, httpClient)) {
-                            createRoute(incomingService);
-                        }
-                    }
+                    servicesToDeploy.add(incomingService);
                 } else {
                     if(serviceUtils.updateExistingService(existingService, incomingService, serviceCache)) {
-                        boolean createRoute = true;
+                        boolean shouldCreate = true;
                         if(incomingService.getServiceCapiInstances() != null) {
                             if(!incomingService.getServiceCapiInstances().getInstances().containsKey(capiInstanceName)) {
-                                createRoute = false;
+                                shouldCreate = false;
                             }
                         }
-                        if(createRoute) {
-                            if(serviceUtils.checkIfOpenApiIsEnabled(incomingService, httpClient)) {
-                                createRoute(incomingService);
-                            }
+                        if(shouldCreate) {
+                            servicesToDeploy.add(incomingService);
                         }
                     }
                 }
             }
         });
+
+        // Phase 2: Fire all OpenAPI fetches in parallel
+        Map<Service, CompletableFuture<HttpResponse<String>>> openApiFutures = new LinkedHashMap<>();
+        for(Service service : servicesToDeploy) {
+            if(serviceUtils.needsOpenApiFetch(service)) {
+                try {
+                    openApiFutures.put(service, httpClient.sendAsync(
+                        serviceUtils.buildOpenApiRequest(service),
+                        HttpResponse.BodyHandlers.ofString()
+                    ));
+                } catch(Exception e) {
+                    log.warn("Failed to build OpenAPI request for service {}: {}", service.getId(), e.getMessage());
+                }
+            }
+        }
+
+        // Phase 3: Process results and create routes
+        for(Service service : servicesToDeploy) {
+            CompletableFuture<HttpResponse<String>> future = openApiFutures.get(service);
+            if(future != null) {
+                try {
+                    HttpResponse<String> response = future.join();
+                    if(serviceUtils.processOpenApiSpec(service, response)) {
+                        createRoute(service);
+                    }
+                } catch(CompletionException e) {
+                    log.warn("Failed to fetch OpenAPI spec for service {}: {}", service.getId(), e.getMessage());
+                }
+            } else {
+                createRoute(service);
+            }
+        }
+
         connectedToConsul = true;
     }
 
@@ -374,7 +384,7 @@ public class ConsulNodeDiscovery {
         }
         return builder
                 .uri(uri)
-                .timeout(Duration.ofMinutes(2))
+                .timeout(Duration.ofSeconds(10))
                 .build();
     }
 

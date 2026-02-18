@@ -18,6 +18,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 
 import io.surisoft.capi.configuration.CAPIConfiguration;
 
@@ -210,8 +211,9 @@ class ConsulNodeDiscoveryTest {
         when(serviceByNameResponse.body()).thenReturn(serviceByNameJson);
 
         when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenReturn(servicesResponse)
-                .thenReturn(serviceByNameResponse);
+                .thenReturn(servicesResponse);
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(CompletableFuture.completedFuture(serviceByNameResponse));
 
         when(serviceCache.entries()).thenReturn(Collections.emptySet());
         when(serviceCache.peek(anyString())).thenReturn(null);
@@ -317,8 +319,9 @@ class ConsulNodeDiscoveryTest {
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
         when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenReturn(servicesResponse)
-                .thenReturn(serviceByNameResponse);
+                .thenReturn(servicesResponse);
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(CompletableFuture.completedFuture(serviceByNameResponse));
 
         when(serviceCache.entries()).thenReturn(Collections.emptySet());
 
@@ -364,8 +367,9 @@ class ConsulNodeDiscoveryTest {
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
         when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenReturn(servicesResponse)
-                .thenReturn(serviceByNameResponse);
+                .thenReturn(servicesResponse);
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(CompletableFuture.completedFuture(serviceByNameResponse));
 
         when(serviceCache.entries()).thenReturn(Collections.emptySet());
 
@@ -416,8 +420,9 @@ class ConsulNodeDiscoveryTest {
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
         when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenReturn(servicesResponse)
-                .thenReturn(serviceByNameResponse);
+                .thenReturn(servicesResponse);
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(CompletableFuture.completedFuture(serviceByNameResponse));
 
         when(serviceCache.entries()).thenReturn(Collections.emptySet());
         when(serviceCache.peek("v1:my-service")).thenReturn(null);
@@ -462,8 +467,9 @@ class ConsulNodeDiscoveryTest {
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
         when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenReturn(servicesResponse)
-                .thenReturn(serviceByNameResponse);
+                .thenReturn(servicesResponse);
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(CompletableFuture.completedFuture(serviceByNameResponse));
 
         when(serviceCache.entries()).thenReturn(Collections.emptySet());
 
@@ -478,11 +484,13 @@ class ConsulNodeDiscoveryTest {
         mapping.setRootContext("/");
         when(serviceUtils.consulObjectToMapping(any(ConsulObject.class))).thenReturn(mapping);
         when(serviceUtils.updateExistingService(any(Service.class), any(Service.class), eq(serviceCache))).thenReturn(true);
-        when(serviceUtils.checkIfOpenApiIsEnabled(any(Service.class), any(HttpClient.class))).thenReturn(false);
+        when(serviceUtils.needsOpenApiFetch(any(Service.class))).thenReturn(true);
+        when(serviceUtils.buildOpenApiRequest(any(Service.class))).thenReturn(mock(HttpRequest.class));
+        when(serviceUtils.processOpenApiSpec(any(Service.class), any(HttpResponse.class))).thenReturn(false);
 
         consulNodeDiscovery.processInfo();
 
-        // Verify no route was cached (since openApi check failed)
+        // Verify no route was cached (since openApi spec processing failed)
         verify(serviceCache, never()).put(eq("my-service:v1"), any(Service.class));
     }
 
@@ -509,8 +517,9 @@ class ConsulNodeDiscoveryTest {
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
         when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenReturn(servicesResponse)
-                .thenReturn(serviceByNameResponse);
+                .thenReturn(servicesResponse);
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(CompletableFuture.completedFuture(serviceByNameResponse));
 
         when(serviceCache.entries()).thenReturn(Collections.emptySet());
 
@@ -543,8 +552,9 @@ class ConsulNodeDiscoveryTest {
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
         when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenReturn(servicesResponse)
-                .thenReturn(serviceByNameResponse);
+                .thenReturn(servicesResponse);
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(CompletableFuture.completedFuture(serviceByNameResponse));
 
         when(serviceCache.entries()).thenReturn(Collections.emptySet());
 
@@ -579,8 +589,9 @@ class ConsulNodeDiscoveryTest {
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
         when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenReturn(servicesResponse)
-                .thenReturn(serviceByNameResponse);
+                .thenReturn(servicesResponse);
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(CompletableFuture.completedFuture(serviceByNameResponse));
 
         when(serviceCache.entries()).thenReturn(Collections.emptySet());
 
@@ -614,8 +625,9 @@ class ConsulNodeDiscoveryTest {
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
         when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenReturn(servicesResponse)
-                .thenReturn(serviceByNameResponse);
+                .thenReturn(servicesResponse);
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(CompletableFuture.completedFuture(serviceByNameResponse));
 
         when(serviceCache.entries()).thenReturn(Collections.emptySet());
         when(serviceUtils.getServiceCapiInstance(any(ConsulObject.class), eq("default"))).thenReturn(null);
@@ -679,9 +691,10 @@ class ConsulNodeDiscoveryTest {
 
         when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
                 .thenReturn(servicesResponse1)
-                .thenReturn(serviceByNameResponse1)
-                .thenReturn(servicesResponse2)
-                .thenReturn(serviceByNameResponse2);
+                .thenReturn(servicesResponse2);
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(CompletableFuture.completedFuture(serviceByNameResponse1))
+                .thenReturn(CompletableFuture.completedFuture(serviceByNameResponse2));
 
         when(serviceCache.entries()).thenReturn(Collections.emptySet());
         when(serviceCache.peek(anyString())).thenReturn(null);
@@ -733,8 +746,9 @@ class ConsulNodeDiscoveryTest {
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
         when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenReturn(servicesResponse)
-                .thenReturn(serviceByNameResponse);
+                .thenReturn(servicesResponse);
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(CompletableFuture.completedFuture(serviceByNameResponse));
 
         when(serviceCache.entries()).thenReturn(Collections.emptySet());
         when(serviceCache.peek(anyString())).thenReturn(null);
@@ -781,8 +795,9 @@ class ConsulNodeDiscoveryTest {
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
         when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenReturn(servicesResponse)
-                .thenReturn(serviceByNameResponse);
+                .thenReturn(servicesResponse);
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(CompletableFuture.completedFuture(serviceByNameResponse));
 
         when(serviceCache.entries()).thenReturn(Collections.emptySet());
         when(serviceCache.peek(anyString())).thenReturn(null);
@@ -831,8 +846,9 @@ class ConsulNodeDiscoveryTest {
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
         when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenReturn(servicesResponse)
-                .thenReturn(serviceByNameResponse);
+                .thenReturn(servicesResponse);
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(CompletableFuture.completedFuture(serviceByNameResponse));
 
         when(serviceCache.entries()).thenReturn(Collections.emptySet());
         when(serviceCache.peek(anyString())).thenReturn(null);
@@ -880,8 +896,9 @@ class ConsulNodeDiscoveryTest {
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
         when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenReturn(servicesResponse)
-                .thenReturn(serviceByNameResponse);
+                .thenReturn(servicesResponse);
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(CompletableFuture.completedFuture(serviceByNameResponse));
 
         when(serviceCache.entries()).thenReturn(Collections.emptySet());
         when(serviceCache.peek(anyString())).thenReturn(null);
@@ -932,8 +949,9 @@ class ConsulNodeDiscoveryTest {
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
         when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenReturn(servicesResponse)
-                .thenReturn(serviceByNameResponse);
+                .thenReturn(servicesResponse);
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(CompletableFuture.completedFuture(serviceByNameResponse));
 
         when(serviceCache.entries()).thenReturn(Collections.emptySet());
         when(serviceCache.peek(anyString())).thenReturn(null);
@@ -977,8 +995,9 @@ class ConsulNodeDiscoveryTest {
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
         when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenReturn(servicesResponse)
-                .thenReturn(serviceByNameResponse);
+                .thenReturn(servicesResponse);
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(CompletableFuture.completedFuture(serviceByNameResponse));
 
         when(serviceCache.entries()).thenReturn(Collections.emptySet());
         when(serviceCache.peek(anyString())).thenReturn(null);
@@ -1026,8 +1045,9 @@ class ConsulNodeDiscoveryTest {
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
         when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenReturn(servicesResponse)
-                .thenReturn(serviceByNameResponse);
+                .thenReturn(servicesResponse);
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(CompletableFuture.completedFuture(serviceByNameResponse));
 
         when(serviceCache.entries()).thenReturn(Collections.emptySet());
         when(serviceCache.peek(anyString())).thenReturn(null);
@@ -1056,7 +1076,7 @@ class ConsulNodeDiscoveryTest {
 
         ServiceMeta meta = new ServiceMeta();
         meta.setGroup("v1");
-        meta.setCapiNamespace("default");
+        // No capiNamespace — service only has multi-instance for "other", not for "default"
         meta.setType("rest");
         meta.handleUnknown("capi-instance-other-secured", "true");
 
@@ -1072,8 +1092,9 @@ class ConsulNodeDiscoveryTest {
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
         when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenReturn(servicesResponse)
-                .thenReturn(serviceByNameResponse);
+                .thenReturn(servicesResponse);
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(CompletableFuture.completedFuture(serviceByNameResponse));
 
         when(serviceCache.entries()).thenReturn(Collections.emptySet());
         when(serviceCache.peek(anyString())).thenReturn(null);
@@ -1083,7 +1104,7 @@ class ConsulNodeDiscoveryTest {
 
         consulNodeDiscovery.processInfo();
 
-        // Instance not matching, should not create route
+        // Only multi-instance for "other", no single or multi for "default" — should not create route
         verify(serviceCache, never()).put(anyString(), any(Service.class));
     }
 }
