@@ -243,4 +243,26 @@ class ConsulStoreTest {
 
         assertDoesNotThrow(() -> emptyTokenStore.process());
     }
+
+    @Test
+    void process_pathTraversalInHost_doesNotCallHttpClient() throws Exception {
+        // consulKvHost with ".." will trigger path traversal detection in buildServicesHttpRequest
+        ConsulStore traversalStore = new ConsulStore(
+                consulTrustStoreCache,
+                routeUtils,
+                "http://consul-host:8500/..",
+                "test-token",
+                "changeit",
+                capiSslContextHolder,
+                camelContext,
+                httpClient
+        );
+
+        when(consulTrustStoreCache.get(Constants.CONSUL_CAPI_TRUST_STORE_GROUP_KEY)).thenReturn(null);
+
+        // Should not crash — the IllegalArgumentException is caught by getRemoteTrustStore's catch block
+        assertDoesNotThrow(() -> traversalStore.process());
+        // httpClient.send should never be called because the exception occurs before it
+        verify(httpClient, never()).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+    }
 }
