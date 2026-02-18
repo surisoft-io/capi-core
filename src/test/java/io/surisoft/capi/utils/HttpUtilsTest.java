@@ -1,9 +1,16 @@
 package io.surisoft.capi.utils;
 
+import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.proc.BadJOSEException;
+import com.nimbusds.jose.proc.SecurityContext;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.proc.DefaultJWTProcessor;
 import io.surisoft.capi.exception.AuthorizationException;
 import io.surisoft.capi.schema.CapiRestError;
+import io.surisoft.capi.schema.OpaResult;
 import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.schema.ServiceMeta;
+import io.surisoft.capi.service.OpaService;
 import org.apache.camel.Exchange;
 import org.apache.camel.Message;
 import org.junit.jupiter.api.BeforeEach;
@@ -12,8 +19,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.io.IOException;
 import java.net.HttpCookie;
 import java.net.URI;
+import java.text.ParseException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -633,5 +642,272 @@ class HttpUtilsTest {
         assertTrue(result.contains("customHostHeader=my-host"));
         // Should not have double ampersand
         assertFalse(result.contains("&&"));
+    }
+
+    // --- Tests for authorizeRequest with mock JWT processors ---
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void authorizeRequest_withSuccessfulProcessor_returnsClaimsSet() throws Exception {
+        DefaultJWTProcessor<SecurityContext> mockProcessor = mock(DefaultJWTProcessor.class);
+        JWTClaimsSet expectedClaims = new JWTClaimsSet.Builder().subject("user1").build();
+        when(mockProcessor.process("valid-token", null)).thenReturn(expectedClaims);
+
+        HttpUtils httpUtilsWithProcessor = new HttpUtils(null, List.of(mockProcessor));
+        JWTClaimsSet result = httpUtilsWithProcessor.authorizeRequest("valid-token");
+
+        assertEquals("user1", result.getSubject());
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void authorizeRequest_allProcessorsFail_throwsAuthorizationException() throws Exception {
+        DefaultJWTProcessor<SecurityContext> mockProcessor = mock(DefaultJWTProcessor.class);
+        when(mockProcessor.process("bad-token", null)).thenThrow(new BadJOSEException("Invalid token"));
+
+        HttpUtils httpUtilsWithProcessor = new HttpUtils(null, List.of(mockProcessor));
+
+        assertThrows(AuthorizationException.class, () -> httpUtilsWithProcessor.authorizeRequest("bad-token"));
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void authorizeRequest_firstProcessorFailsSecondSucceeds_returnsClaimsSet() throws Exception {
+        DefaultJWTProcessor<SecurityContext> failingProcessor = mock(DefaultJWTProcessor.class);
+        when(failingProcessor.process("token", null)).thenThrow(new BadJOSEException("Wrong key"));
+
+        DefaultJWTProcessor<SecurityContext> successfulProcessor = mock(DefaultJWTProcessor.class);
+        JWTClaimsSet expectedClaims = new JWTClaimsSet.Builder().subject("user1").build();
+        when(successfulProcessor.process("token", null)).thenReturn(expectedClaims);
+
+        HttpUtils httpUtilsWithProcessor = new HttpUtils(null, List.of(failingProcessor, successfulProcessor));
+        JWTClaimsSet result = httpUtilsWithProcessor.authorizeRequest("token");
+
+        assertEquals("user1", result.getSubject());
+    }
+
+    // --- Tests for isAuthorized with OPA ---
+
+    @Test
+    void isAuthorized_withOpaAllowed_returnsTrue() throws IOException {
+        OpaService opaService = mock(OpaService.class);
+        OpaResult opaResult = new OpaResult();
+        opaResult.setResult(true);
+        when(opaService.callOpa("my-rego", "token", true)).thenReturn(opaResult);
+
+        Service service = new Service();
+        ServiceMeta meta = new ServiceMeta();
+        meta.setOpaRego("my-rego");
+        service.setServiceMeta(meta);
+
+        boolean result = httpUtils.isAuthorized("token", "/ctx", service, opaService);
+        assertTrue(result);
+    }
+
+    @Test
+    void isAuthorized_withOpaDenied_returnsFalse() throws IOException {
+        OpaService opaService = mock(OpaService.class);
+        OpaResult opaResult = new OpaResult();
+        opaResult.setResult(false);
+        when(opaService.callOpa("my-rego", "token", true)).thenReturn(opaResult);
+
+        Service service = new Service();
+        ServiceMeta meta = new ServiceMeta();
+        meta.setOpaRego("my-rego");
+        service.setServiceMeta(meta);
+
+        boolean result = httpUtils.isAuthorized("token", "/ctx", service, opaService);
+        assertFalse(result);
+    }
+
+    // --- Tests for isAuthorized with JWT role checking ---
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void isAuthorized_withSubscribedRole_returnsTrue() throws Exception {
+        DefaultJWTProcessor<SecurityContext> mockProcessor = mock(DefaultJWTProcessor.class);
+        Map<String, Object> realmAccess = new HashMap<>();
+        realmAccess.put("roles", List.of("ctx"));
+        JWTClaimsSet claims = new JWTClaimsSet.Builder()
+                .claim("realm_access", realmAccess)
+                .build();
+        when(mockProcessor.process("token", null)).thenReturn(claims);
+
+        HttpUtils httpUtilsWithProcessor = new HttpUtils(null, List.of(mockProcessor));
+        Service service = new Service();
+        ServiceMeta meta = new ServiceMeta();
+        service.setServiceMeta(meta);
+
+        boolean result = httpUtilsWithProcessor.isAuthorized("token", "/ctx", service, null);
+        assertTrue(result);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void isAuthorized_notSubscribedButInGroup_returnsTrue() throws Exception {
+        DefaultJWTProcessor<SecurityContext> mockProcessor = mock(DefaultJWTProcessor.class);
+        JWTClaimsSet claims = new JWTClaimsSet.Builder()
+                .claim("realm_access", Map.of("roles", List.of("other-role")))
+                .claim("subscriptions", List.of("my-group"))
+                .build();
+        when(mockProcessor.process("token", null)).thenReturn(claims);
+
+        HttpUtils httpUtilsWithProcessor = new HttpUtils(null, List.of(mockProcessor));
+        Service service = new Service();
+        ServiceMeta meta = new ServiceMeta();
+        meta.setSubscriptionGroup("my-group");
+        service.setServiceMeta(meta);
+
+        boolean result = httpUtilsWithProcessor.isAuthorized("token", "/ctx", service, null);
+        assertTrue(result);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void isAuthorized_notSubscribedNotInGroup_returnsFalse() throws Exception {
+        DefaultJWTProcessor<SecurityContext> mockProcessor = mock(DefaultJWTProcessor.class);
+        JWTClaimsSet claims = new JWTClaimsSet.Builder()
+                .claim("realm_access", Map.of("roles", List.of("other-role")))
+                .claim("subscriptions", List.of("wrong-group"))
+                .build();
+        when(mockProcessor.process("token", null)).thenReturn(claims);
+
+        HttpUtils httpUtilsWithProcessor = new HttpUtils(null, List.of(mockProcessor));
+        Service service = new Service();
+        ServiceMeta meta = new ServiceMeta();
+        meta.setSubscriptionGroup("my-group");
+        service.setServiceMeta(meta);
+
+        boolean result = httpUtilsWithProcessor.isAuthorized("token", "/ctx", service, null);
+        assertFalse(result);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void isAuthorized_noRealmAccessClaim_nullGroup_returnsFalse() throws Exception {
+        DefaultJWTProcessor<SecurityContext> mockProcessor = mock(DefaultJWTProcessor.class);
+        JWTClaimsSet claims = new JWTClaimsSet.Builder().subject("user").build();
+        when(mockProcessor.process("token", null)).thenReturn(claims);
+
+        HttpUtils httpUtilsWithProcessor = new HttpUtils(null, List.of(mockProcessor));
+        Service service = new Service();
+        ServiceMeta meta = new ServiceMeta();
+        service.setServiceMeta(meta);
+
+        boolean result = httpUtilsWithProcessor.isAuthorized("token", "/ctx", service, null);
+        assertFalse(result);
+    }
+
+    // --- Tests for isAuthorized two-arg with group matching ---
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void isAuthorized_twoArg_tokenInGroup_returnsTrue() throws Exception {
+        DefaultJWTProcessor<SecurityContext> mockProcessor = mock(DefaultJWTProcessor.class);
+        JWTClaimsSet claims = new JWTClaimsSet.Builder()
+                .claim("subscriptions", List.of("groupA"))
+                .build();
+        when(mockProcessor.process("token", null)).thenReturn(claims);
+
+        HttpUtils httpUtilsWithProcessor = new HttpUtils(null, List.of(mockProcessor));
+        boolean result = httpUtilsWithProcessor.isAuthorized("token", "groupA");
+        assertTrue(result);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void isAuthorized_twoArg_tokenNotInGroup_returnsFalse() throws Exception {
+        DefaultJWTProcessor<SecurityContext> mockProcessor = mock(DefaultJWTProcessor.class);
+        JWTClaimsSet claims = new JWTClaimsSet.Builder()
+                .claim("subscriptions", List.of("groupB"))
+                .build();
+        when(mockProcessor.process("token", null)).thenReturn(claims);
+
+        HttpUtils httpUtilsWithProcessor = new HttpUtils(null, List.of(mockProcessor));
+        boolean result = httpUtilsWithProcessor.isAuthorized("token", "groupA");
+        assertFalse(result);
+    }
+
+    // --- Tests for prepareForThrottleIfNeeded ---
+
+    @Test
+    void prepareForThrottleIfNeeded_throttleEnabledNotGlobal_setsProperties() throws Exception {
+        JWTClaimsSet claims = new JWTClaimsSet.Builder()
+                .claim("throttleTotalCalls", 100L)
+                .claim("throttleDuration", 60000L)
+                .claim("azp", "my-client")
+                .build();
+        String jwtString = createSignedJwt(claims);
+
+        Service service = new Service();
+        ServiceMeta meta = new ServiceMeta();
+        meta.setThrottle(true);
+        meta.setThrottleGlobal(false);
+        service.setServiceMeta(meta);
+
+        when(exchange.getIn()).thenReturn(message);
+
+        httpUtils.prepareForThrottleIfNeeded(service, jwtString, exchange);
+
+        verify(exchange).setProperty(Constants.CAPI_META_THROTTLE_DURATION, 60000L);
+        verify(exchange).setProperty(Constants.CAPI_META_THROTTLE_TOTAL_CALLS_ALLOWED, 100L);
+        verify(message).setHeader(Constants.CAPI_META_THROTTLE_CONSUMER_KEY, "my-client");
+        verify(message).setHeader(Constants.CAPI_META_THROTTLE_DURATION, 60000L);
+        verify(message).setHeader(Constants.CAPI_META_THROTTLE_TOTAL_CALLS_ALLOWED, 100L);
+    }
+
+    @Test
+    void prepareForThrottleIfNeeded_throttleDisabled_doesNothing() throws ParseException {
+        Service service = new Service();
+        ServiceMeta meta = new ServiceMeta();
+        meta.setThrottle(false);
+        service.setServiceMeta(meta);
+
+        httpUtils.prepareForThrottleIfNeeded(service, "any-token", exchange);
+
+        verifyNoInteractions(exchange);
+    }
+
+    @Test
+    void prepareForThrottleIfNeeded_throttleGlobal_doesNothing() throws ParseException {
+        Service service = new Service();
+        ServiceMeta meta = new ServiceMeta();
+        meta.setThrottle(true);
+        meta.setThrottleGlobal(true);
+        service.setServiceMeta(meta);
+
+        httpUtils.prepareForThrottleIfNeeded(service, "any-token", exchange);
+
+        verifyNoInteractions(exchange);
+    }
+
+    @Test
+    void prepareForThrottleIfNeeded_noThrottleClaims_doesNotSetProperties() throws Exception {
+        JWTClaimsSet claims = new JWTClaimsSet.Builder()
+                .subject("user")
+                .build();
+        String jwtString = createSignedJwt(claims);
+
+        Service service = new Service();
+        ServiceMeta meta = new ServiceMeta();
+        meta.setThrottle(true);
+        meta.setThrottleGlobal(false);
+        service.setServiceMeta(meta);
+
+        httpUtils.prepareForThrottleIfNeeded(service, jwtString, exchange);
+
+        verify(exchange, never()).setProperty(anyString(), any());
+    }
+
+    /**
+     * Creates a signed JWT string from claims, using HMAC-SHA256 with a test key.
+     */
+    private static String createSignedJwt(JWTClaimsSet claims) throws Exception {
+        com.nimbusds.jose.JWSHeader header = new com.nimbusds.jose.JWSHeader(com.nimbusds.jose.JWSAlgorithm.HS256);
+        com.nimbusds.jwt.SignedJWT signedJWT = new com.nimbusds.jwt.SignedJWT(header, claims);
+        byte[] secret = new byte[32];
+        java.util.Arrays.fill(secret, (byte) 0x41);
+        signedJWT.sign(new com.nimbusds.jose.crypto.MACSigner(secret));
+        return signedJWT.serialize();
     }
 }
