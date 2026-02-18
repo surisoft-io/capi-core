@@ -1,0 +1,143 @@
+replicaCount: 1
+
+image:
+  repository: surisoft/capi-core
+  tag: ""  # Defaults to Chart.appVersion
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# CAPI configuration — mirrors config.yaml structure
+capi:
+  version: "1.0.0"
+  instanceName: default
+  strictToInstanceName: true
+  publicEndpoint: http://localhost:8380/api/
+  runningMode: full
+  reverseProxyHost: ""
+
+  rest:
+    enabled: true
+    port: 8380
+    listeningAddress: 0.0.0.0
+    contextPath: /api
+    connectionRequestTimeout: 5000
+    requestTimeout: 5000
+    responseTimeout: 120000
+
+  websocket:
+    enabled: false
+    port: 8382
+    listeningAddress: 0.0.0.0
+    contextPath: /api/*
+
+  ssl:
+    enabled: false
+    keyStoreType: PKCS12
+    password: ""
+    # Base64-encoded keystore file — stored in a Secret and mounted at /capi/certs/keystore.p12
+    keystoreBase64: ""
+
+  trustStore:
+    enabled: false
+    password: ""
+    encoded: ""
+    # Base64-encoded truststore file — stored in a Secret and mounted at /capi/certs/truststore.jks
+    datastoreBase64: ""
+
+  consulCatalogDiscoverInterval: 60000
+  consulHosts:
+    - endpoint: http://consul:8500
+      token: ""
+  consulStore:
+    enabled: false
+    endpoint: http://consul:8500
+    token: ""
+
+  oauth2:
+    enabled: false
+    cookieName: ""
+    keys:
+      - http://keycloak:8080/realms/capi/protocol/openid-connect/certs
+
+  opa:
+    enabled: false
+    endpoint: http://opa:8181
+
+  traces:
+    enabled: false
+    serviceName: capi
+    endpoint: http://otel-collector:4318
+    extraMetadataPrefix: ""
+
+  corsEnabled: false
+  allowedHeaders:
+    - Origin
+    - Accept
+    - X-Requested-With
+    - Content-Type
+    - Access-Control-Request-Method
+    - Authorization
+
+  loggingTraces:
+    enabled: false
+    tenant: capi
+    appName: capi
+    appEnvironment: dev
+    destination: localhost:5444
+
+  accessLogs:
+    enabled: false
+    tenant: capi
+    service: capi
+    destination: localhost:5444
+
+  jvmOpts: "-XX:+UseG1GC -Xms512m -Xmx512m -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/capi/logs/"
+
+service:
+  type: ClusterIP
+  restPort: 8380
+  adminPort: 8381
+  websocketPort: 8382
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: capi.local
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls: []
+  #  - secretName: capi-tls
+  #    hosts:
+  #      - capi.local
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

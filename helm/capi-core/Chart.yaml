@@ -1,0 +1,6 @@
+apiVersion: v2
+name: capi-core
+description: A Helm chart for CAPI API gateway
+type: application
+version: 0.1.0
+appVersion: "1.417.0"
