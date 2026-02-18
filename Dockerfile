@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y maven && \
 
 FROM eclipse-temurin:23-jre
 WORKDIR /app
-COPY --from=build /app/target/capi-core-1.0-SNAPSHOT.jar app.jar
+COPY --from=build /app/target/capi-core-*.jar app.jar
 COPY config/config.yaml /capi/config/config.yaml
 ENV CAPI_CONFIG_FILE=/capi/config/config.yaml
 ENTRYPOINT exec java -XX:InitialHeapSize=512m \
