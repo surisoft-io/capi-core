@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "capi-core.fullname" . }}
+  labels:
+    {{- include "capi-core.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "capi-core.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "capi-core.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "capi-core.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.capi.jvmOpts }}
+          args:
+            - {{ .Values.capi.jvmOpts }}
+          {{- end }}
+          env:
+            - name: CAPI_CONFIG_FILE
+              value: /capi/config/config.yaml
+          ports:
+            - name: rest
+              containerPort: {{ .Values.capi.rest.port }}
+              protocol: TCP
+            - name: admin
+              containerPort: {{ .Values.service.adminPort }}
+              protocol: TCP
+            {{- if .Values.capi.websocket.enabled }}
+            - name: websocket
+              containerPort: {{ .Values.capi.websocket.port }}
+              protocol: TCP
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /info/health
+              port: admin
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: rest
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          volumeMounts:
+            - name: config
+              mountPath: /capi/config
+              readOnly: true
+            {{- if or .Values.capi.ssl.enabled .Values.capi.trustStore.enabled }}
+            - name: certs
+              mountPath: /capi/certs
+              readOnly: true
+            {{- end }}
+            - name: logs
+              mountPath: /capi/logs
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "capi-core.fullname" . }}-config
+        {{- if or .Values.capi.ssl.enabled .Values.capi.trustStore.enabled }}
+        - name: certs
+          secret:
+            secretName: {{ include "capi-core.fullname" . }}-certs
+        {{- end }}
+        - name: logs
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

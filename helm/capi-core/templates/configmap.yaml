@@ -1,0 +1,91 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "capi-core.fullname" . }}-config
+  labels:
+    {{- include "capi-core.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    capi:
+      version: {{ .Values.capi.version | quote }}
+      instanceName: {{ .Values.capi.instanceName }}
+      strictToInstanceName: {{ .Values.capi.strictToInstanceName }}
+      publicEndpoint: {{ .Values.capi.publicEndpoint }}
+      runningMode: {{ .Values.capi.runningMode }}
+      adminPort: {{ .Values.service.adminPort }}
+      reverseProxyHost: {{ .Values.capi.reverseProxyHost | quote }}
+      rest:
+        enabled: {{ .Values.capi.rest.enabled }}
+        port: {{ .Values.capi.rest.port }}
+        listeningAddress: {{ .Values.capi.rest.listeningAddress }}
+        contextPath: {{ .Values.capi.rest.contextPath }}
+        connectionRequestTimeout: {{ .Values.capi.rest.connectionRequestTimeout }}
+        requestTimeout: {{ .Values.capi.rest.requestTimeout }}
+        responseTimeout: {{ .Values.capi.rest.responseTimeout }}
+      websocket:
+        enabled: {{ .Values.capi.websocket.enabled }}
+        port: {{ .Values.capi.websocket.port }}
+        listeningAddress: {{ .Values.capi.websocket.listeningAddress }}
+        contextPath: {{ .Values.capi.websocket.contextPath }}
+      ssl:
+        enabled: {{ .Values.capi.ssl.enabled }}
+        keyStoreType: {{ .Values.capi.ssl.keyStoreType }}
+        {{- if .Values.capi.ssl.enabled }}
+        path: /capi/certs/keystore.p12
+        password: {{ .Values.capi.ssl.password }}
+        {{- else }}
+        path:
+        password:
+        {{- end }}
+      trustStore:
+        enabled: {{ .Values.capi.trustStore.enabled }}
+        {{- if .Values.capi.trustStore.enabled }}
+        path: /capi/certs/truststore.jks
+        encoded: {{ .Values.capi.trustStore.encoded | quote }}
+        password: {{ .Values.capi.trustStore.password }}
+        {{- else }}
+        path:
+        encoded:
+        password:
+        {{- end }}
+      consulCatalogDiscoverInterval: {{ .Values.capi.consulCatalogDiscoverInterval }}
+      consulHosts:
+        {{- range .Values.capi.consulHosts }}
+        - endpoint: {{ .endpoint }}
+          token: {{ .token | quote }}
+        {{- end }}
+      consulStore:
+        enabled: {{ .Values.capi.consulStore.enabled }}
+        endpoint: {{ .Values.capi.consulStore.endpoint }}
+        token: {{ .Values.capi.consulStore.token | quote }}
+      oauth2:
+        enabled: {{ .Values.capi.oauth2.enabled }}
+        cookieName: {{ .Values.capi.oauth2.cookieName | quote }}
+        keys:
+          {{- range .Values.capi.oauth2.keys }}
+          - {{ . }}
+          {{- end }}
+      opa:
+        enabled: {{ .Values.capi.opa.enabled }}
+        endpoint: {{ .Values.capi.opa.endpoint }}
+      traces:
+        enabled: {{ .Values.capi.traces.enabled }}
+        serviceName: {{ .Values.capi.traces.serviceName }}
+        endpoint: {{ .Values.capi.traces.endpoint }}
+        extraMetadataPrefix: {{ .Values.capi.traces.extraMetadataPrefix | quote }}
+      corsEnabled: {{ .Values.capi.corsEnabled }}
+      allowedHeaders:
+        {{- range .Values.capi.allowedHeaders }}
+        - {{ . }}
+        {{- end }}
+      loggingTraces:
+        enabled: {{ .Values.capi.loggingTraces.enabled }}
+        tenant: {{ .Values.capi.loggingTraces.tenant }}
+        appName: {{ .Values.capi.loggingTraces.appName }}
+        appEnvironment: {{ .Values.capi.loggingTraces.appEnvironment }}
+        destination: {{ .Values.capi.loggingTraces.destination }}
+      accessLogs:
+        enabled: {{ .Values.capi.accessLogs.enabled }}
+        tenant: {{ .Values.capi.accessLogs.tenant }}
+        service: {{ .Values.capi.accessLogs.service }}
+        destination: {{ .Values.capi.accessLogs.destination }}
