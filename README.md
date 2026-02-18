@@ -6,7 +6,7 @@
 
 <h5 align="center">
   <br>
-  <a href="https://github.com/surisoft-io/capi-lb/issues/new?assignees=&labels=use+case&template=use_case.md&title=%5BUSECASE%5D+">
+  <a href="https://github.com/surisoft-io/capi-core/issues/new?assignees=&labels=use+case&template=use_case.md&title=%5BUSECASE%5D+">
     <img src="https://dummyimage.com/1000x80/15273c/ffffff.png&text=If+you+are+using+CAPI,+please+let+us+know+by+clicking+here" alt="Share your use case with us">
   </a>
   <br>
@@ -15,27 +15,88 @@
 # CAPI Gateway Documentation
 ## _Light Apache Camel API Gateway_
 
-## Supports:
-* Light API Gateway / Load Balancer powered by Apache Camel dynamics routes.
-* Protect your Services using OAUTH2 or OPA (Open Policy Agent).
-* Distributed tracing system (OpenTelemetry)
+## Features
+* Light API Gateway / Load Balancer powered by Apache Camel dynamic routes
+* Protect your services using OAuth2 or OPA (Open Policy Agent)
+* Distributed tracing (OpenTelemetry)
 * Metrics (Prometheus)
-* Metrics for Route management.
-* Load Balancer (Round robin)
-* Failover (With and without Round Robin)
+* Route management and metrics
+* Load balancing (Round Robin)
+* Failover (with and without Round Robin)
 * Certificate Manager
-* No DB is needed, CAPI uses Hashicorp Consul for service discovery
+* No database needed — CAPI uses HashiCorp Consul for service discovery
 * Websocket Gateway
 * SSE Gateway
-* gRPC Gateway
 
-### CAPI Config File Example
+## Quickstart
+
+CAPI requires the `CAPI_CONFIG_FILE` environment variable pointing to a valid configuration file.
+
+### Running from JAR
+
+```bash
+CAPI_CONFIG_FILE=config/config.yaml java -jar capi-core.jar
+```
+
+### Running with Docker
+
+```bash
+docker run -p 8380:8380 -p 8381:8381 \
+  -v $(pwd)/config/config.yaml:/capi/config/config.yaml \
+  -e CAPI_CONFIG_FILE=/capi/config/config.yaml \
+  surisoft/capi-core
+```
+
+### Running with Helm (Kubernetes)
+
+A Helm chart is available in [`helm/capi-core/`](helm/capi-core/).
+
+```bash
+helm install capi-core helm/capi-core
+
+# With custom values
+helm install capi-core helm/capi-core -f my-values.yaml
+
+# Enable SSL and truststore
+helm install capi-core helm/capi-core \
+  --set capi.ssl.enabled=true \
+  --set capi.ssl.keystoreBase64=<base64-encoded-keystore> \
+  --set capi.ssl.password=changeit
+```
+
+See [`helm/capi-core/values.yaml`](helm/capi-core/values.yaml) for all available configuration options.
+
+## Ports
+
+| Port | Description | Config key |
+|------|-------------|------------|
+| 8380 | REST API gateway | `capi.rest.port` |
+| 8381 | Admin / metrics | `capi.adminPort` |
+| 8382 | Websocket gateway | `capi.websocket.port` |
+
+## Running Modes
+
+The `runningMode` field controls which types of services CAPI will proxy:
+
+| Mode | Description |
+|------|-------------|
+| `full` | Proxies REST, Websocket, and SSE services (default) |
+| `websocket` | Only proxies Websocket services |
+| `sse` | Only proxies SSE services |
+
+## Configuration Reference
+
+CAPI is configured via a YAML file. Below is a complete example with all available fields:
+
 ```yaml
-  capi:
+capi:
   version: 1.0.0
   instanceName: default
+  strictToInstanceName: true
+  publicEndpoint: http://localhost:8380/api/
   runningMode: full
   adminPort: 8381
+  reverseProxyHost:
   rest:
     enabled: true
     port: 8380
@@ -45,7 +106,7 @@
     requestTimeout: 5000
     responseTimeout: 120000
   websocket:
-    enabled: true
+    enabled: false
     port: 8382
     listeningAddress: 0.0.0.0
     contextPath: /api/*
@@ -56,23 +117,31 @@
     password:
   trustStore:
     enabled: false
-    path: /some/path
+    path:
     encoded:
     password:
+  consulCatalogDiscoverInterval: 60000
   consulHosts:
     - endpoint: http://localhost:8500
       token:
+  consulStore:
+    enabled: false
+    endpoint: http://localhost:8500
+    token:
   oauth2:
-    enabled: true
+    enabled: false
     cookieName:
     keys:
       - http://localhost:8080/realms/capi/protocol/openid-connect/certs
+  opa:
+    enabled: false
+    endpoint: http://localhost:8181
   traces:
-    enabled: true
+    enabled: false
     serviceName: capi
     endpoint: http://localhost:4318
-    extraMetadataPrefix: ec-
-  corsEnabled: true
+    extraMetadataPrefix:
+  corsEnabled: false
   allowedHeaders:
     - Origin
     - Accept
@@ -80,11 +149,55 @@
     - Content-Type
     - Access-Control-Request-Method
     - Authorization
+  loggingTraces:
+    enabled: false
+    tenant: capi
+    appName: capi
+    appEnvironment: dev
+    destination: localhost:5444
+  accessLogs:
+    enabled: false
+    tenant: capi
+    service: capi
+    destination: localhost:5444
 ```
 
-### Metrics Endpoint
-CAPI Metrics are available on http://localhost:8381/metrics
-* Get statistics about the routes. `/metrics/routes`
-* Get General info. `/metrics/capi`
-* Certificate Management 
+### Config Fields
 
+| Field | Description |
+|-------|-------------|
+| `instanceName` | Name of this CAPI instance (used for multi-instance setups) |
+| `strictToInstanceName` | When `true`, only routes tagged for this instance are proxied |
+| `publicEndpoint` | The externally-reachable URL of this gateway |
+| `runningMode` | Service types to proxy: `full`, `websocket`, or `sse` |
+| `reverseProxyHost` | Override the host header sent to upstream services |
+| `consulCatalogDiscoverInterval` | Interval (ms) for polling Consul for service changes |
+| `consulHosts` | List of Consul agent endpoints for service discovery |
+| `consulStore` | Optional Consul KV store for persisting route configuration |
+| `oauth2` | OAuth2/OIDC protection — provide JWKS endpoint(s) |
+| `opa` | Open Policy Agent integration for fine-grained authorization |
+| `traces` | OpenTelemetry tracing configuration (OTLP HTTP endpoint) |
+| `loggingTraces` | Structured logging traces forwarding |
+| `accessLogs` | Access log forwarding |
+
+## Health Endpoints
+
+| Endpoint | Port | Purpose |
+|----------|------|---------|
+| `GET /health` | REST (8380) | Readiness — checks Consul connectivity |
+| `GET /info/health` | Admin (8381) | Liveness — confirms the process is running |
+
+## Admin Endpoints
+
+All admin endpoints are served on the admin port (default `8381`):
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /info/health` | Health check |
+| `GET /info/metrics` | Prometheus metrics |
+| `GET /info/capi` | General CAPI instance info |
+| `GET /info/routes` | List all managed routes |
+| `GET /info/routes/{id}` | Get a specific route by ID |
+| `GET /info/openapi/{id}` | OpenAPI spec for a route |
+| `GET /info/truststore` | Truststore info |
+| `GET /info/wsroutes` | List active Websocket routes |
