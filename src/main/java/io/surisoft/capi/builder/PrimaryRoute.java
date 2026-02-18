@@ -3,6 +3,7 @@ package io.surisoft.capi.builder;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.surisoft.capi.service.CapiAccessLogReceiver;
+import io.surisoft.capi.service.ConsulNodeDiscovery;
 import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.RouteUtils;
@@ -105,6 +106,20 @@ public class PrimaryRoute extends RouteBuilder {
                 .recipientList(simple("${exchangeProperty.CamelRecipientListEndpoint}"))
                 .routeId("primary-route");
         routeUtils.registerMetric("primary-route");
+
+        String healthScheme = sslEnabled ? "https" : "http";
+        from("undertow:" + healthScheme + "://" + capiRestListeningAddress + ":" + capiRestPort + "/health")
+                .process(exchange -> {
+                    exchange.getIn().setHeader(String.valueOf(Headers.CONTENT_TYPE), "application/json");
+                    if(ConsulNodeDiscovery.isConnectedToConsul()) {
+                        exchange.getIn().setHeader(Exchange.HTTP_RESPONSE_CODE, 200);
+                        exchange.getIn().setBody("{\"status\":\"UP\"}");
+                    } else {
+                        exchange.getIn().setHeader(Exchange.HTTP_RESPONSE_CODE, 503);
+                        exchange.getIn().setBody("{\"status\":\"DOWN\"}");
+                    }
+                })
+                .routeId("health-route");
     }
 
     private void processControlledHeaders(Exchange exchange) {

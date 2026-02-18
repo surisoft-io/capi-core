@@ -7,7 +7,7 @@ capi:
   adminPort: 8381
   reverseProxyHost:
   rest:
-    enabled: false
+    enabled: true
     port: 8380
     listeningAddress: 0.0.0.0
     contextPath: /api
@@ -31,11 +31,11 @@ capi:
     password:
   consulCatalogDiscoverInterval: 60000
   consulHosts:
-    - endpoint: http://localhost:8500
+    - endpoint: http://consul:8500
       token:
   consulStore:
     enabled: false
-    endpoint: http://localhost:8500
+    endpoint: http://consul:8500
     token:
   oauth2:
     enabled: false
@@ -59,13 +59,13 @@ capi:
     - Access-Control-Request-Method
     - Authorization
   loggingTraces:
-    enabled: false
+    enabled: true
     tenant: capi
     appName: capi
     appEnvironment: dev
-    destination: localhost:5444
+    destination: otel-collector:5444
   accessLogs:
-    enabled: false
+    enabled: true
     tenant: capi
     service: capi
-    destination: localhost:5444
+    destination: otel-collector:5444
