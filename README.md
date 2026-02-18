@@ -1,6 +1,8 @@
 <img src="https://capi.surisoft.io/capi-4.4.04.png" alt="CAPI" width="20%"/>
 
 [![CAPI](https://github.com/surisoft-io/capi-core/actions/workflows/main.yaml/badge.svg)](https://github.com/surisoft-io/capi-core/actions/workflows/main.yml)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=surisoft-io_capi-core&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=surisoft-io_capi-core)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=surisoft-io_capi-core&metric=coverage)](https://sonarcloud.io/summary/new_code?id=surisoft-io_capi-core)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 ![Docker Image Version (latest by date)](https://img.shields.io/docker/v/surisoft/capi-core)
 
