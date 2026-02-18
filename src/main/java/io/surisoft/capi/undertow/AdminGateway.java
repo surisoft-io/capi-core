@@ -8,6 +8,7 @@ import io.surisoft.capi.metrics.*;
 import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.schema.WebsocketClient;
 import io.surisoft.capi.service.CapiTrustManager;
+import io.surisoft.capi.service.ConsulNodeDiscovery;
 import io.surisoft.capi.utils.Constants;
 import io.undertow.Undertow;
 import io.undertow.server.HttpServerExchange;
@@ -85,8 +86,13 @@ public class AdminGateway {
 
     private void handleHealth(HttpServerExchange exchange) {
         exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
-        exchange.setStatusCode(StatusCodes.OK);
-        exchange.getResponseSender().send("{\"status\":\"UP\"}");
+        if(ConsulNodeDiscovery.isConnectedToConsul()) {
+            exchange.setStatusCode(StatusCodes.OK);
+            exchange.getResponseSender().send("{\"status\":\"UP\"}");
+        } else {
+            exchange.setStatusCode(StatusCodes.SERVICE_UNAVAILABLE);
+            exchange.getResponseSender().send("{\"status\":\"DOWN\"}");
+        }
     }
 
     private void handleCapiInfo(HttpServerExchange exchange) {
