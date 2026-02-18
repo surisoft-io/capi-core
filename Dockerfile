@@ -10,10 +10,9 @@ WORKDIR /app
 COPY --from=build /app/target/capi-core-*.jar app.jar
 COPY config/config.yaml /capi/config/config.yaml
 ENV CAPI_CONFIG_FILE=/capi/config/config.yaml
-ENTRYPOINT exec java -XX:InitialHeapSize=512m \
-                     -XX:+UseG1GC \
+ENTRYPOINT exec java -XX:+UseG1GC \
                      -XX:MaxGCPauseMillis=100 \
-                     -XX:+ParallelRefProcEnabled \
+                     -Xms512m -Xmx512m \
                      -XX:+HeapDumpOnOutOfMemoryError \
                      -XX:HeapDumpPath=/capi/logs/heap-dump.hprof \
                      -jar app.jar
