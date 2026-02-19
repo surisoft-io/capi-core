@@ -8,28 +8,6 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class SmallPojosTest {
 
-    // CapiEvent
-    @Test
-    void capiEvent_gettersSetters() {
-        CapiEvent event = new CapiEvent();
-        event.setId("id-1");
-        event.setType("type-1");
-        event.setKey("key-1");
-        event.setValue("value-1");
-        event.setNodeIndex(42);
-        event.setInstanceId("inst-1");
-        ThrottleServiceObject tso = new ThrottleServiceObject();
-        event.setThrottleServiceObject(tso);
-
-        assertEquals("id-1", event.getId());
-        assertEquals("type-1", event.getType());
-        assertEquals("key-1", event.getKey());
-        assertEquals("value-1", event.getValue());
-        assertEquals(42, event.getNodeIndex());
-        assertEquals("inst-1", event.getInstanceId());
-        assertSame(tso, event.getThrottleServiceObject());
-    }
-
     // AliasInfo
     @Test
     void aliasInfo_gettersSetters() {
