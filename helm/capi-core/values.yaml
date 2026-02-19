@@ -94,6 +94,11 @@ capi:
     service: capi
     destination: localhost:5444
 
+  throttle:
+    enabled: false
+    kubernetesNamespace: ""
+    kubernetesServiceName: ""
+
   jvmOpts: "-XX:+UseG1GC -Xms512m -Xmx512m -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/capi/logs/"
 
 service:

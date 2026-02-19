@@ -89,3 +89,7 @@ data:
         tenant: {{ .Values.capi.accessLogs.tenant }}
         service: {{ .Values.capi.accessLogs.service }}
         destination: {{ .Values.capi.accessLogs.destination }}
+      throttle:
+        enabled: {{ .Values.capi.throttle.enabled }}
+        kubernetesNamespace: {{ .Values.capi.throttle.kubernetesNamespace | quote }}
+        kubernetesServiceName: {{ .Values.capi.throttle.kubernetesServiceName | quote }}
