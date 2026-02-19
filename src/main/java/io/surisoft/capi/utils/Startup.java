@@ -305,7 +305,7 @@ public class Startup {
         contentTypeValidator = new ContentTypeValidator();
         if(configuration.getThrottle() != null && configuration.getThrottle().isEnabled()) {
             log.info("Throttling enabled, starting Hazelcast");
-            throttleProcessor = new ThrottleProcessor(serviceCache, httpUtils, HazelcastCacheConfiguration.createThrottleCache());
+            throttleProcessor = new ThrottleProcessor(serviceCache, httpUtils, HazelcastCacheConfiguration.createThrottleCache(configuration.getThrottle()));
         }
         if(configuration.getOauth2().isEnabled()) {
             authorizationProcessor = new AuthorizationProcessor(httpUtils, serviceCache, opaService);

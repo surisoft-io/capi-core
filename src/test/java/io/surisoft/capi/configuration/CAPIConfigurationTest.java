@@ -555,4 +555,39 @@ class CAPIConfigurationTest {
         al.setDestination("file:///var/log/access.log");
         assertEquals("file:///var/log/access.log", al.getDestination());
     }
+
+    // --- Throttle nested class ---
+
+    @Test
+    void throttle_enabled() {
+        CAPIConfiguration.Throttle throttle = new CAPIConfiguration.Throttle();
+        assertFalse(throttle.isEnabled());
+        throttle.setEnabled(true);
+        assertTrue(throttle.isEnabled());
+    }
+
+    @Test
+    void throttle_kubernetesNamespace() {
+        CAPIConfiguration.Throttle throttle = new CAPIConfiguration.Throttle();
+        assertNull(throttle.getKubernetesNamespace());
+        throttle.setKubernetesNamespace("default");
+        assertEquals("default", throttle.getKubernetesNamespace());
+    }
+
+    @Test
+    void throttle_kubernetesServiceName() {
+        CAPIConfiguration.Throttle throttle = new CAPIConfiguration.Throttle();
+        assertNull(throttle.getKubernetesServiceName());
+        throttle.setKubernetesServiceName("capi");
+        assertEquals("capi", throttle.getKubernetesServiceName());
+    }
+
+    @Test
+    void throttle_getterSetter() {
+        CAPIConfiguration config = new CAPIConfiguration();
+        assertNull(config.getThrottle());
+        CAPIConfiguration.Throttle throttle = new CAPIConfiguration.Throttle();
+        config.setThrottle(throttle);
+        assertSame(throttle, config.getThrottle());
+    }
 }

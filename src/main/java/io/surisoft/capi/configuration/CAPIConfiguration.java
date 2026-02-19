@@ -535,12 +535,26 @@ public class CAPIConfiguration {
 
     public static class Throttle {
         private boolean enabled;
+        private String kubernetesNamespace;
+        private String kubernetesServiceName;
 
         public boolean isEnabled() {
             return enabled;
         }
         public void setEnabled(boolean enabled) {
             this.enabled = enabled;
+        }
+        public String getKubernetesNamespace() {
+            return kubernetesNamespace;
+        }
+        public void setKubernetesNamespace(String kubernetesNamespace) {
+            this.kubernetesNamespace = kubernetesNamespace;
+        }
+        public String getKubernetesServiceName() {
+            return kubernetesServiceName;
+        }
+        public void setKubernetesServiceName(String kubernetesServiceName) {
+            this.kubernetesServiceName = kubernetesServiceName;
         }
     }
 }
