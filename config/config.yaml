@@ -71,3 +71,5 @@ capi:
     destination: localhost:5444
   throttle:
     enabled: false
+    kubernetesNamespace:
+    kubernetesServiceName:
