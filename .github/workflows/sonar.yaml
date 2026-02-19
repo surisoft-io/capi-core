@@ -22,7 +22,4 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           CAPI_CONFIG_FILE: config/config.yaml
         run: >
-          mvn -B verify jacoco:report
-          org.sonarsource.scanner.maven:sonar-maven-plugin:sonar
-          -Dsonar.projectKey=surisoft-io_capi-core
-          -Dsonar.organization=surisoft-io
+          mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=surisoft-io_capi-core
