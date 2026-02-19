@@ -47,9 +47,6 @@ class ConsulNodeDiscoveryTest {
     @Mock
     private WebsocketUtils websocketUtils;
 
-    @Mock
-    private SSEUtils sseUtils;
-
     private ConsulNodeDiscovery consulNodeDiscovery;
 
     private List<CAPIConfiguration.HostConfig> consulHosts;
@@ -154,7 +151,6 @@ class ConsulNodeDiscoveryTest {
             consulNodeDiscovery.setHttpUtils(null);
             consulNodeDiscovery.setCapiRunningMode("full");
             consulNodeDiscovery.setWebsocketClientMap(new HashMap<>());
-            consulNodeDiscovery.setSseClientMap(new HashMap<>());
             consulNodeDiscovery.setMetricsProcessor(null);
             consulNodeDiscovery.setThrottleProcessor(null);
             consulNodeDiscovery.setContentTypeValidator(null);
@@ -771,9 +767,9 @@ class ConsulNodeDiscoveryTest {
 
     @SuppressWarnings("unchecked")
     @Test
-    void processInfo_sseType_createsSseClient() throws Exception {
+    void processInfo_sseType_createsWebsocketClient() throws Exception {
         consulNodeDiscovery.setCapiRunningMode("full");
-        consulNodeDiscovery.setSseClientMap(new HashMap<>());
+        consulNodeDiscovery.setWebsocketClientMap(new HashMap<>());
 
         HttpResponse<String> servicesResponse = mock(HttpResponse.class);
         when(servicesResponse.body()).thenReturn("{\"sse-service\": []}");
@@ -809,18 +805,13 @@ class ConsulNodeDiscoveryTest {
         when(serviceUtils.consulObjectToMapping(any(ConsulObject.class))).thenReturn(mapping);
         when(serviceUtils.checkIfOpenApiIsEnabled(any(Service.class), any(HttpClient.class))).thenReturn(true);
 
-        SSEClient sseClient = new SSEClient();
-        sseClient.setApiId("/sse-service/v1");
-        when(sseUtils.createSSEClient(any(Service.class))).thenReturn(sseClient);
-
-        // Need to set sseUtils via reflection since there is no setter
-        java.lang.reflect.Field sseUtilsField = ConsulNodeDiscovery.class.getDeclaredField("sseUtils");
-        sseUtilsField.setAccessible(true);
-        sseUtilsField.set(consulNodeDiscovery, sseUtils);
+        WebsocketClient wsClient = new WebsocketClient();
+        wsClient.setServiceId("/sse-service/v1");
+        when(websocketUtils.createWebsocketClient(any(Service.class))).thenReturn(wsClient);
 
         consulNodeDiscovery.processInfo();
 
-        verify(sseUtils).createSSEClient(any(Service.class));
+        verify(websocketUtils).createWebsocketClient(any(Service.class));
     }
 
     @SuppressWarnings("unchecked")

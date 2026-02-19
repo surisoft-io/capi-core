@@ -285,24 +285,6 @@ class SmallPojosTest {
         assertEquals("/root", client.getRootContext());
     }
 
-    // SSEClient
-    @Test
-    void sseClient_gettersSetters() {
-        SSEClient client = new SSEClient();
-        Set<Mapping> mappings = new HashSet<>();
-        client.setApiId("sse-svc");
-        client.setPath("/sse");
-        client.setMappingList(mappings);
-        client.setRequiresSubscription(true);
-        client.setSubscriptionRole("viewer");
-
-        assertEquals("sse-svc", client.getApiId());
-        assertEquals("/sse", client.getPath());
-        assertSame(mappings, client.getMappingList());
-        assertTrue(client.isRequiresSubscription());
-        assertEquals("viewer", client.getSubscriptionRole());
-    }
-
     // Mapping
     @Test
     void mapping_gettersSetters() {

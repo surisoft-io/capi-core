@@ -11,13 +11,11 @@ import io.swagger.v3.oas.models.Operation;
 import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
 import org.cache2k.Cache;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.text.ParseException;
 
 public class OpenApiProcessor implements Processor {
-    private static final Logger log = LoggerFactory.getLogger(OpenApiProcessor.class);
+
     private final OpenAPI openAPI;
     private final HttpUtils httpUtils;
     private final Cache<String, Service> serviceCache;

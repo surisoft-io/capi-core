@@ -52,10 +52,8 @@ public class ConsulNodeDiscovery {
     private String capiRunningMode;
 
     private WebsocketUtils websocketUtils;
-    private SSEUtils sseUtils;
 
     private Map<String, WebsocketClient> websocketClientMap;
-    private Map<String, SSEClient> sseClientMap;
 
     private MetricsProcessor metricsProcessor;
     private ThrottleProcessor throttleProcessor;
@@ -444,20 +442,13 @@ public class ConsulNodeDiscovery {
     private void createRoute(Service incomingService) {
         if(incomingService.getServiceMeta().getState() == null || incomingService.getServiceMeta().getState().equals(State.PUBLISHED)) {
             serviceCache.put(incomingService.getId(), incomingService);
-            if(incomingService.getServiceMeta().getType().equalsIgnoreCase(Constants.WEBSOCKET_TYPE) &&
-                    (capiRunningMode.equalsIgnoreCase(Constants.WEBSOCKET_TYPE) || capiRunningMode.equalsIgnoreCase(Constants.FULL_TYPE)) && websocketUtils != null) {
+            if((incomingService.getServiceMeta().getType().equalsIgnoreCase(Constants.WEBSOCKET_TYPE) ||
+                    incomingService.getServiceMeta().getType().equalsIgnoreCase(Constants.SSE_TYPE)) &&
+                    (capiRunningMode.equalsIgnoreCase(Constants.WEBSOCKET_TYPE) || capiRunningMode.equalsIgnoreCase(Constants.SSE_TYPE) || capiRunningMode.equalsIgnoreCase(Constants.FULL_TYPE)) && websocketUtils != null) {
                 WebsocketClient websocketClient = websocketUtils.createWebsocketClient(incomingService);
                 if(websocketClient != null && websocketClientMap != null) {
                     websocketClientMap.put(websocketClient.getServiceId(), websocketClient);
                 }
-            } else if(incomingService.getServiceMeta().getType().equalsIgnoreCase(Constants.SSE_TYPE) &&
-                    (capiRunningMode.equalsIgnoreCase(Constants.SSE_TYPE) || capiRunningMode.equalsIgnoreCase(Constants.FULL_TYPE))) {
-                log.trace("Creating SSE client for service: {}", incomingService.getId());
-                SSEClient sseClient = sseUtils.createSSEClient(incomingService);
-                if(sseClient != null && sseClientMap != null) {
-                    sseClientMap.put(sseClient.getApiId(), sseClient);
-                }
-
             } else if(capiContext != null && capiRunningMode.equalsIgnoreCase(Constants.FULL_TYPE) && (incomingService.getServiceMeta().getType() == null || incomingService.getServiceMeta().getType().equals("rest"))) {
                 List<String> apiRouteIdList = routeUtils.getAllRouteIdForAGivenService(incomingService);
                 for(String routeId : apiRouteIdList) {
@@ -465,7 +456,6 @@ public class ConsulNodeDiscovery {
                     if(existingRoute == null) {
                         try {
                             DirectRouteProcessor directRouteProcessor = new DirectRouteProcessor(camelContext, incomingService, routeUtils, metricsProcessor, routeId, capiContext, reverseProxyHost, contentTypeValidator, throttleProcessor);
-                            directRouteProcessor.setHttpUtils(httpUtils);
                             directRouteProcessor.setOpaService(opaService);
                             directRouteProcessor.setServiceCache(serviceCache);
                             camelContext.addRoutes(directRouteProcessor);
@@ -492,10 +482,6 @@ public class ConsulNodeDiscovery {
 
     public void setWebsocketClientMap(Map<String, WebsocketClient> websocketClientMap) {
         this.websocketClientMap = websocketClientMap;
-    }
-
-    public void setSseClientMap(Map<String, SSEClient> sseClientMap) {
-        this.sseClientMap = sseClientMap;
     }
 
     public static boolean isConnectedToConsul() {

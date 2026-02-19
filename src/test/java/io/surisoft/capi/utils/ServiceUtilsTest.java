@@ -41,7 +41,7 @@ class ServiceUtilsTest {
     @BeforeEach
     void setUp() {
         httpUtils = new HttpUtils(null, null);
-        serviceUtils = new ServiceUtils(httpUtils, Optional.empty(), Optional.empty(), null, null, Optional.empty(), "full");
+        serviceUtils = new ServiceUtils(httpUtils, Optional.empty(), null, null, Optional.empty(), "full");
     }
 
     @Test
@@ -389,7 +389,7 @@ class ServiceUtilsTest {
     @Test
     void updateExistingService_changed_redeploysService() throws Exception {
         when(camelContext.getRouteController()).thenReturn(routeController);
-        ServiceUtils spyServiceUtils = new ServiceUtils(httpUtils, Optional.empty(), Optional.empty(), routeUtils, camelContext, Optional.empty(), "full");
+        ServiceUtils spyServiceUtils = new ServiceUtils(httpUtils, Optional.empty(), routeUtils, camelContext, Optional.empty(), "full");
 
         Service existing = createServiceWithMapping("svc", "dev", "host1", 8080);
         existing.setId("svc:dev");
@@ -407,7 +407,7 @@ class ServiceUtilsTest {
 
     @Test
     void updateExistingService_notChanged_returnsFalse() {
-        ServiceUtils spyServiceUtils = new ServiceUtils(httpUtils, Optional.empty(), Optional.empty(), routeUtils, camelContext, Optional.empty(), "full");
+        ServiceUtils spyServiceUtils = new ServiceUtils(httpUtils, Optional.empty(), routeUtils, camelContext, Optional.empty(), "full");
 
         Service existing = createServiceWithMapping("svc", "dev", "host1", 8080);
         existing.setId("svc:dev");
@@ -428,7 +428,7 @@ class ServiceUtilsTest {
         wc.setServiceId("svc:dev");
         wsMap.put("svc:dev", wc);
 
-        ServiceUtils wsServiceUtils = new ServiceUtils(httpUtils, Optional.of(wsMap), Optional.empty(), routeUtils, camelContext, Optional.empty(), "full");
+        ServiceUtils wsServiceUtils = new ServiceUtils(httpUtils, Optional.of(wsMap), routeUtils, camelContext, Optional.empty(), "full");
 
         Service existing = createServiceWithMapping("svc", "dev", "host1", 8080);
         existing.setId("svc:dev");
@@ -443,16 +443,17 @@ class ServiceUtilsTest {
     }
 
     @Test
-    void updateExistingService_sseType_removesFromSseMap() throws Exception {
-        Map<String, SSEClient> sseMap = new HashMap<>();
-        SSEClient sc = new SSEClient();
-        sc.setApiId("svc:dev");
-        sseMap.put("svc:dev", sc);
+    void updateExistingService_sseType_removesFromWebsocketMap() throws Exception {
+        Map<String, WebsocketClient> wsMap = new HashMap<>();
+        WebsocketClient wc = new WebsocketClient();
+        wc.setServiceId("svc:dev");
+        wsMap.put("svc:dev", wc);
 
-        ServiceUtils sseServiceUtils = new ServiceUtils(httpUtils, Optional.empty(), Optional.of(sseMap), routeUtils, camelContext, Optional.empty(), "full");
+        ServiceUtils sseServiceUtils = new ServiceUtils(httpUtils, Optional.of(wsMap), routeUtils, camelContext, Optional.empty(), "full");
 
         Service existing = createServiceWithMapping("svc", "dev", "host1", 8080);
         existing.setId("svc:dev");
+        existing.setContext("/svc/dev");
         existing.getServiceMeta().setType("sse");
         Service incoming = createServiceWithMapping("svc", "dev", "host2", 9090);
         incoming.setId("svc:dev");
@@ -469,7 +470,7 @@ class ServiceUtilsTest {
         Map<String, WebsocketClient> wsMap = new HashMap<>();
         wsMap.put("/svc/dev", new WebsocketClient());
 
-        ServiceUtils wsServiceUtils = new ServiceUtils(httpUtils, Optional.of(wsMap), Optional.empty(), routeUtils, camelContext, Optional.of(websocketUtils), "full");
+        ServiceUtils wsServiceUtils = new ServiceUtils(httpUtils, Optional.of(wsMap), routeUtils, camelContext, Optional.of(websocketUtils), "full");
 
         Service service = createService("svc", "dev");
         service.setContext("/svc/dev");
@@ -480,24 +481,24 @@ class ServiceUtilsTest {
     }
 
     @Test
-    void removeUnusedService_sseType_removesFromMap() throws Exception {
-        Map<String, SSEClient> sseMap = new HashMap<>();
-        sseMap.put("/svc/dev", new SSEClient());
+    void removeUnusedService_sseType_removesFromWebsocketMap() throws Exception {
+        Map<String, WebsocketClient> wsMap = new HashMap<>();
+        wsMap.put("/svc/dev", new WebsocketClient());
 
-        ServiceUtils sseServiceUtils = new ServiceUtils(httpUtils, Optional.empty(), Optional.of(sseMap), routeUtils, camelContext, Optional.empty(), "full");
+        ServiceUtils sseServiceUtils = new ServiceUtils(httpUtils, Optional.of(wsMap), routeUtils, camelContext, Optional.of(websocketUtils), "full");
 
         Service service = createService("svc", "dev");
         service.setContext("/svc/dev");
         service.getServiceMeta().setType("sse");
 
         sseServiceUtils.removeUnusedService(camelContext, routeUtils, service);
-        assertFalse(sseMap.containsKey("/svc/dev"));
+        verify(websocketUtils).removeClientFromMap(wsMap, service);
     }
 
     @Test
     void removeUnusedService_restType_removesRoutes() throws Exception {
         when(camelContext.getRouteController()).thenReturn(routeController);
-        ServiceUtils restServiceUtils = new ServiceUtils(httpUtils, Optional.empty(), Optional.empty(), routeUtils, camelContext, Optional.empty(), "full");
+        ServiceUtils restServiceUtils = new ServiceUtils(httpUtils, Optional.empty(), routeUtils, camelContext, Optional.empty(), "full");
 
         Service service = createServiceWithMapping("svc", "dev", "host1", 8080);
         service.setId("svc:dev");
@@ -515,7 +516,7 @@ class ServiceUtilsTest {
 
     @Test
     void checkIfOpenApiIsEnabled_notFullMode_returnsTrue() {
-        ServiceUtils notFullServiceUtils = new ServiceUtils(httpUtils, Optional.empty(), Optional.empty(), routeUtils, camelContext, Optional.empty(), "websocket");
+        ServiceUtils notFullServiceUtils = new ServiceUtils(httpUtils, Optional.empty(), routeUtils, camelContext, Optional.empty(), "websocket");
 
         Service service = createService("svc", "dev");
         service.getServiceMeta().setOpenApiEndpoint("http://example.com/api-docs");

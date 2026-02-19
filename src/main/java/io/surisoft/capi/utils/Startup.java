@@ -298,7 +298,7 @@ public class Startup {
     }
 
     private void startServiceUtils() {
-        serviceUtils = new ServiceUtils(httpUtils, null, null, routeUtils, camelContext, null, configuration.getRunningMode());
+        serviceUtils = new ServiceUtils(httpUtils, null, routeUtils, camelContext, null, configuration.getRunningMode());
     }
 
     private void createRouteProcessors() {
