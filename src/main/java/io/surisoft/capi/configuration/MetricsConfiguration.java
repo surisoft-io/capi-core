@@ -53,10 +53,11 @@ public class MetricsConfiguration {
         // JVM metrics
         new ClassLoaderMetrics().bindTo(prometheus);
         new JvmMemoryMetrics().bindTo(prometheus);
-        new JvmGcMetrics().bindTo(prometheus);
+        try (JvmGcMetrics jvmGcMetrics = new JvmGcMetrics()) {
+            jvmGcMetrics.bindTo(prometheus);
+        }
         new JvmThreadMetrics().bindTo(prometheus);
         new ProcessorMetrics().bindTo(prometheus);
-
 
         compositeMeterRegistry.add(prometheus);
         return compositeMeterRegistry;
