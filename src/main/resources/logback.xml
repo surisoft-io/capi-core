@@ -46,27 +46,6 @@
 </condition>
 <if>
     <then>
-        <!--appender name="LOGSTASH" class="io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender">
-            <destination>${logsDestination}</destination>
-            <keepAliveDuration>5 minutes</keepAliveDuration>
-            <connectionTimeout>5s</connectionTimeout>
-            <writeTimeout>5s</writeTimeout>
-            <reconnectionDelay>10s</reconnectionDelay>
-            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
-                <customFields>
-                    {
-                    "tenant":"${logsTenant}",
-                    "appName":"${logsAppName}",
-                    "appEnvironment":"${logsAppEnvironment}",
-                    "host":"${accessLogsDestination}"
-                    }
-                </customFields>
-                <includeMdc>true</includeMdc>
-                <includeContext>true</includeContext>
-                <includeStructuredArguments>true</includeStructuredArguments>
-            </encoder>
-
-        </appender-->
         <appender name="LOGSTASH" class="net.logstash.logback.appender.LogstashTcpSocketAppender">
             <destination>${logsDestination}</destination>
             <keepAliveDuration>5 minutes</keepAliveDuration>
@@ -120,25 +99,17 @@
     <!-- Pattern with trace/span support -->
     <property name="LOG_PATTERN"
               value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"/>
-
     <!-- Console appender -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
             <pattern>${LOG_PATTERN}</pattern>
         </encoder>
     </appender>
-
-
-
     <!-- Root logger -->
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>
         <appender-ref ref="LOGSTASH"/>
     </root>
-    <!--logger name="io.surisoft.capi" additivity="false" level="TRACE">
-        <appender-ref ref="LOGSTASH"/>
-    </logger-->
-
     <if condition='Boolean.parseBoolean(property("accessLogsEnabled"))'>
         <then>
             <logger name="capi.access" level="INFO" additivity="false">
@@ -146,6 +117,4 @@
             </logger>
         </then>
     </if>
-
-
 </configuration>

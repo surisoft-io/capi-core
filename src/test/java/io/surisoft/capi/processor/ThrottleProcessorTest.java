@@ -1,17 +1,23 @@
 package io.surisoft.capi.processor;
 
+import com.hazelcast.config.Config;
+import com.hazelcast.core.Hazelcast;
+import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.map.IMap;
 import io.surisoft.capi.exception.AuthorizationException;
-import io.surisoft.capi.kafka.CapiInstance;
 import io.surisoft.capi.oidc.Oauth2Constants;
 import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.schema.ServiceMeta;
+import io.surisoft.capi.schema.ThrottleServiceObject;
 import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.HttpUtils;
 import org.apache.camel.Exchange;
 import org.apache.camel.Message;
 import org.cache2k.Cache;
 import org.cache2k.Cache2kBuilder;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -33,7 +39,24 @@ class ThrottleProcessorTest {
 
     private Cache<String, Service> serviceCache;
     private ThrottleProcessor throttleProcessor;
-    private final CapiInstance capiInstance = new CapiInstance("test-uuid");
+
+    private static HazelcastInstance hazelcastInstance;
+    private static IMap<String, ThrottleServiceObject> throttleMap;
+
+    @BeforeAll
+    static void startHazelcast() {
+        Config config = new Config();
+        config.setClusterName("capi-throttle-test");
+        hazelcastInstance = Hazelcast.newHazelcastInstance(config);
+        throttleMap = hazelcastInstance.getMap("throttle-test-cache");
+    }
+
+    @AfterAll
+    static void stopHazelcast() {
+        if (hazelcastInstance != null) {
+            hazelcastInstance.shutdown();
+        }
+    }
 
     @BeforeEach
     void setUp() {
@@ -41,7 +64,8 @@ class ThrottleProcessorTest {
                 .name("throttleTestCache-" + System.nanoTime())
                 .eternal(true)
                 .build();
-        throttleProcessor = new ThrottleProcessor(serviceCache, httpUtils, "test-topic", capiInstance);
+        throttleMap.clear();
+        throttleProcessor = new ThrottleProcessor(serviceCache, httpUtils, throttleMap);
     }
 
     @AfterEach
@@ -56,7 +80,6 @@ class ThrottleProcessorTest {
         when(exchange.getIn()).thenReturn(message);
         when(message.getHeader(Oauth2Constants.CAMEL_SERVLET_CONTEXT_PATH)).thenReturn("/test/path");
         when(httpUtils.contextToRole("/test/path")).thenReturn("test:path");
-        // serviceCache has no entry for "test:path", so service is null
 
         throttleProcessor.process(exchange);
 
@@ -64,10 +87,10 @@ class ThrottleProcessorTest {
     }
 
     @Test
-    void process_globalThrottle_cannotContinue_setsException() throws Exception {
+    void process_globalThrottle_firstCall_allows() throws Exception {
         ServiceMeta serviceMeta = new ServiceMeta();
         serviceMeta.setThrottleGlobal(true);
-        serviceMeta.setThrottleDuration(1000);
+        serviceMeta.setThrottleDuration(60000);
         serviceMeta.setThrottleTotalCalls(10);
 
         Service service = new Service();
@@ -82,10 +105,32 @@ class ThrottleProcessorTest {
 
         throttleProcessor.process(exchange);
 
-        // canContinue always returns false (logic is commented out), so exception should be set
-        verify(exchange).setProperty(Constants.REASON_MESSAGE_HEADER, "Too Many requests");
-        verify(message).setHeader(Constants.REASON_MESSAGE_HEADER, "Too Many requests");
-        verify(message).setHeader(Constants.REASON_CODE_HEADER, 407);
+        verify(exchange, never()).setException(any());
+    }
+
+    @Test
+    void process_globalThrottle_exceedingLimit_setsException() throws Exception {
+        ServiceMeta serviceMeta = new ServiceMeta();
+        serviceMeta.setThrottleGlobal(true);
+        serviceMeta.setThrottleDuration(60000);
+        serviceMeta.setThrottleTotalCalls(1);
+
+        Service service = new Service();
+        service.setId("test-service-exceed");
+        service.setServiceMeta(serviceMeta);
+
+        serviceCache.put("test:path", service);
+
+        when(exchange.getIn()).thenReturn(message);
+        when(message.getHeader(Oauth2Constants.CAMEL_SERVLET_CONTEXT_PATH)).thenReturn("/test/path");
+        when(httpUtils.contextToRole("/test/path")).thenReturn("test:path");
+
+        // First call — creates entry (currentCalls=1), allowed
+        throttleProcessor.process(exchange);
+        verify(exchange, never()).setException(any());
+
+        // Second call — canCall: currentCalls(1) < totalCallsAllowed(1) = false -> throttled
+        throttleProcessor.process(exchange);
         verify(exchange).setException(any(AuthorizationException.class));
     }
 
@@ -134,12 +179,12 @@ class ThrottleProcessorTest {
     }
 
     @Test
-    void process_consumerThrottle_withHeaders_cannotContinue_setsException() throws Exception {
+    void process_consumerThrottle_withHeaders_firstCall_allows() throws Exception {
         ServiceMeta serviceMeta = new ServiceMeta();
         serviceMeta.setThrottleGlobal(false);
 
         Service service = new Service();
-        service.setId("test-service");
+        service.setId("test-service-consumer");
         service.setServiceMeta(serviceMeta);
 
         serviceCache.put("test:path", service);
@@ -148,16 +193,12 @@ class ThrottleProcessorTest {
         when(message.getHeader(Oauth2Constants.CAMEL_SERVLET_CONTEXT_PATH)).thenReturn("/test/path");
         when(httpUtils.contextToRole("/test/path")).thenReturn("test:path");
         when(message.getHeader(Constants.CAPI_META_THROTTLE_CONSUMER_KEY)).thenReturn("consumer-123");
-        when(message.getHeader(Constants.CAPI_META_THROTTLE_DURATION)).thenReturn(5000L);
+        when(message.getHeader(Constants.CAPI_META_THROTTLE_DURATION)).thenReturn(60000L);
         when(message.getHeader(Constants.CAPI_META_THROTTLE_TOTAL_CALLS_ALLOWED)).thenReturn(100L);
 
         throttleProcessor.process(exchange);
 
-        // canContinue always returns false (logic is commented out)
-        verify(exchange).setProperty(Constants.REASON_MESSAGE_HEADER, "Too Many requests");
-        verify(message).setHeader(Constants.REASON_MESSAGE_HEADER, "Too Many requests");
-        verify(message).setHeader(Constants.REASON_CODE_HEADER, 407);
-        verify(exchange).setException(any(AuthorizationException.class));
+        verify(exchange, never()).setException(any());
     }
 
     @Test
@@ -186,15 +227,84 @@ class ThrottleProcessorTest {
         when(exchange.getIn()).thenReturn(message);
         when(message.getHeader(Oauth2Constants.CAMEL_SERVLET_CONTEXT_PATH)).thenThrow(new RuntimeException("test error"));
 
-        // Should not throw - exception is caught internally
         assertDoesNotThrow(() -> throttleProcessor.process(exchange));
     }
 
     @Test
-    void canContinue_alwaysReturnsFalse() {
+    void canContinue_firstCall_returnsTrue() {
         Service service = new Service();
-        // Since the logic is commented out, canContinue always returns false
-        assertFalse(throttleProcessor.canContinue(exchange, service, null, false, -1, -1));
-        assertFalse(throttleProcessor.canContinue(exchange, service, "consumer-key", true, 100, 5000));
+        service.setId("svc-first-call");
+        ServiceMeta meta = new ServiceMeta();
+        meta.setThrottleTotalCalls(10);
+        meta.setThrottleDuration(60000);
+        service.setServiceMeta(meta);
+
+        assertTrue(throttleProcessor.canContinue(service, null, false, -1, -1));
+    }
+
+    @Test
+    void canContinue_withinLimit_returnsTrue() {
+        Service service = new Service();
+        service.setId("svc-within-limit");
+        ServiceMeta meta = new ServiceMeta();
+        meta.setThrottleTotalCalls(5);
+        meta.setThrottleDuration(60000);
+        service.setServiceMeta(meta);
+
+        // Call multiple times within limit
+        for (int i = 0; i < 4; i++) {
+            assertTrue(throttleProcessor.canContinue(service, null, false, -1, -1));
+        }
+    }
+
+    @Test
+    void canContinue_exceedingLimit_returnsFalse() {
+        Service service = new Service();
+        service.setId("svc-exceed-limit-v2");
+        ServiceMeta meta = new ServiceMeta();
+        meta.setThrottleTotalCalls(3);
+        meta.setThrottleDuration(60000);
+        service.setServiceMeta(meta);
+
+        assertTrue(throttleProcessor.canContinue(service, null, false, -1, -1));
+        assertTrue(throttleProcessor.canContinue(service, null, false, -1, -1));
+        assertTrue(throttleProcessor.canContinue(service, null, false, -1, -1));
+        assertFalse(throttleProcessor.canContinue(service, null, false, -1, -1));
+    }
+
+    @Test
+    void canContinue_expiredEntry_resets() throws InterruptedException {
+        Service service = new Service();
+        service.setId("svc-expired");
+        ServiceMeta meta = new ServiceMeta();
+        meta.setThrottleTotalCalls(2);
+        meta.setThrottleDuration(100); // 100ms expiration
+        service.setServiceMeta(meta);
+
+        assertTrue(throttleProcessor.canContinue(service, null, false, -1, -1));
+        assertTrue(throttleProcessor.canContinue(service, null, false, -1, -1));
+        assertFalse(throttleProcessor.canContinue(service, null, false, -1, -1));
+
+        // Wait for expiration
+        Thread.sleep(150);
+
+        // Should reset and allow again
+        assertTrue(throttleProcessor.canContinue(service, null, false, -1, -1));
+    }
+
+    @Test
+    void canContinue_consumerBased_differentKeys() {
+        Service service = new Service();
+        service.setId("svc-consumer");
+        ServiceMeta meta = new ServiceMeta();
+        service.setServiceMeta(meta);
+
+        // Consumer A: limit of 2
+        assertTrue(throttleProcessor.canContinue(service, "consumer-A", true, 2, 60000));
+        assertTrue(throttleProcessor.canContinue(service, "consumer-A", true, 2, 60000));
+        assertFalse(throttleProcessor.canContinue(service, "consumer-A", true, 2, 60000));
+
+        // Consumer B: should still be allowed (different key)
+        assertTrue(throttleProcessor.canContinue(service, "consumer-B", true, 2, 60000));
     }
 }

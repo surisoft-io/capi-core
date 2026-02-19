@@ -7,7 +7,6 @@ import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import io.opentelemetry.api.OpenTelemetry;
 import io.surisoft.capi.CAPIMain;
 import io.surisoft.capi.configuration.*;
-import io.surisoft.capi.kafka.CapiInstance;
 import io.surisoft.capi.oidc.Oauth2Provider;
 import io.surisoft.capi.processor.*;
 import io.surisoft.capi.schema.ConsulKeyStoreEntry;
@@ -304,7 +303,10 @@ public class Startup {
     private void createRouteProcessors() {
         metricsProcessor = new MetricsProcessor(meterRegistry);
         contentTypeValidator = new ContentTypeValidator();
-        throttleProcessor = new ThrottleProcessor(serviceCache, httpUtils, "topic", new CapiInstance(UUID.randomUUID().toString()));
+        if(configuration.getThrottle() != null && configuration.getThrottle().isEnabled()) {
+            log.info("Throttling enabled, starting Hazelcast");
+            throttleProcessor = new ThrottleProcessor(serviceCache, httpUtils, HazelcastCacheConfiguration.createThrottleCache());
+        }
         if(configuration.getOauth2().isEnabled()) {
             authorizationProcessor = new AuthorizationProcessor(httpUtils, serviceCache, opaService);
         }

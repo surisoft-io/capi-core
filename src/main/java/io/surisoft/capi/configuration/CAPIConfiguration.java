@@ -25,6 +25,7 @@ public class CAPIConfiguration {
     private Opa opa;
     private LoggingTraces loggingTraces;
     private AccessLogs accessLogs;
+    private Throttle throttle;
 
     public String getVersion() {
         return version;
@@ -523,5 +524,23 @@ public class CAPIConfiguration {
     }
     public void setAccessLogs(AccessLogs accessLogs) {
         this.accessLogs = accessLogs;
+    }
+
+    public Throttle getThrottle() {
+        return throttle;
+    }
+    public void setThrottle(Throttle throttle) {
+        this.throttle = throttle;
+    }
+
+    public static class Throttle {
+        private boolean enabled;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
     }
 }

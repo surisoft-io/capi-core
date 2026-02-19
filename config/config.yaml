@@ -69,3 +69,5 @@ capi:
     tenant: capi
     service: capi
     destination: localhost:5444
+  throttle:
+    enabled: false
