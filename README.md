@@ -29,6 +29,7 @@
 * No database needed — CAPI uses HashiCorp Consul for service discovery
 * Websocket Gateway
 * SSE Gateway
+* Distributed throttling (Hazelcast, with Kubernetes discovery support)
 
 ## Quickstart
 
@@ -162,6 +163,10 @@ capi:
     tenant: capi
     service: capi
     destination: localhost:5444
+  throttle:
+    enabled: false
+    kubernetesNamespace:
+    kubernetesServiceName:
 ```
 
 ### Config Fields
@@ -181,6 +186,45 @@ capi:
 | `traces` | OpenTelemetry tracing configuration (OTLP HTTP endpoint) |
 | `loggingTraces` | Structured logging traces forwarding |
 | `accessLogs` | Access log forwarding |
+| `throttle` | Rate-limiting via distributed Hazelcast cache |
+
+## Throttling
+
+CAPI supports distributed rate-limiting using a Hazelcast cluster. When enabled, throttle state is shared across all CAPI instances.
+
+```yaml
+capi:
+  throttle:
+    enabled: true
+```
+
+### Kubernetes Discovery
+
+By default, Hazelcast uses multicast to discover cluster members. This works for standalone JARs and Docker containers on the same network, but **not in Kubernetes** where multicast is typically blocked.
+
+To run throttling in Kubernetes, set `kubernetesServiceName` to the name of the Kubernetes `Service` that fronts your CAPI pods. Hazelcast will then use the Kubernetes API to discover members instead of multicast.
+
+```yaml
+capi:
+  throttle:
+    enabled: true
+    kubernetesServiceName: capi-core
+    kubernetesNamespace: default
+```
+
+| Field | Description |
+|-------|-------------|
+| `kubernetesServiceName` | K8s Service name for Hazelcast pod discovery. If empty, multicast is used. |
+| `kubernetesNamespace` | K8s namespace to query. Optional — defaults to the pod's own namespace. |
+
+When deploying with the Helm chart, the required `ServiceAccount`, `Role`, and `RoleBinding` are created automatically:
+
+```bash
+helm install capi-core helm/capi-core \
+  --set capi.throttle.enabled=true \
+  --set capi.throttle.kubernetesServiceName=capi-core \
+  --set capi.throttle.kubernetesNamespace=default
+```
 
 ## Health Endpoints
 
