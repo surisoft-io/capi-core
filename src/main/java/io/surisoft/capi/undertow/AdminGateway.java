@@ -24,7 +24,7 @@ import org.slf4j.LoggerFactory;
 import javax.net.ssl.SSLContext;
 import java.util.Map;
 
-public class AdminGateway {
+public class AdminGateway implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(AdminGateway.class);
     private final int port;
@@ -76,6 +76,11 @@ public class AdminGateway {
             log.info("Stopping Admin Gateway on port {}", port);
             server.stop();
         }
+    }
+
+    @Override
+    public void close() {
+        stop();
     }
 
     private void handleMetrics(HttpServerExchange exchange) {
