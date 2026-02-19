@@ -16,6 +16,12 @@ public class HazelcastCacheConfiguration {
     private HazelcastCacheConfiguration() {}
 
     public static IMap<String, ThrottleServiceObject> createThrottleCache(CAPIConfiguration.Throttle throttle) {
+        Config config = buildConfig(throttle);
+        HazelcastInstance instance = Hazelcast.newHazelcastInstance(config);
+        return instance.getMap(MAP_NAME);
+    }
+
+    static Config buildConfig(CAPIConfiguration.Throttle throttle) {
         Config config = new Config();
         config.setClusterName(CLUSTER_NAME);
 
@@ -34,7 +40,6 @@ public class HazelcastCacheConfiguration {
             }
         }
 
-        HazelcastInstance instance = Hazelcast.newHazelcastInstance(config);
-        return instance.getMap(MAP_NAME);
+        return config;
     }
 }
