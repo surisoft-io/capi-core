@@ -14,11 +14,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.text.ParseException;
-import java.util.Optional;
 
-//@ConditionalOnProperty(prefix = "capi.oauth2.provider", name = "enabled", havingValue = "true")
 public class AuthorizationProcessor implements Processor {
-    private static final Logger log = LoggerFactory.getLogger(AuthorizationProcessor.class);
+
     private final HttpUtils httpUtils;
     private final Cache<String, Service> serviceCache;
     private final OpaService opaService;

@@ -26,7 +26,6 @@ public class ServiceUtils {
     private static final Logger log = LoggerFactory.getLogger(ServiceUtils.class);
     private final HttpUtils httpUtils;
     private final Optional<Map<String, WebsocketClient>> websocketClientMap;
-    private final Optional<Map<String, SSEClient>> sseClientMap;
     private final RouteUtils routeUtils;
     private final CamelContext camelContext;
     private final Optional<WebsocketUtils> websocketUtils;
@@ -34,14 +33,12 @@ public class ServiceUtils {
 
     public ServiceUtils(HttpUtils httpUtils,
                         Optional<Map<String, WebsocketClient>> websocketClientMap,
-                        Optional<Map<String, SSEClient>> sseClientMap,
                         RouteUtils routeUtils,
                         CamelContext camelContext,
                         Optional<WebsocketUtils> websocketUtils,
                         String capiRunningMode) {
         this.httpUtils = httpUtils;
         this.websocketClientMap = websocketClientMap;
-        this.sseClientMap = sseClientMap;
         this.routeUtils = routeUtils;
         this.camelContext = camelContext;
         this.websocketUtils = websocketUtils;
@@ -130,17 +127,11 @@ public class ServiceUtils {
     private void redeployService(Service incomingService, Service existingService, Cache<String, Service> serviceCache) {
         log.trace("Changes detected for Service: {}, redeploying routes.", existingService.getId());
         if(existingService.getServiceMeta().getType() != null &&
-                existingService.getServiceMeta().getType().equals(Constants.WEBSOCKET_TYPE) &&
-                incomingService.getServiceMeta().getType().equals(Constants.WEBSOCKET_TYPE) &&
+                (existingService.getServiceMeta().getType().equals(Constants.WEBSOCKET_TYPE) || existingService.getServiceMeta().getType().equals(Constants.SSE_TYPE)) &&
+                (incomingService.getServiceMeta().getType().equals(Constants.WEBSOCKET_TYPE) || incomingService.getServiceMeta().getType().equals(Constants.SSE_TYPE)) &&
                 websocketClientMap.isPresent() &&
                 websocketClientMap.get().containsKey(existingService.getId())) {
             websocketClientMap.get().remove(existingService.getContext());
-        } else if(existingService.getServiceMeta().getType() != null &&
-                existingService.getServiceMeta().getType().equals(Constants.SSE_TYPE) &&
-                incomingService.getServiceMeta().getType().equals(Constants.SSE_TYPE) &&
-                sseClientMap.isPresent() &&
-                sseClientMap.get().containsKey(existingService.getId())) {
-            sseClientMap.get().remove(existingService.getId());
         } else {
             try {
                 List<String> apiRouteIdList = routeUtils.getAllRouteIdForAGivenService(existingService);
@@ -227,10 +218,8 @@ public class ServiceUtils {
 
 
     public void removeUnusedService(CamelContext camelContext, RouteUtils routeUtils, Service service) throws Exception {
-        if(service.getServiceMeta().getType().equals("websocket") && websocketClientMap.isPresent() && websocketUtils.isPresent()) {
+        if((service.getServiceMeta().getType().equals(Constants.WEBSOCKET_TYPE) || service.getServiceMeta().getType().equals(Constants.SSE_TYPE)) && websocketClientMap.isPresent() && websocketUtils.isPresent()) {
             websocketUtils.get().removeClientFromMap(websocketClientMap.get(), service);
-        } else if(service.getServiceMeta().getType().equals("sse") && sseClientMap.isPresent()) {
-            sseClientMap.get().remove(service.getContext());
         } else {
             List<String> serviceRouteIdList = routeUtils.getAllRouteIdForAGivenService(service);
             for (String routeId : serviceRouteIdList) {

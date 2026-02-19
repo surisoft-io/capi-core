@@ -2,7 +2,6 @@ package io.surisoft.capi.processor;
 
 import io.surisoft.capi.exception.AuthorizationException;
 import io.surisoft.capi.kafka.CapiInstance;
-//import io.surisoft.capi.kafka.CapiKafkaEvent;
 import io.surisoft.capi.oidc.Oauth2Constants;
 import io.surisoft.capi.schema.CapiEvent;
 import io.surisoft.capi.schema.Service;
@@ -17,29 +16,19 @@ import org.slf4j.LoggerFactory;
 
 import java.util.UUID;
 
-//@ConditionalOnProperty(prefix = "capi.throttling", name = "enabled", havingValue = "true")
 public class ThrottleProcessor implements Processor {
 
     private static final Logger log = LoggerFactory.getLogger(ThrottleProcessor.class);
     private final Cache<String, Service> serviceCache;
     private final HttpUtils httpUtils;
-
-    //private final Cache<String, ThrottleServiceObject> throttleServiceObjectCache;
-    //private final KafkaTemplate<String, CapiEvent> kafkaTemplate;
-    private final String capiKafkaTopic;
     private final CapiInstance capiInstance;
 
     public ThrottleProcessor(Cache<String, Service> serviceCache,
                              HttpUtils httpUtils,
-                             //ThrottleServiceObject> throttleServiceObjectCache,
-                             //KafkaTemplate<String, CapiEvent> kafkaTemplate,
                              String capiKafkaTopic,
                              CapiInstance capiInstance) {
         this.serviceCache = serviceCache;
         this.httpUtils = httpUtils;
-        //this.throttleServiceObjectCache = throttleServiceObjectCache;
-        //this.kafkaTemplate = kafkaTemplate;
-        this.capiKafkaTopic = capiKafkaTopic;
         this.capiInstance = capiInstance;
     }
 

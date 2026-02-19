@@ -6,8 +6,6 @@ import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
 import org.apache.hc.client5.http.HttpHostConnectException;
 import org.apache.hc.core5.http.NoHttpResponseException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.net.ssl.SSLException;
 import javax.net.ssl.SSLHandshakeException;
@@ -15,7 +13,7 @@ import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 
 public class HttpErrorProcessor implements Processor {
-    private static final Logger log = LoggerFactory.getLogger(HttpErrorProcessor.class);
+
     @Override
     public void process(Exchange exchange) {
         Exception cause = exchange.getProperty(Exchange.EXCEPTION_CAUGHT, Exception.class);

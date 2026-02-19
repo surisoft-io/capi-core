@@ -5,25 +5,19 @@ import io.surisoft.capi.processor.*;
 import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.service.OpaService;
 import io.surisoft.capi.utils.Constants;
-import io.surisoft.capi.utils.HttpUtils;
 import io.surisoft.capi.utils.RouteUtils;
 import org.apache.camel.CamelContext;
-import org.apache.camel.Exchange;
 import org.apache.camel.builder.RouteBuilder;
 import org.apache.camel.model.RouteDefinition;
-import org.apache.camel.model.rest.RestDefinition;
-import org.apache.camel.model.rest.VerbDefinition;
-import org.apache.camel.opentelemetry.SpanCustomizer;
 import org.apache.hc.core5.http.NoHttpResponseException;
 import org.cache2k.Cache;
 
 import javax.net.ssl.SSLHandshakeException;
 import java.net.SocketException;
 import java.net.UnknownHostException;
-import java.util.ArrayList;
-import java.util.List;
 
 public class DirectRouteProcessor extends RouteBuilder {
+
     private final RouteUtils routeUtils;
     private final Service service;
     private final String routeId;
@@ -31,7 +25,6 @@ public class DirectRouteProcessor extends RouteBuilder {
     private final MetricsProcessor metricsProcessor;
     private final String reverseProxyHost;
     private OpaService opaService;
-    private HttpUtils httpUtils;
     private Cache<String, Service> serviceCache;
     private final ContentTypeValidator contentTypeValidator;
     private final ThrottleProcessor throttleProcessor;
@@ -79,7 +72,6 @@ public class DirectRouteProcessor extends RouteBuilder {
             routeDefinition
                 .doTry()
                     .setHeader("CapiServicePath", simple(service.getContext()))
-                    //.process(capiSpanCustomizer)
                     .process(metricsProcessor)
                     .process(contentTypeValidator)
                     .process(exchange -> {
@@ -180,60 +172,13 @@ public class DirectRouteProcessor extends RouteBuilder {
 
         routeUtils.registerMetric(routeId);
         routeUtils.registerTracer(service);
-
-        //build the rest definition for the inline route, default since 4.5.0
-        String restRouteId = Constants.CAMEL_REST_PREFIX + routeId;
-
-        /*RestDefinition restDefinition = getRestDefinition(service);
-        if(restDefinition != null) {
-            restDefinition.to(Constants.CAMEL_DIRECT + routeId);
-            restDefinition.routeId(restRouteId);
-            routeUtils.registerMetric(restRouteId);
-        } else {
-            log.warn("Bad definition for service name: {}, please make sure the service context does not contain colons", service.getContext());
-        }*/
-
-
     }
 
     public void setOpaService(OpaService opaService) {
         this.opaService = opaService;
     }
 
-    public void setHttpUtils(HttpUtils httpUtils) {
-        this.httpUtils = httpUtils;
-    }
-
     public void setServiceCache(Cache<String, Service> serviceCache) {
         this.serviceCache = serviceCache;
-    }
-
-    private RestDefinition getRestDefinition(Service service) {
-        RestDefinition restDefinition;
-        service.setMatchOnUriPrefix(true);
-
-        switch (routeUtils.getMethodFromRouteId(routeId)) {
-            case "get" -> restDefinition = rest().get(routeUtils.buildFrom(service)
-                    + Constants.MATCH_ON_URI_PREFIX
-                    + service.isMatchOnUriPrefix());
-            case "post" -> restDefinition = rest().post(routeUtils.buildFrom(service)
-                    + Constants.MATCH_ON_URI_PREFIX
-                    + service.isMatchOnUriPrefix()
-                    + Constants.MAP_HTTP_MESSAGE_FORM_URL_ENCODED_BODY);
-            case "put" -> restDefinition = rest().put(routeUtils.buildFrom(service)
-                    + Constants.MATCH_ON_URI_PREFIX
-                    + service.isMatchOnUriPrefix()
-                    + Constants.MAP_HTTP_MESSAGE_FORM_URL_ENCODED_BODY);
-            case "delete" -> restDefinition = rest().delete(routeUtils.buildFrom(service)
-                    + Constants.MATCH_ON_URI_PREFIX
-                    + service.isMatchOnUriPrefix());
-            case "patch" -> restDefinition = rest().patch(routeUtils.buildFrom(service)
-                    + Constants.MATCH_ON_URI_PREFIX
-                    + service.isMatchOnUriPrefix());
-            default -> {
-                return null;
-            }
-        }
-        return restDefinition;
     }
 }

@@ -7,11 +7,9 @@ import io.surisoft.capi.processor.ThrottleProcessor;
 import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.schema.ServiceMeta;
 import io.surisoft.capi.service.OpaService;
-import io.surisoft.capi.utils.HttpUtils;
 import io.surisoft.capi.utils.RouteUtils;
 import org.apache.camel.CamelContext;
 import org.apache.camel.impl.DefaultCamelContext;
-import org.apache.camel.model.rest.RestDefinition;
 import org.cache2k.Cache;
 import org.cache2k.Cache2kBuilder;
 import org.junit.jupiter.api.AfterEach;
@@ -23,8 +21,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
-
-import java.lang.reflect.Method;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -45,8 +41,6 @@ class DirectRouteProcessorTest {
     private HttpErrorProcessor httpErrorProcessor;
     @Mock
     private OpaService opaService;
-    @Mock
-    private HttpUtils httpUtils;
 
     private CamelContext camelContext;
     private Cache<String, Service> serviceCache;
@@ -112,7 +106,6 @@ class DirectRouteProcessorTest {
                 contentTypeValidator, throttleProcessor
         );
         processor.setOpaService(opaService);
-        processor.setHttpUtils(httpUtils);
         processor.setServiceCache(serviceCache);
 
         assertDoesNotThrow(() -> camelContext.addRoutes(processor));
@@ -222,17 +215,6 @@ class DirectRouteProcessorTest {
     }
 
     @Test
-    void setHttpUtils_setsField() {
-        Service service = buildService(false, false, false);
-        DirectRouteProcessor processor = new DirectRouteProcessor(
-                camelContext, service, routeUtils, metricsProcessor,
-                "test-service:get:get", "/capi", null,
-                contentTypeValidator, throttleProcessor
-        );
-        assertDoesNotThrow(() -> processor.setHttpUtils(httpUtils));
-    }
-
-    @Test
     void setServiceCache_setsField() {
         Service service = buildService(false, false, false);
         DirectRouteProcessor processor = new DirectRouteProcessor(
@@ -260,7 +242,7 @@ class DirectRouteProcessorTest {
                 contentTypeValidator, throttleProcessor
         );
         processor.setOpaService(opaService);
-        processor.setHttpUtils(httpUtils);
+
         processor.setServiceCache(serviceCache);
 
         assertDoesNotThrow(() -> camelContext.addRoutes(processor));
@@ -280,7 +262,7 @@ class DirectRouteProcessorTest {
                 contentTypeValidator, throttleProcessor
         );
         processor.setOpaService(opaService);
-        processor.setHttpUtils(httpUtils);
+
         processor.setServiceCache(serviceCache);
 
         assertDoesNotThrow(() -> camelContext.addRoutes(processor));
@@ -301,7 +283,7 @@ class DirectRouteProcessorTest {
         );
         processor.setServiceCache(serviceCache);
         processor.setOpaService(opaService);
-        processor.setHttpUtils(httpUtils);
+
 
         assertDoesNotThrow(() -> camelContext.addRoutes(processor));
         verify(routeUtils).registerTracer(service);
@@ -321,7 +303,7 @@ class DirectRouteProcessorTest {
         );
         processor.setServiceCache(serviceCache);
         processor.setOpaService(opaService);
-        processor.setHttpUtils(httpUtils);
+
 
         assertDoesNotThrow(() -> camelContext.addRoutes(processor));
     }
@@ -404,146 +386,9 @@ class DirectRouteProcessorTest {
         );
         processor.setServiceCache(serviceCache);
         processor.setOpaService(opaService);
-        processor.setHttpUtils(httpUtils);
+
 
         assertDoesNotThrow(() -> camelContext.addRoutes(processor));
     }
 
-    // ---------------------------------------------------------------
-    // getRestDefinition - private method tests via reflection
-    // ---------------------------------------------------------------
-
-    private DirectRouteProcessor createProcessorWithRouteId(String routeId) {
-        Service service = buildService(false, false, false);
-        return new DirectRouteProcessor(
-                camelContext, service, routeUtils, metricsProcessor,
-                routeId, "/capi", null,
-                contentTypeValidator, throttleProcessor
-        );
-    }
-
-    @Test
-    void getRestDefinition_get_returnsGetRestDefinition() throws Exception {
-        Service service = buildService(false, false, false);
-        DirectRouteProcessor processor = new DirectRouteProcessor(
-                camelContext, service, routeUtils, metricsProcessor,
-                "test-service:dev:get", "/capi", null,
-                contentTypeValidator, throttleProcessor
-        );
-
-        when(routeUtils.getMethodFromRouteId("test-service:dev:get")).thenReturn("get");
-        when(routeUtils.buildFrom(service)).thenReturn("/test");
-
-        Method getRestDefinition = DirectRouteProcessor.class.getDeclaredMethod("getRestDefinition", Service.class);
-        getRestDefinition.setAccessible(true);
-
-        RestDefinition result = (RestDefinition) getRestDefinition.invoke(processor, service);
-        assertNotNull(result);
-        // Verify it has verb definitions (the get verb was added)
-        assertFalse(result.getVerbs().isEmpty());
-        assertEquals("get", result.getVerbs().get(0).asVerb());
-    }
-
-    @Test
-    void getRestDefinition_post_returnsPostRestDefinition() throws Exception {
-        Service service = buildService(false, false, false);
-        DirectRouteProcessor processor = new DirectRouteProcessor(
-                camelContext, service, routeUtils, metricsProcessor,
-                "test-service:dev:post", "/capi", null,
-                contentTypeValidator, throttleProcessor
-        );
-
-        when(routeUtils.getMethodFromRouteId("test-service:dev:post")).thenReturn("post");
-        when(routeUtils.buildFrom(service)).thenReturn("/test");
-
-        Method getRestDefinition = DirectRouteProcessor.class.getDeclaredMethod("getRestDefinition", Service.class);
-        getRestDefinition.setAccessible(true);
-
-        RestDefinition result = (RestDefinition) getRestDefinition.invoke(processor, service);
-        assertNotNull(result);
-        assertFalse(result.getVerbs().isEmpty());
-        assertEquals("post", result.getVerbs().get(0).asVerb());
-    }
-
-    @Test
-    void getRestDefinition_put_returnsPutRestDefinition() throws Exception {
-        Service service = buildService(false, false, false);
-        DirectRouteProcessor processor = new DirectRouteProcessor(
-                camelContext, service, routeUtils, metricsProcessor,
-                "test-service:dev:put", "/capi", null,
-                contentTypeValidator, throttleProcessor
-        );
-
-        when(routeUtils.getMethodFromRouteId("test-service:dev:put")).thenReturn("put");
-        when(routeUtils.buildFrom(service)).thenReturn("/test");
-
-        Method getRestDefinition = DirectRouteProcessor.class.getDeclaredMethod("getRestDefinition", Service.class);
-        getRestDefinition.setAccessible(true);
-
-        RestDefinition result = (RestDefinition) getRestDefinition.invoke(processor, service);
-        assertNotNull(result);
-        assertFalse(result.getVerbs().isEmpty());
-        assertEquals("put", result.getVerbs().get(0).asVerb());
-    }
-
-    @Test
-    void getRestDefinition_delete_returnsDeleteRestDefinition() throws Exception {
-        Service service = buildService(false, false, false);
-        DirectRouteProcessor processor = new DirectRouteProcessor(
-                camelContext, service, routeUtils, metricsProcessor,
-                "test-service:dev:delete", "/capi", null,
-                contentTypeValidator, throttleProcessor
-        );
-
-        when(routeUtils.getMethodFromRouteId("test-service:dev:delete")).thenReturn("delete");
-        when(routeUtils.buildFrom(service)).thenReturn("/test");
-
-        Method getRestDefinition = DirectRouteProcessor.class.getDeclaredMethod("getRestDefinition", Service.class);
-        getRestDefinition.setAccessible(true);
-
-        RestDefinition result = (RestDefinition) getRestDefinition.invoke(processor, service);
-        assertNotNull(result);
-        assertFalse(result.getVerbs().isEmpty());
-        assertEquals("delete", result.getVerbs().get(0).asVerb());
-    }
-
-    @Test
-    void getRestDefinition_patch_returnsPatchRestDefinition() throws Exception {
-        Service service = buildService(false, false, false);
-        DirectRouteProcessor processor = new DirectRouteProcessor(
-                camelContext, service, routeUtils, metricsProcessor,
-                "test-service:dev:patch", "/capi", null,
-                contentTypeValidator, throttleProcessor
-        );
-
-        when(routeUtils.getMethodFromRouteId("test-service:dev:patch")).thenReturn("patch");
-        when(routeUtils.buildFrom(service)).thenReturn("/test");
-
-        Method getRestDefinition = DirectRouteProcessor.class.getDeclaredMethod("getRestDefinition", Service.class);
-        getRestDefinition.setAccessible(true);
-
-        RestDefinition result = (RestDefinition) getRestDefinition.invoke(processor, service);
-        assertNotNull(result);
-        assertFalse(result.getVerbs().isEmpty());
-        assertEquals("patch", result.getVerbs().get(0).asVerb());
-    }
-
-    @Test
-    void getRestDefinition_unknownMethod_returnsNull() throws Exception {
-        Service service = buildService(false, false, false);
-        DirectRouteProcessor processor = new DirectRouteProcessor(
-                camelContext, service, routeUtils, metricsProcessor,
-                "test-service:dev:options", "/capi", null,
-                contentTypeValidator, throttleProcessor
-        );
-
-        when(routeUtils.getMethodFromRouteId("test-service:dev:options")).thenReturn("options");
-        when(routeUtils.buildFrom(service)).thenReturn("/test");
-
-        Method getRestDefinition = DirectRouteProcessor.class.getDeclaredMethod("getRestDefinition", Service.class);
-        getRestDefinition.setAccessible(true);
-
-        RestDefinition result = (RestDefinition) getRestDefinition.invoke(processor, service);
-        assertNull(result);
-    }
 }
