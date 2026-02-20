@@ -57,13 +57,12 @@ public class Oauth2Provider {
                     JWSKeySelector<SecurityContext> keySelector = new JWSVerificationKeySelector<>(expectedJWSAlg, keySource);
                     jwtProcessor.setJWSKeySelector(keySelector);
                     jwtProcessorList.add(jwtProcessor);
-                    return jwtProcessorList;
                 }
             } catch (URISyntaxException | InterruptedException | IOException | ParseException e) {
                 throw new RuntimeException(e);
             }
         }
-        return null;
+        return jwtProcessorList;
     }
 
     public List<DefaultJWTProcessor<SecurityContext>> getJwtProcessorList() {

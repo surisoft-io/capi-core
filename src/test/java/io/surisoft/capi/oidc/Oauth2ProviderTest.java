@@ -58,16 +58,17 @@ class Oauth2ProviderTest {
     }
 
     @Test
-    void getJwtProcessor_emptyProviderKeys_returnsNull() {
+    void getJwtProcessor_emptyProviderKeys_returnsEmptyList() {
         List<String> keys = new ArrayList<>();
         Oauth2Provider provider = new Oauth2Provider(keys);
 
         List<DefaultJWTProcessor<SecurityContext>> result = provider.getJwtProcessor(null);
-        assertNull(result);
+        assertNotNull(result);
+        assertTrue(result.isEmpty());
     }
 
     @Test
-    void getJwtProcessor_emptyProviderKeys_withSslContext_returnsNull() throws Exception {
+    void getJwtProcessor_emptyProviderKeys_withSslContext_returnsEmptyList() throws Exception {
         SSLContext sslContext = SSLContext.getDefault();
         when(capiSslContextHolder.getSslContext()).thenReturn(sslContext);
 
@@ -75,7 +76,8 @@ class Oauth2ProviderTest {
         Oauth2Provider provider = new Oauth2Provider(keys);
 
         List<DefaultJWTProcessor<SecurityContext>> result = provider.getJwtProcessor(capiSslContextHolder);
-        assertNull(result);
+        assertNotNull(result);
+        assertTrue(result.isEmpty());
     }
 
     @Test
