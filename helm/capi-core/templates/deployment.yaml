@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "capi-core.fullname" . }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "capi-core.labels" . | nindent 4 }}
 spec:

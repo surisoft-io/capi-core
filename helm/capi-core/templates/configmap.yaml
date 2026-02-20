@@ -2,6 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: {{ include "capi-core.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "capi-core.labels" . | nindent 4 }}
 data:

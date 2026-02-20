@@ -9,6 +9,7 @@ import io.surisoft.capi.utils.RouteUtils;
 import org.apache.camel.CamelContext;
 import org.apache.camel.builder.RouteBuilder;
 import org.apache.camel.model.RouteDefinition;
+import org.apache.hc.client5.http.ConnectTimeoutException;
 import org.apache.hc.core5.http.NoHttpResponseException;
 import org.cache2k.Cache;
 
@@ -95,7 +96,7 @@ public class DirectRouteProcessor extends RouteBuilder {
                     .failover(1, false, service.isRoundRobinEnabled(), false)
                     .to(routeUtils.buildEndpoints(service))
                 .endDoTry()
-                .doCatch(SSLHandshakeException.class, SocketException.class, UnknownHostException.class, AuthorizationException.class)
+                .doCatch(SSLHandshakeException.class, SocketException.class, UnknownHostException.class, AuthorizationException.class, NoHttpResponseException.class, ConnectTimeoutException.class)
                     .setHeader(Constants.ERROR_API_SHOW_TRACE_ID, constant(service.getServiceMeta().isB3TraceId()))
                     .process(routeUtils.getHttpErrorProcessor())
                     .setHeader(Constants.ROUTE_ID_HEADER, constant(routeId))
@@ -144,7 +145,7 @@ public class DirectRouteProcessor extends RouteBuilder {
                     })
                 .to(routeUtils.buildEndpoints(service))
                     .endDoTry()
-                    .doCatch(SSLHandshakeException.class, SocketException.class, UnknownHostException.class, AuthorizationException.class, NoHttpResponseException.class)
+                    .doCatch(SSLHandshakeException.class, SocketException.class, UnknownHostException.class, AuthorizationException.class, NoHttpResponseException.class, ConnectTimeoutException.class)
                     .setHeader(Constants.ERROR_API_SHOW_TRACE_ID, constant(service.getServiceMeta().isB3TraceId()))
                     .process(routeUtils.getHttpErrorProcessor())
                     .setHeader(Constants.ROUTE_ID_HEADER, constant(routeId))
