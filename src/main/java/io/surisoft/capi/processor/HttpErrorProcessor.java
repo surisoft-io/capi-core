@@ -4,11 +4,13 @@ import io.surisoft.capi.exception.AuthorizationException;
 import io.surisoft.capi.utils.Constants;
 import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
+import org.apache.hc.client5.http.ConnectTimeoutException;
 import org.apache.hc.client5.http.HttpHostConnectException;
 import org.apache.hc.core5.http.NoHttpResponseException;
 
 import javax.net.ssl.SSLException;
 import javax.net.ssl.SSLHandshakeException;
+import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 
@@ -45,6 +47,10 @@ public class HttpErrorProcessor implements Processor {
         } else if(cause instanceof NoHttpResponseException) {
             exchange.setProperty(Constants.REASON_MESSAGE_HEADER, "Remote server is not responding, or it has a configuration issue");
             exchange.getIn().setHeader(Constants.REASON_MESSAGE_HEADER, "Remote server is not responding, or it has a configuration issue");
+            exchange.getIn().setHeader(Constants.REASON_CODE_HEADER, 502);
+        } else if(cause instanceof ConnectTimeoutException) {
+            exchange.setProperty(Constants.REASON_MESSAGE_HEADER, "The remote server took too long");
+            exchange.getIn().setHeader(Constants.REASON_MESSAGE_HEADER, "The remote server took too long");
             exchange.getIn().setHeader(Constants.REASON_CODE_HEADER, 502);
         }
         exchange.getIn().setHeader(Constants.CAPI_URI_IN_ERROR, exchange.getIn().getHeader(Exchange.HTTP_URI).toString());

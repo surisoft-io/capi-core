@@ -1,0 +1,29 @@
+{{- if and .Values.serviceAccount.create .Values.capi.throttle.enabled (ne .Values.capi.throttle.kubernetesServiceName "") }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "capi-core.fullname" . }}-hazelcast
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "capi-core.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "capi-core.fullname" . }}-hazelcast
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "capi-core.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "capi-core.fullname" . }}-hazelcast
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "capi-core.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
