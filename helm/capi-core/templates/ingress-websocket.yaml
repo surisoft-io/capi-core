@@ -1,0 +1,42 @@
+{{- if and .Values.websocketIngress.enabled .Values.capi.websocket.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "capi-core.fullname" . }}-websocket
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "capi-core.labels" . | nindent 4 }}
+  {{- with .Values.websocketIngress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.websocketIngress.className }}
+  ingressClassName: {{ .Values.websocketIngress.className }}
+  {{- end }}
+  {{- if .Values.websocketIngress.tls }}
+  tls:
+    {{- range .Values.websocketIngress.tls }}
+    - hosts:
+        {{- range .hosts }}
+        - {{ . | quote }}
+        {{- end }}
+      secretName: {{ .secretName }}
+    {{- end }}
+  {{- end }}
+  rules:
+    {{- range .Values.websocketIngress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ include "capi-core.fullname" $ }}
+                port:
+                  name: websocket
+          {{- end }}
+    {{- end }}
+{{- end }}
