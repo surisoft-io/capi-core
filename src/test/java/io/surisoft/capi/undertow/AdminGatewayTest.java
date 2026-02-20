@@ -146,6 +146,223 @@ class AdminGatewayTest {
     // === New tests to increase coverage ===
 
     @Test
+    void handleInfo_returnsLinksJson() throws Exception {
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        HeaderMap headerMap = new HeaderMap();
+        when(exchange.getResponseHeaders()).thenReturn(headerMap);
+        Sender sender = mock(Sender.class);
+        when(exchange.getResponseSender()).thenReturn(sender);
+        when(exchange.getHostAndPort()).thenReturn("localhost:9091");
+
+        Method handleInfo = AdminGateway.class.getDeclaredMethod("handleInfo", HttpServerExchange.class);
+        handleInfo.setAccessible(true);
+        handleInfo.invoke(adminGatewayNoSsl, exchange);
+
+        verify(exchange).setStatusCode(200);
+        verify(sender).send(argThat((String s) ->
+                s.contains("_links") &&
+                s.contains("/info/metrics") &&
+                s.contains("/info/health") &&
+                s.contains("/info/capi") &&
+                s.contains("/info/routes") &&
+                s.contains("/info/openapi/{serviceId}") &&
+                s.contains("/info/truststore") &&
+                s.contains("/info/wsroutes") &&
+                s.contains("http://localhost:9091")
+        ));
+        assertEquals("application/json", headerMap.getFirst(Headers.CONTENT_TYPE));
+    }
+
+    @Test
+    void handleInfo_withSsl_usesHttpsScheme() throws Exception {
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        HeaderMap headerMap = new HeaderMap();
+        when(exchange.getResponseHeaders()).thenReturn(headerMap);
+        Sender sender = mock(Sender.class);
+        when(exchange.getResponseSender()).thenReturn(sender);
+        when(exchange.getHostAndPort()).thenReturn("localhost:9090");
+
+        Method handleInfo = AdminGateway.class.getDeclaredMethod("handleInfo", HttpServerExchange.class);
+        handleInfo.setAccessible(true);
+        handleInfo.invoke(adminGateway, exchange);
+
+        verify(exchange).setStatusCode(200);
+        verify(sender).send(argThat((String s) -> s.contains("https://localhost:9090")));
+    }
+
+    @Test
+    void handleInfo_jsonProcessingError_throwsRuntimeException() throws Exception {
+        ObjectMapper brokenMapper = mock(ObjectMapper.class);
+        when(brokenMapper.writeValueAsString(any())).thenThrow(new com.fasterxml.jackson.core.JsonProcessingException("fail") {});
+
+        Field omField = AdminGateway.class.getDeclaredField("objectMapper");
+        omField.setAccessible(true);
+        omField.set(adminGatewayNoSsl, brokenMapper);
+
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        HeaderMap headerMap = new HeaderMap();
+        when(exchange.getResponseHeaders()).thenReturn(headerMap);
+        when(exchange.getHostAndPort()).thenReturn("localhost:9091");
+
+        Method handleInfo = AdminGateway.class.getDeclaredMethod("handleInfo", HttpServerExchange.class);
+        handleInfo.setAccessible(true);
+
+        Exception thrown = assertThrows(Exception.class, () -> handleInfo.invoke(adminGatewayNoSsl, exchange));
+        assertTrue(thrown.getCause() instanceof RuntimeException);
+    }
+
+    @Test
+    void handleCapiInfo_jsonProcessingError_throwsRuntimeException() throws Exception {
+        ObjectMapper brokenMapper = mock(ObjectMapper.class);
+        when(brokenMapper.writeValueAsString(any())).thenThrow(new com.fasterxml.jackson.core.JsonProcessingException("fail") {});
+
+        Field omField = AdminGateway.class.getDeclaredField("objectMapper");
+        omField.setAccessible(true);
+        omField.set(adminGateway, brokenMapper);
+
+        when(camelContext.getUptime()).thenReturn(Duration.ofMinutes(1));
+        when(camelContext.getVersion()).thenReturn("4.17.0");
+        when(camelContext.getRoutesSize()).thenReturn(0);
+        when(capiConfiguration.getVersion()).thenReturn("1.0");
+        when(capiConfiguration.getInstanceName()).thenReturn("test");
+
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        HeaderMap headerMap = new HeaderMap();
+        when(exchange.getResponseHeaders()).thenReturn(headerMap);
+
+        Method handleCapiInfo = AdminGateway.class.getDeclaredMethod("handleCapiInfo", HttpServerExchange.class);
+        handleCapiInfo.setAccessible(true);
+
+        Exception thrown = assertThrows(Exception.class, () -> handleCapiInfo.invoke(adminGateway, exchange));
+        assertTrue(thrown.getCause() instanceof RuntimeException);
+    }
+
+    @Test
+    void handleRoutesInfo_jsonProcessingError_throwsRuntimeException() throws Exception {
+        ObjectMapper brokenMapper = mock(ObjectMapper.class);
+        when(brokenMapper.writeValueAsString(any())).thenThrow(new com.fasterxml.jackson.core.JsonProcessingException("fail") {});
+
+        AdminGateway gw = new AdminGateway(9093, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager);
+        Field omField = AdminGateway.class.getDeclaredField("objectMapper");
+        omField.setAccessible(true);
+        omField.set(gw, brokenMapper);
+
+        when(camelContext.getRoutes()).thenReturn(java.util.Collections.emptyList());
+
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        HeaderMap headerMap = new HeaderMap();
+        when(exchange.getResponseHeaders()).thenReturn(headerMap);
+
+        Method handleRoutesInfo = AdminGateway.class.getDeclaredMethod("handleRoutesInfo", HttpServerExchange.class);
+        handleRoutesInfo.setAccessible(true);
+
+        Exception thrown = assertThrows(Exception.class, () -> handleRoutesInfo.invoke(gw, exchange));
+        assertTrue(thrown.getCause() instanceof RuntimeException);
+    }
+
+    @Test
+    void handleRouteById_jsonProcessingError_throwsRuntimeException() throws Exception {
+        ObjectMapper brokenMapper = mock(ObjectMapper.class);
+        when(brokenMapper.writeValueAsString(any())).thenThrow(new com.fasterxml.jackson.core.JsonProcessingException("fail") {});
+
+        AdminGateway gw = new AdminGateway(9094, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager);
+        Field omField = AdminGateway.class.getDeclaredField("objectMapper");
+        omField.setAccessible(true);
+        omField.set(gw, brokenMapper);
+
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        HeaderMap headerMap = new HeaderMap();
+        when(exchange.getResponseHeaders()).thenReturn(headerMap);
+        when(exchange.getRelativePath()).thenReturn("/");
+
+        Method handleRouteById = AdminGateway.class.getDeclaredMethod("handleRouteById", HttpServerExchange.class);
+        handleRouteById.setAccessible(true);
+
+        Exception thrown = assertThrows(Exception.class, () -> handleRouteById.invoke(gw, exchange));
+        assertTrue(thrown.getCause() instanceof RuntimeException);
+    }
+
+    @Test
+    void handleOpenApi_jsonProcessingError_throwsRuntimeException() throws Exception {
+        ObjectMapper brokenMapper = mock(ObjectMapper.class);
+        when(brokenMapper.writeValueAsString(any())).thenThrow(new com.fasterxml.jackson.core.JsonProcessingException("fail") {});
+
+        AdminGateway gw = new AdminGateway(9095, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager);
+        Field omField = AdminGateway.class.getDeclaredField("objectMapper");
+        omField.setAccessible(true);
+        omField.set(gw, brokenMapper);
+
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        HeaderMap headerMap = new HeaderMap();
+        when(exchange.getResponseHeaders()).thenReturn(headerMap);
+        when(exchange.getRelativePath()).thenReturn("/");
+
+        Method handleOpenApi = AdminGateway.class.getDeclaredMethod("handleOpenApi", HttpServerExchange.class);
+        handleOpenApi.setAccessible(true);
+
+        Exception thrown = assertThrows(Exception.class, () -> handleOpenApi.invoke(gw, exchange));
+        assertTrue(thrown.getCause() instanceof RuntimeException);
+    }
+
+    @Test
+    void handleTruststore_jsonProcessingError_throwsRuntimeException() throws Exception {
+        ObjectMapper brokenMapper = mock(ObjectMapper.class);
+        when(brokenMapper.writeValueAsString(any())).thenThrow(new com.fasterxml.jackson.core.JsonProcessingException("fail") {});
+
+        AdminGateway gw = new AdminGateway(9096, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager);
+        Field omField = AdminGateway.class.getDeclaredField("objectMapper");
+        omField.setAccessible(true);
+        omField.set(gw, brokenMapper);
+
+        CAPIConfiguration.TrustStore trustStoreConfig = new CAPIConfiguration.TrustStore();
+        trustStoreConfig.setEnabled(true);
+        when(capiConfiguration.getTrustStore()).thenReturn(trustStoreConfig);
+
+        java.security.KeyStore keyStore = java.security.KeyStore.getInstance("JKS");
+        keyStore.load(null, null);
+        when(capiTrustManager.getKeyStore()).thenReturn(keyStore);
+
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        HeaderMap headerMap = new HeaderMap();
+        when(exchange.getResponseHeaders()).thenReturn(headerMap);
+
+        Method handleTruststore = AdminGateway.class.getDeclaredMethod("handleTruststore", HttpServerExchange.class);
+        handleTruststore.setAccessible(true);
+
+        Exception thrown = assertThrows(Exception.class, () -> handleTruststore.invoke(gw, exchange));
+        assertTrue(thrown.getCause() instanceof RuntimeException);
+    }
+
+    @Test
+    void handleWsRoutes_jsonProcessingError_throwsRuntimeException() throws Exception {
+        ObjectMapper brokenMapper = mock(ObjectMapper.class);
+        when(brokenMapper.writeValueAsString(any())).thenThrow(new com.fasterxml.jackson.core.JsonProcessingException("fail") {});
+
+        AdminGateway gw = new AdminGateway(9097, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager);
+        Field omField = AdminGateway.class.getDeclaredField("objectMapper");
+        omField.setAccessible(true);
+        omField.set(gw, brokenMapper);
+
+        CAPIConfiguration.Websocket wsConfig = new CAPIConfiguration.Websocket();
+        wsConfig.setEnabled(true);
+        when(capiConfiguration.getWebsocket()).thenReturn(wsConfig);
+
+        Map<String, WebsocketClient> clients = new HashMap<>();
+        clients.put("test", new WebsocketClient());
+        gw.setWebsocketClients(clients);
+
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        HeaderMap headerMap = new HeaderMap();
+        when(exchange.getResponseHeaders()).thenReturn(headerMap);
+
+        Method handleWsRoutes = AdminGateway.class.getDeclaredMethod("handleWsRoutes", HttpServerExchange.class);
+        handleWsRoutes.setAccessible(true);
+
+        Exception thrown = assertThrows(Exception.class, () -> handleWsRoutes.invoke(gw, exchange));
+        assertTrue(thrown.getCause() instanceof RuntimeException);
+    }
+
+    @Test
     void handleMetrics_sendsPrometheusData() throws Exception {
         when(prometheusRegistry.scrape()).thenReturn("# HELP metric\n# TYPE metric counter\nmetric 42");
 
@@ -835,6 +1052,32 @@ class AdminGatewayTest {
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
             assertEquals(404, response.statusCode());
+        }
+    }
+
+    @Test
+    void start_withoutSsl_infoEndpoint_returnsLinks() throws Exception {
+        try (AdminGateway gw = new AdminGateway(19114, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager)) {
+            gw.start();
+
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("http://localhost:19114/info"))
+                    .GET()
+                    .build();
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(200, response.statusCode());
+            String body = response.body();
+            assertTrue(body.contains("_links"));
+            assertTrue(body.contains("/info/metrics"));
+            assertTrue(body.contains("/info/health"));
+            assertTrue(body.contains("/info/capi"));
+            assertTrue(body.contains("/info/routes"));
+            assertTrue(body.contains("/info/openapi/{serviceId}"));
+            assertTrue(body.contains("/info/truststore"));
+            assertTrue(body.contains("/info/wsroutes"));
+            assertTrue(body.contains("http://localhost:19114"));
         }
     }
 }

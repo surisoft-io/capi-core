@@ -121,6 +121,24 @@ ingress:
   #    hosts:
   #      - capi.local
 
+websocketIngress:
+  enabled: false
+  className: ""
+  annotations: {}
+  #  nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+  #  nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+  #  nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+  #  nginx.ingress.kubernetes.io/upstream-hash-by: "$remote_addr"
+  hosts:
+    - host: capi-ws.local
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls: []
+  #  - secretName: capi-ws-tls
+  #    hosts:
+  #      - capi-ws.local
+
 resources:
   requests:
     cpu: 250m

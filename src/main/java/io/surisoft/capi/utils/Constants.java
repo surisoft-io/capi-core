@@ -127,4 +127,9 @@ public class Constants {
     public static final String CAPI_META_THROTTLE_TOTAL_CALLS_ALLOWED = "Capi-Meta-Throttle-Total-Calls-Allowed";
     public static final String CAPI_META_THROTTLE_CURRENT_CALL_NUMBER = "Capi-Meta-Throttle-Current-Call-Number";
     public static final String CAPI_EXCHANGE_INTERNAL_TRACE_ID = "CapiSpanId";
+    public static final String ERROR_REMOTE_SERVER_TIMEOUT = "The remote server took too long";
+    public static final String ERROR_SERVICE_CERTIFICATE = "Problem with Service certificate";
+    public static final String ERROR_SERVICE_HOST = "Problem with Service host";
+    public static final String ERROR_NO_SERVER_AVAILABLE = "No server available at the moment. Please try again later.";
+    public static final String ERROR_REMOTE_NOT_RESPONDING = "Remote server is not responding, or it has a configuration issue";
 }

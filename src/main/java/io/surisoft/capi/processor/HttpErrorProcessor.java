@@ -20,37 +20,37 @@ public class HttpErrorProcessor implements Processor {
     public void process(Exchange exchange) {
         Exception cause = exchange.getProperty(Exchange.EXCEPTION_CAUGHT, Exception.class);
         if(cause instanceof SSLHandshakeException) {
-            exchange.setProperty(Constants.REASON_MESSAGE_HEADER, "Problem with Service certificate");
-            exchange.getIn().setHeader(Constants.REASON_MESSAGE_HEADER, "Problem with Service certificate");
+            exchange.setProperty(Constants.REASON_MESSAGE_HEADER, Constants.ERROR_SERVICE_CERTIFICATE);
+            exchange.getIn().setHeader(Constants.REASON_MESSAGE_HEADER, Constants.ERROR_SERVICE_CERTIFICATE);
             exchange.getIn().setHeader(Constants.REASON_CODE_HEADER, 502);
         }
         if (cause instanceof SSLException) {
-            exchange.setProperty(Constants.REASON_MESSAGE_HEADER, "Problem with Service certificate");
-            exchange.getIn().setHeader(Constants.REASON_MESSAGE_HEADER, "Problem with Service certificate");
+            exchange.setProperty(Constants.REASON_MESSAGE_HEADER, Constants.ERROR_SERVICE_CERTIFICATE);
+            exchange.getIn().setHeader(Constants.REASON_MESSAGE_HEADER, Constants.ERROR_SERVICE_CERTIFICATE);
             exchange.getIn().setHeader(Constants.REASON_CODE_HEADER, 502);
         } else if (cause instanceof UnknownHostException) {
-            exchange.setProperty(Constants.REASON_MESSAGE_HEADER, "Problem with Service host");
-            exchange.getIn().setHeader(Constants.REASON_MESSAGE_HEADER, "Problem with Service host");
+            exchange.setProperty(Constants.REASON_MESSAGE_HEADER, Constants.ERROR_SERVICE_HOST);
+            exchange.getIn().setHeader(Constants.REASON_MESSAGE_HEADER, Constants.ERROR_SERVICE_HOST);
             exchange.getIn().setHeader(Constants.REASON_CODE_HEADER, 502);
         } else if (cause instanceof SocketTimeoutException) {
-            exchange.setProperty(Constants.REASON_MESSAGE_HEADER, "The remote server took too long");
-            exchange.getIn().setHeader(Constants.REASON_MESSAGE_HEADER, "The remote server took too long");
+            exchange.setProperty(Constants.REASON_MESSAGE_HEADER, Constants.ERROR_REMOTE_SERVER_TIMEOUT);
+            exchange.getIn().setHeader(Constants.REASON_MESSAGE_HEADER, Constants.ERROR_REMOTE_SERVER_TIMEOUT);
             exchange.getIn().setHeader(Constants.REASON_CODE_HEADER, 502);
         } else if(cause instanceof HttpHostConnectException) {
-            exchange.setProperty(Constants.REASON_MESSAGE_HEADER, "No server available at the moment. Please try again later.");
-            exchange.getIn().setHeader(Constants.REASON_MESSAGE_HEADER, "No server available at the moment. Please try again later.");
+            exchange.setProperty(Constants.REASON_MESSAGE_HEADER, Constants.ERROR_NO_SERVER_AVAILABLE);
+            exchange.getIn().setHeader(Constants.REASON_MESSAGE_HEADER, Constants.ERROR_NO_SERVER_AVAILABLE);
             exchange.getIn().setHeader(Constants.REASON_CODE_HEADER, 502);
         } else if(cause instanceof AuthorizationException) {
             exchange.setProperty(Constants.REASON_MESSAGE_HEADER, cause.getMessage());
             exchange.getIn().setHeader(Constants.REASON_MESSAGE_HEADER, cause.getMessage());
             exchange.getIn().setHeader(Constants.REASON_CODE_HEADER, 401);
         } else if(cause instanceof NoHttpResponseException) {
-            exchange.setProperty(Constants.REASON_MESSAGE_HEADER, "Remote server is not responding, or it has a configuration issue");
-            exchange.getIn().setHeader(Constants.REASON_MESSAGE_HEADER, "Remote server is not responding, or it has a configuration issue");
+            exchange.setProperty(Constants.REASON_MESSAGE_HEADER, Constants.ERROR_REMOTE_NOT_RESPONDING);
+            exchange.getIn().setHeader(Constants.REASON_MESSAGE_HEADER, Constants.ERROR_REMOTE_NOT_RESPONDING);
             exchange.getIn().setHeader(Constants.REASON_CODE_HEADER, 502);
         } else if(cause instanceof ConnectTimeoutException) {
-            exchange.setProperty(Constants.REASON_MESSAGE_HEADER, "The remote server took too long");
-            exchange.getIn().setHeader(Constants.REASON_MESSAGE_HEADER, "The remote server took too long");
+            exchange.setProperty(Constants.REASON_MESSAGE_HEADER, Constants.ERROR_REMOTE_SERVER_TIMEOUT);
+            exchange.getIn().setHeader(Constants.REASON_MESSAGE_HEADER, Constants.ERROR_REMOTE_SERVER_TIMEOUT);
             exchange.getIn().setHeader(Constants.REASON_CODE_HEADER, 502);
         }
         exchange.getIn().setHeader(Constants.CAPI_URI_IN_ERROR, exchange.getIn().getHeader(Exchange.HTTP_URI).toString());

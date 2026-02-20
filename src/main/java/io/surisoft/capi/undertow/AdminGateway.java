@@ -22,6 +22,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.net.ssl.SSLContext;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 public class AdminGateway implements AutoCloseable {
@@ -50,6 +51,7 @@ public class AdminGateway implements AutoCloseable {
 
     public void start() {
         PathHandler pathHandler = new PathHandler()
+                .addExactPath("/info", this::handleInfo)
                 .addExactPath("/info/metrics", this::handleMetrics)
                 .addExactPath("/info/health", this::handleHealth)
                 .addExactPath("/info/capi", this::handleCapiInfo)
@@ -81,6 +83,32 @@ public class AdminGateway implements AutoCloseable {
     @Override
     public void close() {
         stop();
+    }
+
+    private void handleInfo(HttpServerExchange exchange) {
+        try {
+            String scheme = sslContext != null ? "https" : "http";
+            String host = exchange.getHostAndPort();
+            String baseUrl = scheme + "://" + host;
+
+            Map<String, Object> links = new LinkedHashMap<>();
+            links.put("metrics", Map.of("href", baseUrl + "/info/metrics"));
+            links.put("health", Map.of("href", baseUrl + "/info/health"));
+            links.put("capi", Map.of("href", baseUrl + "/info/capi"));
+            links.put("routes", Map.of("href", baseUrl + "/info/routes"));
+            links.put("openapi", Map.of("href", baseUrl + "/info/openapi/{serviceId}"));
+            links.put("truststore", Map.of("href", baseUrl + "/info/truststore"));
+            links.put("wsroutes", Map.of("href", baseUrl + "/info/wsroutes"));
+
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("_links", links);
+
+            exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+            exchange.setStatusCode(StatusCodes.OK);
+            exchange.getResponseSender().send(objectMapper.writeValueAsString(response));
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private void handleMetrics(HttpServerExchange exchange) {
