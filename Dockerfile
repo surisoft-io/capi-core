@@ -6,9 +6,9 @@ RUN apt-get update && apt-get install -y maven && \
     mvn package -DskipTests
 
 FROM eclipse-temurin:23-jre
+WORKDIR /app
 RUN mkdir -p /capi/config /capi/logs && \
     chown -R 1000:0 /capi /app
-WORKDIR /app
 COPY --from=build --chown=1000:0 /app/target/capi-core-*.jar app.jar
 COPY --chown=1000:0 config/config.yaml /capi/config/config.yaml
 ENV CAPI_CONFIG_FILE=/capi/config/config.yaml
