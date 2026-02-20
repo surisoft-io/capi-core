@@ -85,7 +85,7 @@ public class WebsocketUtils {
     }
 
     public WebsocketAuthorization createWebsocketAuthorization() throws CapiUndertowException {
-        if(defaultJWTProcessor != null) {
+        if(defaultJWTProcessor != null && !defaultJWTProcessor.isEmpty()) {
             return new WebsocketAuthorization(defaultJWTProcessor);
         }
         throw new CapiUndertowException("No OIDC provider enabled, consider enabling OIDC");
