@@ -415,6 +415,13 @@
         <h3>Kubernetes &amp; Helm Ready</h3>
         <p>Production-grade Helm chart with ingress, TLS, security contexts, and Hazelcast Kubernetes discovery out of the box.</p>
       </div>
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        </div>
+        <h3>MCP Gateway <span style="font-size:0.7rem;background:var(--accent);color:var(--primary);padding:2px 8px;border-radius:4px;vertical-align:middle;font-weight:700;margin-left:6px;">EXPERIMENTAL</span></h3>
+        <p>Expose Consul services as MCP tools for LLM agents. Claude Desktop, Cursor, and custom agents discover and invoke enterprise capabilities via JSON-RPC 2.0 over Streamable HTTP.</p>
+      </div>
     </div>
   </div>
 </section>
@@ -435,6 +442,7 @@
 
 <span class="comment"># CAPI Gateway     →  http://localhost:8380/api/</span>
 <span class="comment"># Admin API        →  http://localhost:8381/info</span>
+<span class="comment"># MCP Gateway      →  http://localhost:8383/mcp  (experimental)</span>
 <span class="comment"># Consul UI        →  http://localhost:8500</span>
 <span class="comment"># Keycloak         →  http://localhost:8080</span>
 <span class="comment"># OpenSearch Dash  →  http://localhost:5601</span>
@@ -531,6 +539,14 @@
             <td class="cross">Plugin</td>
             <td class="check">Yes</td>
             <td class="cross">Manual</td>
+          </tr>
+          <tr>
+            <td><strong>MCP Gateway (LLM tools)</strong></td>
+            <td class="check">Built-in</td>
+            <td class="cross">No</td>
+            <td class="cross">No</td>
+            <td class="cross">No</td>
+            <td class="cross">No</td>
           </tr>
           <tr>
             <td><strong>Architecture</strong></td>

@@ -35,6 +35,7 @@ CAPI is a lightweight API Gateway and load balancer powered by Apache Camel dyna
 * Admin API with health, metrics, and route inspection
 * Multi-instance support (route targeting per CAPI instance)
 * Reverse proxy headers (`X-Forwarded-*`)
+* **[Experimental]** MCP Gateway — expose services as MCP tools for LLM agents (JSON-RPC 2.0 over Streamable HTTP)
 
 ## Quickstart
 
@@ -81,6 +82,7 @@ See [`helm/capi-core/values.yaml`](helm/capi-core/values.yaml) for all available
 | 8380 | REST API gateway | `capi.rest.port` |
 | 8381 | Admin / metrics | `capi.adminPort` |
 | 8382 | WebSocket gateway | `capi.websocket.port` |
+| 8383 | MCP Gateway (experimental) | `capi.mcp.port` |
 
 ## Running Modes
 
@@ -100,4 +102,4 @@ The `runningMode` field controls which types of services CAPI will proxy:
 | [Security](docs/security.md) | OAuth2/OIDC and OPA authorization configuration |
 | [Admin API](docs/admin-api.md) | Admin endpoints reference (health, metrics, routes, OpenAPI) |
 | [Configuration Reference](docs/configuration.md) | Complete YAML configuration reference with all fields |
-| [MCP Gateway (Proposed)](docs/mcp-gateway.md) | Proposed MCP Gateway capabilities for LLM tool integration |
+| [MCP Gateway (Experimental)](docs/mcp-gateway.md) | MCP Gateway for LLM tool integration via JSON-RPC 2.0 |

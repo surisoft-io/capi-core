@@ -10,6 +10,7 @@ import io.surisoft.capi.configuration.CamelStartupListener;
 import io.surisoft.capi.service.CamelProxyPeerAddressHandler;
 import io.surisoft.capi.service.CapiAccessLogReceiver;
 import io.surisoft.capi.undertow.AdminGateway;
+import io.surisoft.capi.undertow.McpGateway;
 import io.surisoft.capi.undertow.WebsocketGateway;
 import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.Startup;
@@ -88,7 +89,15 @@ public class CAPIMain {
             if(startup.getWebSocketClientMap() != null) {
                 adminGateway.setWebsocketClients(startup.getWebSocketClientMap());
             }
+            if(startup.getMcpToolRegistry() != null) {
+                adminGateway.setMcpToolRegistry(startup.getMcpToolRegistry());
+            }
+            if(startup.getMcpSessionStore() != null) {
+                adminGateway.setMcpSessionStore(startup.getMcpSessionStore());
+            }
             adminGateway.start();
+
+            McpGateway mcpGateway = getMcpGateway(startup);
 
             camelContext.getRegistry().bind("consulNodeDiscovery", startup.getConsulNodeDiscovery());
             if(capiConfiguration.getConsulStore().isEnabled()) {
@@ -129,6 +138,9 @@ public class CAPIMain {
                 if(websocketGateway != null) {
                     websocketGateway.stop();
                 }
+                if(mcpGateway != null) {
+                    mcpGateway.stop();
+                }
                 camelContext.stop();
                 adminGateway.stop();
                 log.info("CAPI Gateway stopped.");
@@ -151,6 +163,29 @@ public class CAPIMain {
             websocketGateway.runProxy();
         }
         return websocketGateway;
+    }
+
+    private @Nullable McpGateway getMcpGateway(Startup startup) {
+        if(capiConfiguration.getMcp() != null && capiConfiguration.getMcp().isEnabled()
+                && startup.getMcpToolRegistry() != null
+                && startup.getMcpSessionStore() != null) {
+            java.net.http.HttpClient mcpHttpClient = java.net.http.HttpClient.newBuilder()
+                    .connectTimeout(java.time.Duration.ofSeconds(10))
+                    .build();
+            McpGateway mcpGateway = new McpGateway(
+                    capiConfiguration.getMcp().getPort(),
+                    startup.getUndertowSslContext(),
+                    startup.getMcpToolRegistry(),
+                    startup.getHttpUtils(),
+                    startup.getOpaService(),
+                    mcpHttpClient,
+                    startup.getMcpSessionStore(),
+                    capiConfiguration
+            );
+            mcpGateway.start();
+            return mcpGateway;
+        }
+        return null;
     }
 
     private void initializeLogs(CAPIConfiguration configuration) {

@@ -13,6 +13,7 @@ import io.surisoft.capi.schema.ConsulKeyStoreEntry;
 import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.schema.WebsocketClient;
 import io.surisoft.capi.service.*;
+import io.surisoft.capi.configuration.LocalCacheConfiguration;
 import io.surisoft.capi.tracer.CapiTracer;
 import io.surisoft.capi.tracer.TracingBootstrap;
 import jakarta.annotation.Nullable;
@@ -77,6 +78,10 @@ public class Startup {
     @Nullable
     private ConsulStore consulStore;
     private RouteConsistencyChecker routeConsistencyChecker;
+    @Nullable
+    private McpToolRegistry mcpToolRegistry;
+    @Nullable
+    private McpSessionStore mcpSessionStore;
 
     private CompositeMeterRegistry meterRegistry;
     private PrometheusMeterRegistry prometheusRegistry;
@@ -109,6 +114,7 @@ public class Startup {
         }
         startRouteConsistencyChecker();
         startOpaService();
+        startMcpService();
     }
 
     private void configureUndertowSsl() {
@@ -372,6 +378,28 @@ public class Startup {
 
     public RouteConsistencyChecker getRouteConsistencyChecker() {
         return routeConsistencyChecker;
+    }
+
+    private void startMcpService() {
+        if (configuration.getMcp() != null && configuration.getMcp().isEnabled()) {
+            log.info("Configuring MCP Gateway");
+            mcpToolRegistry = new McpToolRegistry(serviceCache);
+            if (configuration.getThrottle() != null && configuration.getThrottle().isEnabled()) {
+                mcpSessionStore = new HazelcastMcpSessionStore(
+                        io.surisoft.capi.configuration.HazelcastCacheConfiguration.createMcpSessionMap(configuration.getThrottle()));
+            } else {
+                mcpSessionStore = new LocalMcpSessionStore(
+                        LocalCacheConfiguration.mcpSessionCache(configuration.getMcp().getSessionTtl()));
+            }
+        }
+    }
+
+    public @Nullable McpToolRegistry getMcpToolRegistry() {
+        return mcpToolRegistry;
+    }
+
+    public @Nullable McpSessionStore getMcpSessionStore() {
+        return mcpSessionStore;
     }
 
     private void startConsulHttpClient() {
