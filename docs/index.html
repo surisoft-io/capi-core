@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CAPI Gateway — Light Apache Camel API Gateway</title>
+  <meta name="description" content="A lightweight API Gateway powered by Apache Camel that discovers services from Consul automatically. No database, no declarative routes — just register and go.">
+  <style>
+    :root {
+      --primary: #0f2b46;
+      --primary-light: #163d5e;
+      --accent: #00b4d8;
+      --accent-dark: #0096b7;
+      --surface: #f8fafc;
+      --surface-alt: #eef2f7;
+      --text: #1e293b;
+      --text-muted: #64748b;
+      --white: #ffffff;
+      --border: #e2e8f0;
+      --radius: 10px;
+      --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.04);
+      --shadow-lg: 0 4px 24px rgba(0,0,0,0.10);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      color: var(--text);
+      line-height: 1.6;
+      background: var(--white);
+    }
+
+    /* --- Nav --- */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      background: rgba(15,43,70,0.97);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .nav-inner {
+      max-width: 1120px; margin: 0 auto;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 24px; height: 60px;
+    }
+    .nav-logo {
+      font-size: 1.25rem; font-weight: 700; color: var(--white); text-decoration: none; letter-spacing: -0.5px;
+    }
+    .nav-logo span { color: var(--accent); }
+    .nav-links { display: flex; gap: 28px; list-style: none; }
+    .nav-links a {
+      color: rgba(255,255,255,0.75); text-decoration: none; font-size: 0.9rem; font-weight: 500;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--white); }
+    .nav-gh {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15);
+      padding: 6px 14px; border-radius: 6px; color: var(--white); text-decoration: none;
+      font-size: 0.85rem; font-weight: 500; transition: background 0.2s;
+    }
+    .nav-gh:hover { background: rgba(255,255,255,0.18); }
+    .nav-gh svg { width: 18px; height: 18px; fill: currentColor; }
+
+    /* --- Hero --- */
+    .hero {
+      background: linear-gradient(160deg, var(--primary) 0%, var(--primary-light) 60%, #1a4971 100%);
+      color: var(--white);
+      padding: 140px 24px 80px;
+      text-align: center;
+    }
+    .hero h1 {
+      font-size: clamp(2rem, 5vw, 3.2rem);
+      font-weight: 800; letter-spacing: -1px;
+      margin-bottom: 16px;
+    }
+    .hero h1 span { color: var(--accent); }
+    .hero p {
+      font-size: 1.2rem; color: rgba(255,255,255,0.8);
+      max-width: 640px; margin: 0 auto 32px;
+    }
+    .hero-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 12px 28px; border-radius: 8px; font-size: 1rem; font-weight: 600;
+      text-decoration: none; transition: all 0.2s; border: none; cursor: pointer;
+    }
+    .btn-primary { background: var(--accent); color: var(--primary); }
+    .btn-primary:hover { background: var(--accent-dark); }
+    .btn-secondary {
+      background: transparent; color: var(--white);
+      border: 1.5px solid rgba(255,255,255,0.3);
+    }
+    .btn-secondary:hover { border-color: rgba(255,255,255,0.6); background: rgba(255,255,255,0.05); }
+    .hero-badges {
+      margin-top: 40px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;
+    }
+    .hero-badges img { height: 22px; }
+
+    /* --- Section --- */
+    section { padding: 80px 24px; }
+    .container { max-width: 1120px; margin: 0 auto; }
+    .section-label {
+      text-transform: uppercase; font-size: 0.8rem; font-weight: 700; letter-spacing: 1.5px;
+      color: var(--accent-dark); margin-bottom: 8px;
+    }
+    .section-title {
+      font-size: clamp(1.6rem, 3.5vw, 2.2rem); font-weight: 800;
+      letter-spacing: -0.5px; margin-bottom: 16px;
+    }
+    .section-subtitle {
+      font-size: 1.05rem; color: var(--text-muted); max-width: 600px; margin-bottom: 48px;
+    }
+
+    /* --- How it works --- */
+    .how-it-works { background: var(--surface); }
+    .diagram-wrapper {
+      background: var(--white); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 32px; box-shadow: var(--shadow);
+      overflow-x: auto;
+    }
+    .diagram-wrapper svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+
+    /* --- Features --- */
+    .features-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+    }
+    .feature-card {
+      background: var(--white); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 28px;
+      box-shadow: var(--shadow); transition: box-shadow 0.2s;
+    }
+    .feature-card:hover { box-shadow: var(--shadow-lg); }
+    .feature-icon {
+      width: 44px; height: 44px; border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.3rem; margin-bottom: 16px;
+      background: var(--surface-alt); color: var(--accent-dark);
+    }
+    .feature-card h3 { font-size: 1.05rem; font-weight: 700; margin-bottom: 6px; }
+    .feature-card p { font-size: 0.92rem; color: var(--text-muted); line-height: 1.55; }
+
+    /* --- Quickstart --- */
+    .quickstart { background: var(--surface); }
+    .code-block {
+      background: var(--primary); color: #e2e8f0; border-radius: var(--radius);
+      padding: 24px 28px; font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+      font-size: 0.88rem; line-height: 1.7; overflow-x: auto;
+      box-shadow: var(--shadow-lg); position: relative;
+    }
+    .code-block .comment { color: #64748b; }
+    .code-block .cmd { color: var(--accent); }
+
+    /* --- Compare --- */
+    .compare-table {
+      width: 100%; border-collapse: collapse;
+      background: var(--white); border: 1px solid var(--border);
+      border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow);
+    }
+    .compare-table th, .compare-table td {
+      padding: 14px 20px; text-align: left; font-size: 0.92rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .compare-table thead th {
+      background: var(--primary); color: var(--white); font-weight: 600;
+    }
+    .compare-table tbody tr:last-child td { border-bottom: none; }
+    .compare-table tbody tr:hover { background: var(--surface); }
+    .check { color: #16a34a; font-weight: 700; }
+    .cross { color: var(--text-muted); }
+
+    /* --- CTA --- */
+    .cta {
+      background: linear-gradient(160deg, var(--primary) 0%, var(--primary-light) 100%);
+      color: var(--white); text-align: center;
+    }
+    .cta .section-title { color: var(--white); }
+    .cta p { color: rgba(255,255,255,0.75); margin-bottom: 32px; }
+
+    /* --- Footer --- */
+    footer {
+      background: var(--primary); color: rgba(255,255,255,0.5);
+      text-align: center; padding: 28px 24px; font-size: 0.85rem;
+    }
+    footer a { color: var(--accent); text-decoration: none; }
+
+    /* --- Responsive --- */
+    @media (max-width: 640px) {
+      .nav-links { display: none; }
+      .hero { padding: 120px 20px 60px; }
+      .features-grid { grid-template-columns: 1fr; }
+      .compare-table { font-size: 0.82rem; }
+      .compare-table th, .compare-table td { padding: 10px 12px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav>
+  <div class="nav-inner">
+    <a href="#" class="nav-logo">CAPI <span>Gateway</span></a>
+    <ul class="nav-links">
+      <li><a href="#how-it-works">How it works</a></li>
+      <li><a href="#features">Features</a></li>
+      <li><a href="#quickstart">Quickstart</a></li>
+      <li><a href="#compare">Compare</a></li>
+    </ul>
+    <a href="https://github.com/surisoft-io/capi-core" class="nav-gh" target="_blank" rel="noopener">
+      <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      GitHub
+    </a>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <h1>The API Gateway that<br><span>discovers your services</span></h1>
+  <p>
+    CAPI is a lightweight gateway powered by Apache Camel. Register services in Consul — routes, load balancing, security, and observability are handled automatically. No database. No declarative config files. Just register and go.
+  </p>
+  <div class="hero-actions">
+    <a href="#quickstart" class="btn btn-primary">Get Started</a>
+    <a href="https://github.com/surisoft-io/capi-core" class="btn btn-secondary" target="_blank" rel="noopener">View on GitHub</a>
+  </div>
+  <div class="hero-badges">
+    <img src="https://github.com/surisoft-io/capi-core/actions/workflows/main.yaml/badge.svg" alt="Build">
+    <img src="https://sonarcloud.io/api/project_badges/measure?project=surisoft-io_capi-core&metric=alert_status" alt="Quality Gate">
+    <img src="https://sonarcloud.io/api/project_badges/measure?project=surisoft-io_capi-core&metric=coverage" alt="Coverage">
+    <img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License">
+    <img src="https://img.shields.io/docker/v/surisoft/capi-core" alt="Docker Version">
+  </div>
+</section>
+
+<!-- How it works -->
+<section class="how-it-works" id="how-it-works">
+  <div class="container">
+    <div class="section-label">Architecture</div>
+    <h2 class="section-title">How it works</h2>
+    <p class="section-subtitle">Services register in Consul with metadata that tells CAPI how to route, secure, and observe each API — no gateway config needed.</p>
+    <div class="diagram-wrapper">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 420" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+        <!-- Background -->
+        <rect width="880" height="420" fill="#f8fafc" rx="8"/>
+
+        <!-- Clients -->
+        <rect x="20" y="150" width="120" height="120" rx="10" fill="#0f2b46" stroke="#1a4971" stroke-width="1.5"/>
+        <text x="80" y="195" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">Clients</text>
+        <text x="80" y="218" text-anchor="middle" fill="#94a3b8" font-size="10">REST / WS / SSE</text>
+        <rect x="42" y="232" width="76" height="24" rx="4" fill="#1a4971"/>
+        <text x="80" y="248" text-anchor="middle" fill="#94a3b8" font-size="9">curl, browser, SDK</text>
+
+        <!-- Arrow: Clients -> CAPI -->
+        <line x1="140" y1="210" x2="196" y2="210" stroke="#00b4d8" stroke-width="2" marker-end="url(#arrow)"/>
+
+        <!-- CAPI Gateway Box -->
+        <rect x="200" y="60" width="300" height="300" rx="12" fill="#fff" stroke="#00b4d8" stroke-width="2"/>
+        <rect x="200" y="60" width="300" height="38" rx="12" fill="#0f2b46"/>
+        <rect x="200" y="86" width="300" height="12" fill="#0f2b46"/>
+        <text x="350" y="85" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">CAPI Gateway</text>
+
+        <!-- Internal layers -->
+        <rect x="220" y="110" width="260" height="36" rx="6" fill="#eef2f7" stroke="#e2e8f0"/>
+        <text x="350" y="133" text-anchor="middle" fill="#0f2b46" font-size="11" font-weight="600">OAuth2 / OIDC Validation</text>
+
+        <rect x="220" y="154" width="260" height="36" rx="6" fill="#eef2f7" stroke="#e2e8f0"/>
+        <text x="350" y="177" text-anchor="middle" fill="#0f2b46" font-size="11" font-weight="600">OPA Policy Authorization</text>
+
+        <rect x="220" y="198" width="260" height="36" rx="6" fill="#eef2f7" stroke="#e2e8f0"/>
+        <text x="350" y="221" text-anchor="middle" fill="#0f2b46" font-size="11" font-weight="600">Throttling (Hazelcast)</text>
+
+        <rect x="220" y="242" width="126" height="36" rx="6" fill="#eef2f7" stroke="#e2e8f0"/>
+        <text x="283" y="265" text-anchor="middle" fill="#0f2b46" font-size="11" font-weight="600">Load Balancer</text>
+
+        <rect x="354" y="242" width="126" height="36" rx="6" fill="#eef2f7" stroke="#e2e8f0"/>
+        <text x="417" y="265" text-anchor="middle" fill="#0f2b46" font-size="11" font-weight="600">Failover</text>
+
+        <rect x="220" y="286" width="260" height="36" rx="6" fill="#eef2f7" stroke="#e2e8f0"/>
+        <text x="350" y="309" text-anchor="middle" fill="#0f2b46" font-size="11" font-weight="600">OpenTelemetry Traces + Metrics</text>
+
+        <!-- Arrow: CAPI -> Services -->
+        <line x1="500" y1="210" x2="556" y2="170" stroke="#00b4d8" stroke-width="2" marker-end="url(#arrow)"/>
+        <line x1="500" y1="210" x2="556" y2="210" stroke="#00b4d8" stroke-width="2" marker-end="url(#arrow)"/>
+        <line x1="500" y1="210" x2="556" y2="250" stroke="#00b4d8" stroke-width="2" marker-end="url(#arrow)"/>
+
+        <!-- Services -->
+        <rect x="560" y="140" width="140" height="52" rx="8" fill="#fff" stroke="#e2e8f0" stroke-width="1.5"/>
+        <circle cx="580" cy="166" r="6" fill="#16a34a"/>
+        <text x="636" y="163" text-anchor="middle" fill="#0f2b46" font-size="11" font-weight="600">Service A</text>
+        <text x="636" y="178" text-anchor="middle" fill="#94a3b8" font-size="9">REST</text>
+
+        <rect x="560" y="200" width="140" height="52" rx="8" fill="#fff" stroke="#e2e8f0" stroke-width="1.5"/>
+        <circle cx="580" cy="226" r="6" fill="#16a34a"/>
+        <text x="636" y="223" text-anchor="middle" fill="#0f2b46" font-size="11" font-weight="600">Service B</text>
+        <text x="636" y="238" text-anchor="middle" fill="#94a3b8" font-size="9">WebSocket</text>
+
+        <rect x="560" y="260" width="140" height="52" rx="8" fill="#fff" stroke="#e2e8f0" stroke-width="1.5"/>
+        <circle cx="580" cy="286" r="6" fill="#16a34a"/>
+        <text x="636" y="283" text-anchor="middle" fill="#0f2b46" font-size="11" font-weight="600">Service C</text>
+        <text x="636" y="298" text-anchor="middle" fill="#94a3b8" font-size="9">SSE</text>
+
+        <!-- Consul -->
+        <rect x="710" y="120" width="150" height="76" rx="10" fill="#fff" stroke="#e2e8f0" stroke-width="1.5"/>
+        <text x="785" y="150" text-anchor="middle" fill="#0f2b46" font-size="12" font-weight="700">Consul</text>
+        <text x="785" y="168" text-anchor="middle" fill="#94a3b8" font-size="10">Service catalog</text>
+        <text x="785" y="182" text-anchor="middle" fill="#94a3b8" font-size="10">+ metadata</text>
+
+        <!-- Arrow: Services -> Consul (register) -->
+        <line x1="700" y1="166" x2="710" y2="158" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow-gray)"/>
+        <text x="690" y="138" text-anchor="middle" fill="#64748b" font-size="8" font-style="italic">register</text>
+
+        <!-- Arrow: Consul -> CAPI (discover) -->
+        <path d="M 710 180 Q 550 380 500 310" fill="none" stroke="#00b4d8" stroke-width="1.5" stroke-dasharray="6,3" marker-end="url(#arrow)"/>
+        <text x="640" y="310" text-anchor="middle" fill="#0096b7" font-size="9" font-weight="600">auto-discover</text>
+
+        <!-- OPA badge -->
+        <rect x="710" y="230" width="150" height="52" rx="10" fill="#fff" stroke="#e2e8f0" stroke-width="1.5"/>
+        <text x="785" y="253" text-anchor="middle" fill="#0f2b46" font-size="12" font-weight="700">OPA</text>
+        <text x="785" y="270" text-anchor="middle" fill="#94a3b8" font-size="10">Policy engine</text>
+
+        <!-- OTEL badge -->
+        <rect x="710" y="296" width="150" height="52" rx="10" fill="#fff" stroke="#e2e8f0" stroke-width="1.5"/>
+        <text x="785" y="319" text-anchor="middle" fill="#0f2b46" font-size="12" font-weight="700">OpenTelemetry</text>
+        <text x="785" y="336" text-anchor="middle" fill="#94a3b8" font-size="10">Traces + Logs</text>
+
+        <!-- Keycloak badge -->
+        <rect x="710" y="24" width="150" height="52" rx="10" fill="#fff" stroke="#e2e8f0" stroke-width="1.5"/>
+        <text x="785" y="47" text-anchor="middle" fill="#0f2b46" font-size="12" font-weight="700">IdP / Keycloak</text>
+        <text x="785" y="64" text-anchor="middle" fill="#94a3b8" font-size="10">JWKS endpoint</text>
+
+        <!-- Arrow markers -->
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#00b4d8"/>
+          </marker>
+          <marker id="arrow-gray" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#94a3b8"/>
+          </marker>
+        </defs>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<!-- Features -->
+<section id="features">
+  <div class="container">
+    <div class="section-label">Features</div>
+    <h2 class="section-title">Everything you need in an API Gateway</h2>
+    <p class="section-subtitle">Security, observability, and traffic management — configured via Consul metadata, not YAML files.</p>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        </div>
+        <h3>Auto-Discovery from Consul</h3>
+        <p>Services register in Consul with metadata. CAPI polls the catalog and creates or removes routes dynamically — no restart, no redeploy.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        </div>
+        <h3>OAuth2 / OIDC Security</h3>
+        <p>Validate JWT tokens from any OIDC provider via JWKS endpoints. Multi-provider support with per-service opt-in through a single metadata flag.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <h3>OPA Authorization</h3>
+        <p>Fine-grained policy enforcement using Open Policy Agent. Write Rego policies per service — CAPI evaluates them on every request.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        </div>
+        <h3>OpenTelemetry Tracing</h3>
+        <p>Distributed traces exported via OTLP. Prometheus metrics at the admin port. Full observability with zero application code changes.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </div>
+        <h3>Distributed Throttling</h3>
+        <p>Rate-limit APIs globally or per consumer using Hazelcast distributed maps. Supports Kubernetes-native Hazelcast discovery.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+        </div>
+        <h3>REST, WebSocket &amp; SSE</h3>
+        <p>Gateway for all protocol types. REST with load balancing and failover, plus native WebSocket and Server-Sent Events passthrough.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        </div>
+        <h3>OpenAPI Aggregation</h3>
+        <p>Automatically collects and serves OpenAPI specs from upstream services through the admin API. One place to discover all your APIs.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        </div>
+        <h3>Admin API</h3>
+        <p>Built-in endpoints for health checks, Prometheus metrics, route inspection, and truststore management. Everything you need to operate at scale.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+        </div>
+        <h3>Kubernetes &amp; Helm Ready</h3>
+        <p>Production-grade Helm chart with ingress, TLS, security contexts, and Hazelcast Kubernetes discovery out of the box.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Quickstart -->
+<section class="quickstart" id="quickstart">
+  <div class="container">
+    <div class="section-label">Get started</div>
+    <h2 class="section-title">Up and running in 60 seconds</h2>
+    <p class="section-subtitle">One command brings up the full ecosystem — CAPI, Consul, Keycloak, OPA, OpenSearch, and sample services.</p>
+    <div class="code-block">
+<span class="comment"># Clone the repo</span>
+<span class="cmd">git clone</span> https://github.com/surisoft-io/capi-core.git
+<span class="cmd">cd</span> capi-core/docker
+
+<span class="comment"># Bring up the full stack</span>
+<span class="cmd">docker compose up</span> -d
+
+<span class="comment"># CAPI Gateway     →  http://localhost:8380/api/</span>
+<span class="comment"># Admin API        →  http://localhost:8381/info</span>
+<span class="comment"># Consul UI        →  http://localhost:8500</span>
+<span class="comment"># Keycloak         →  http://localhost:8080</span>
+<span class="comment"># OpenSearch Dash  →  http://localhost:5601</span>
+<span class="comment"># OPA              →  http://localhost:8181</span>
+
+<span class="comment"># Register a sample service in Consul and call it through CAPI</span>
+<span class="cmd">curl</span> http://localhost:8380/api/public-service/dev/hello
+
+<span class="comment"># Inspect active routes</span>
+<span class="cmd">curl</span> http://localhost:8381/info/routes | jq
+    </div>
+  </div>
+</section>
+
+<!-- Compare -->
+<section id="compare">
+  <div class="container">
+    <div class="section-label">Why CAPI</div>
+    <h2 class="section-title">How CAPI compares</h2>
+    <p class="section-subtitle">Purpose-built for Consul-native environments. No database, no declarative routes, no plugins to install.</p>
+    <div style="overflow-x:auto">
+      <table class="compare-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th>CAPI Gateway</th>
+            <th>Kong</th>
+            <th>Traefik</th>
+            <th>Spring Cloud GW</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Consul auto-discovery</strong></td>
+            <td class="check">Native</td>
+            <td class="cross">Plugin</td>
+            <td class="check">Yes</td>
+            <td class="cross">Manual</td>
+          </tr>
+          <tr>
+            <td><strong>Route config required</strong></td>
+            <td class="check">None (metadata)</td>
+            <td class="cross">Admin API / DB</td>
+            <td class="cross">Labels / files</td>
+            <td class="cross">YAML / code</td>
+          </tr>
+          <tr>
+            <td><strong>External database</strong></td>
+            <td class="check">Not needed</td>
+            <td class="cross">PostgreSQL</td>
+            <td class="check">Not needed</td>
+            <td class="check">Not needed</td>
+          </tr>
+          <tr>
+            <td><strong>OAuth2 / OIDC built-in</strong></td>
+            <td class="check">Yes</td>
+            <td class="cross">Enterprise / Plugin</td>
+            <td class="cross">Middleware</td>
+            <td class="check">Yes</td>
+          </tr>
+          <tr>
+            <td><strong>OPA integration</strong></td>
+            <td class="check">Built-in</td>
+            <td class="cross">Plugin</td>
+            <td class="cross">Plugin</td>
+            <td class="cross">Manual</td>
+          </tr>
+          <tr>
+            <td><strong>WebSocket &amp; SSE</strong></td>
+            <td class="check">Yes</td>
+            <td class="check">Yes</td>
+            <td class="check">Yes</td>
+            <td class="check">Yes</td>
+          </tr>
+          <tr>
+            <td><strong>Distributed throttling</strong></td>
+            <td class="check">Hazelcast</td>
+            <td class="check">Built-in</td>
+            <td class="check">Built-in</td>
+            <td class="cross">Manual</td>
+          </tr>
+          <tr>
+            <td><strong>OpenTelemetry</strong></td>
+            <td class="check">Native OTLP</td>
+            <td class="cross">Plugin</td>
+            <td class="check">Yes</td>
+            <td class="cross">Manual</td>
+          </tr>
+          <tr>
+            <td><strong>Footprint</strong></td>
+            <td class="check">~120 MB</td>
+            <td class="cross">~500 MB+</td>
+            <td class="check">~100 MB</td>
+            <td class="check">~200 MB</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta">
+  <div class="container">
+    <h2 class="section-title">Ready to simplify your API layer?</h2>
+    <p>CAPI is open-source under the Apache 2.0 license. Star us on GitHub, try the Docker Compose stack, or jump straight into the docs.</p>
+    <div class="hero-actions" style="justify-content:center">
+      <a href="https://github.com/surisoft-io/capi-core" class="btn btn-primary" target="_blank" rel="noopener">Star on GitHub</a>
+      <a href="https://github.com/surisoft-io/capi-core/tree/main/docs" class="btn btn-secondary" target="_blank" rel="noopener">Read the Docs</a>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer>
+  CAPI Gateway &mdash; Open-source under <a href="https://opensource.org/licenses/Apache-2.0">Apache 2.0</a> &mdash; Built by <a href="https://github.com/surisoft-io">Surisoft</a>
+</footer>
+
+</body>
+</html>
