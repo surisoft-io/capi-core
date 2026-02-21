@@ -461,6 +461,7 @@
           <tr>
             <th></th>
             <th>CAPI Gateway</th>
+            <th>WSO2 API Manager</th>
             <th>Kong</th>
             <th>Traefik</th>
             <th>Spring Cloud GW</th>
@@ -470,6 +471,7 @@
           <tr>
             <td><strong>Consul auto-discovery</strong></td>
             <td class="check">Native</td>
+            <td class="cross">Not supported</td>
             <td class="cross">Plugin</td>
             <td class="check">Yes</td>
             <td class="cross">Manual</td>
@@ -477,6 +479,7 @@
           <tr>
             <td><strong>Route config required</strong></td>
             <td class="check">None (metadata)</td>
+            <td class="cross">Admin portal</td>
             <td class="cross">Admin API / DB</td>
             <td class="cross">Labels / files</td>
             <td class="cross">YAML / code</td>
@@ -484,6 +487,7 @@
           <tr>
             <td><strong>External database</strong></td>
             <td class="check">Not needed</td>
+            <td class="cross">PostgreSQL / MySQL</td>
             <td class="cross">PostgreSQL</td>
             <td class="check">Not needed</td>
             <td class="check">Not needed</td>
@@ -491,6 +495,7 @@
           <tr>
             <td><strong>OAuth2 / OIDC built-in</strong></td>
             <td class="check">Yes</td>
+            <td class="check">Yes (Key Manager)</td>
             <td class="cross">Enterprise / Plugin</td>
             <td class="cross">Middleware</td>
             <td class="check">Yes</td>
@@ -498,6 +503,7 @@
           <tr>
             <td><strong>OPA integration</strong></td>
             <td class="check">Built-in</td>
+            <td class="cross">Manual / custom</td>
             <td class="cross">Plugin</td>
             <td class="cross">Plugin</td>
             <td class="cross">Manual</td>
@@ -508,10 +514,12 @@
             <td class="check">Yes</td>
             <td class="check">Yes</td>
             <td class="check">Yes</td>
+            <td class="check">Yes</td>
           </tr>
           <tr>
             <td><strong>Distributed throttling</strong></td>
             <td class="check">Hazelcast</td>
+            <td class="check">Traffic Manager</td>
             <td class="check">Built-in</td>
             <td class="check">Built-in</td>
             <td class="cross">Manual</td>
@@ -519,13 +527,23 @@
           <tr>
             <td><strong>OpenTelemetry</strong></td>
             <td class="check">Native OTLP</td>
+            <td class="cross">Custom / ELK</td>
             <td class="cross">Plugin</td>
             <td class="check">Yes</td>
             <td class="cross">Manual</td>
           </tr>
           <tr>
+            <td><strong>Architecture</strong></td>
+            <td class="check">Single process</td>
+            <td class="cross">Multi-component</td>
+            <td class="check">Single process</td>
+            <td class="check">Single process</td>
+            <td class="check">Single process</td>
+          </tr>
+          <tr>
             <td><strong>Footprint</strong></td>
             <td class="check">~120 MB</td>
+            <td class="cross">~1 GB+</td>
             <td class="cross">~500 MB+</td>
             <td class="check">~100 MB</td>
             <td class="check">~200 MB</td>
