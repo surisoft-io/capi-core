@@ -1,0 +1,54 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+  tcplog:
+    listen_address: 0.0.0.0:5444
+    operators:
+      - id: json_parser
+        type: json_parser
+        parse_from: body
+        parse_to: body
+        if: 'body matches "^\\{.*\\}$"'
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+
+exporters:
+  debug:
+    verbosity: basic
+
+  opensearch/traces:
+    http:
+      endpoint: http://opensearch:9200
+      tls:
+        insecure: true
+    dataset: traces
+
+  opensearch/logs:
+    http:
+      endpoint: http://opensearch:9200
+      tls:
+        insecure: true
+    dataset: logs
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug, opensearch/traces]
+    logs:
+      receivers: [otlp, tcplog]
+      processors: [batch]
+      exporters: [debug, opensearch/logs]

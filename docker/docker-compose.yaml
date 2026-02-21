@@ -1,0 +1,158 @@
+services:
+
+  # --- Infrastructure ---
+
+  consul:
+    image: hashicorp/consul:1.22
+    container_name: consul
+    ports:
+      - "8500:8500"
+    command: agent -dev -client=0.0.0.0
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.1
+    container_name: keycloak
+    ports:
+      - "8080:8080"
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    command: start-dev
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080; echo -e 'GET /health/ready HTTP/1.1\r\nhost: localhost\r\nConnection: close\r\n\r\n' >&3; grep -q '200' <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  opa:
+    image: openpolicyagent/opa:1.4.2
+    container_name: opa
+    ports:
+      - "8181:8181"
+    volumes:
+      - ./opa-policy:/policy
+    command: run --server --addr 0.0.0.0:8181 /policy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8181/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # --- Observability ---
+
+  opensearch:
+    image: opensearchproject/opensearch:2.19.1
+    container_name: opensearch
+    ports:
+      - "9200:9200"
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: "C4p1-Admin!2024"
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.19.1
+    container_name: opensearch-dashboards
+    ports:
+      - "5601:5601"
+    environment:
+      OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
+      DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
+    depends_on:
+      opensearch:
+        condition: service_healthy
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-config.yaml:/etc/otelcol/config.yaml
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "5444:5444"
+    depends_on:
+      opensearch:
+        condition: service_healthy
+
+  # --- CAPI Gateway ---
+
+  capi:
+    image: surisoft/capi-core:latest
+    pull_policy: always
+    restart: always
+    container_name: capi
+    ports:
+      - "8380:8380"
+      - "8381:8381"
+      - "8382:8382"
+    volumes:
+      - ./capi-config.yaml:/capi/config/config.yaml
+    environment:
+      CAPI_CONFIG_FILE: /capi/config/config.yaml
+    depends_on:
+      consul:
+        condition: service_healthy
+
+  # --- Sample Services ---
+
+  public-service-1:
+    image: surisoft/sample-service:2.0.0
+    restart: always
+    container_name: public-service-1
+    ports:
+      - "8083:8083"
+    depends_on:
+      consul:
+        condition: service_healthy
+    environment:
+      - server.port=8083
+      - spring.application.name=public-service
+      - spring.cloud.consul.enabled=true
+      - spring.cloud.consul.host=consul
+      - spring.cloud.consul.port=8500
+      - spring.cloud.consul.discovery.hostname=public-service-1
+      - spring.cloud.consul.discovery.port=8083
+      - spring.cloud.consul.discovery.metadata.group=dev
+      - spring.cloud.consul.discovery.metadata.root-context=/
+      - spring.cloud.consul.discovery.metadata.scheme=http
+      - spring.cloud.consul.discovery.metadata.type=rest
+      - spring.cloud.consul.discovery.metadata.capi-instance=default
+      - spring.cloud.consul.discovery.metadata.secured=false
+
+  public-service-2:
+    image: surisoft/sample-service:2.0.0
+    restart: always
+    container_name: public-service-2
+    ports:
+      - "8084:8084"
+    depends_on:
+      consul:
+        condition: service_healthy
+    environment:
+      - server.port=8084
+      - spring.application.name=public-service
+      - spring.cloud.consul.enabled=true
+      - spring.cloud.consul.host=consul
+      - spring.cloud.consul.port=8500
+      - spring.cloud.consul.discovery.hostname=public-service-2
+      - spring.cloud.consul.discovery.port=8084
+      - spring.cloud.consul.discovery.metadata.group=dev
+      - spring.cloud.consul.discovery.metadata.root-context=/
+      - spring.cloud.consul.discovery.metadata.scheme=http
+      - spring.cloud.consul.discovery.metadata.type=rest
+      - spring.cloud.consul.discovery.metadata.capi-instance=default
+      - spring.cloud.consul.discovery.metadata.secured=false
