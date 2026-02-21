@@ -1,0 +1,241 @@
+# Configuration Reference
+
+CAPI is configured via a YAML file. Set the `CAPI_CONFIG_FILE` environment variable to point to it.
+
+## Complete Configuration
+
+```yaml
+capi:
+  version: 1.0.0
+  instanceName: default
+  strictToInstanceName: true
+  publicEndpoint: http://localhost:8380/api/
+  runningMode: full
+  adminPort: 8381
+  reverseProxyHost:
+
+  rest:
+    enabled: true
+    port: 8380
+    listeningAddress: 0.0.0.0
+    contextPath: /api
+    connectionRequestTimeout: 5000
+    requestTimeout: 5000
+    responseTimeout: 120000
+
+  websocket:
+    enabled: false
+    port: 8382
+    listeningAddress: 0.0.0.0
+    contextPath: /api/*
+
+  ssl:
+    enabled: false
+    keyStoreType: PKCS12
+    path:
+    password:
+
+  trustStore:
+    enabled: false
+    path:
+    encoded:
+    password:
+
+  consulCatalogDiscoverInterval: 60000
+  consulHosts:
+    - endpoint: http://localhost:8500
+      token:
+  consulStore:
+    enabled: false
+    endpoint: http://localhost:8500
+    token:
+
+  oauth2:
+    enabled: false
+    cookieName:
+    keys:
+      - http://localhost:8080/realms/capi/protocol/openid-connect/certs
+
+  opa:
+    enabled: false
+    endpoint: http://localhost:8181
+
+  traces:
+    enabled: false
+    serviceName: capi
+    endpoint: http://localhost:4318
+    extraMetadataPrefix:
+
+  corsEnabled: false
+  allowedHeaders:
+    - Origin
+    - Accept
+    - X-Requested-With
+    - Content-Type
+    - Access-Control-Request-Method
+    - Authorization
+
+  loggingTraces:
+    enabled: false
+    tenant: capi
+    appName: capi
+    appEnvironment: dev
+    destination: localhost:5444
+
+  accessLogs:
+    enabled: false
+    tenant: capi
+    service: capi
+    destination: localhost:5444
+
+  throttle:
+    enabled: false
+    kubernetesNamespace:
+    kubernetesServiceName:
+```
+
+## Fields
+
+### General
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `version` | — | CAPI version identifier (informational). |
+| `instanceName` | `default` | Name of this CAPI instance. Used for multi-instance targeting via Consul metadata. |
+| `strictToInstanceName` | `true` | When `true`, only services that declare this instance name are routed. When `false`, services without an instance declaration are also accepted. |
+| `publicEndpoint` | — | The externally-reachable URL of this gateway. Used for OpenAPI spec URL rewriting. |
+| `runningMode` | `full` | Service types to proxy: `full` (REST + WebSocket + SSE), `websocket`, or `sse`. |
+| `adminPort` | `8381` | Port for the Admin API (health, metrics, routes). |
+| `reverseProxyHost` | — | Override the `X-Forwarded-Host` header sent to upstream services. |
+
+### REST
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `rest.enabled` | `true` | Enable the REST gateway. |
+| `rest.port` | `8380` | Listening port. |
+| `rest.listeningAddress` | `0.0.0.0` | Bind address. |
+| `rest.contextPath` | `/api` | Base path for all REST routes. |
+| `rest.connectionRequestTimeout` | `5000` | Time (ms) to obtain a connection from the pool. |
+| `rest.requestTimeout` | `5000` | Total request timeout (ms). |
+| `rest.responseTimeout` | `120000` | Time (ms) to wait for a response from the backend. |
+
+### WebSocket
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `websocket.enabled` | `false` | Enable the WebSocket/SSE gateway. |
+| `websocket.port` | `8382` | Listening port. |
+| `websocket.listeningAddress` | `0.0.0.0` | Bind address. |
+| `websocket.contextPath` | `/api/*` | Path pattern for WebSocket routes. |
+
+### SSL
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `ssl.enabled` | `false` | Enable TLS termination on all listeners. |
+| `ssl.keyStoreType` | `PKCS12` | Keystore format. |
+| `ssl.path` | — | Path to the keystore file. |
+| `ssl.password` | — | Keystore password. |
+
+### Truststore
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `trustStore.enabled` | `false` | Enable a custom truststore for upstream connections. |
+| `trustStore.path` | — | Path to the truststore file. |
+| `trustStore.encoded` | — | Base64-encoded truststore content (alternative to path). |
+| `trustStore.password` | — | Truststore password. |
+
+### Consul
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `consulCatalogDiscoverInterval` | `60000` | Interval (ms) between Consul catalog polls. |
+| `consulHosts[].endpoint` | — | Consul agent HTTP endpoint (e.g. `http://consul:8500`). Multiple hosts supported. |
+| `consulHosts[].token` | — | Consul ACL token for this host. |
+| `consulStore.enabled` | `false` | Enable Consul KV store integration. |
+| `consulStore.endpoint` | — | Consul KV store endpoint. |
+| `consulStore.token` | — | Consul KV store token. |
+
+### OAuth2
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `oauth2.enabled` | `false` | Enable OAuth2/OIDC token validation. |
+| `oauth2.cookieName` | — | Cookie name to extract tokens from (for browser clients). |
+| `oauth2.keys` | — | List of JWKS endpoint URLs. Multiple providers supported. |
+
+See [Security](security.md) for details.
+
+### OPA
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `opa.enabled` | `false` | Enable OPA authorization. |
+| `opa.endpoint` | — | OPA server endpoint (e.g. `http://opa:8181`). |
+
+See [Security](security.md) for details.
+
+### Tracing
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `traces.enabled` | `false` | Enable OpenTelemetry distributed tracing. |
+| `traces.serviceName` | `capi` | Service name reported in traces. |
+| `traces.endpoint` | — | OTLP HTTP endpoint (e.g. `http://otel-collector:4318`). |
+| `traces.extraMetadataPrefix` | — | Prefix for extracting extra service metadata from Consul into trace attributes. |
+
+### CORS
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `corsEnabled` | `false` | Enable CORS header management. |
+| `allowedHeaders` | — | List of allowed request headers. |
+
+See [Security](security.md) for details.
+
+### Logging
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `loggingTraces.enabled` | `false` | Enable structured log forwarding. |
+| `loggingTraces.tenant` | — | Tenant identifier in logs. |
+| `loggingTraces.appName` | — | Application name in logs. |
+| `loggingTraces.appEnvironment` | — | Environment label (dev, staging, prod). |
+| `loggingTraces.destination` | — | Remote log destination (host:port). |
+| `accessLogs.enabled` | `false` | Enable access log forwarding. |
+| `accessLogs.tenant` | — | Tenant identifier. |
+| `accessLogs.service` | — | Service identifier. |
+| `accessLogs.destination` | — | Remote log destination (host:port). |
+
+### Throttling
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `throttle.enabled` | `false` | Enable distributed rate limiting via Hazelcast. |
+| `throttle.kubernetesServiceName` | — | Kubernetes Service name for Hazelcast pod discovery. If empty, multicast is used. |
+| `throttle.kubernetesNamespace` | — | Kubernetes namespace for Hazelcast discovery. Defaults to the pod's own namespace. |
+
+Per-service throttle settings are configured via Consul metadata. See [Service Registration](consul-metadata.md) for details.
+
+## Ports Summary
+
+| Port | Description | Config Key |
+|------|-------------|------------|
+| 8380 | REST gateway | `capi.rest.port` |
+| 8381 | Admin API | `capi.adminPort` |
+| 8382 | WebSocket/SSE gateway | `capi.websocket.port` |
+
+## Reverse Proxy Headers
+
+CAPI automatically sets the following headers on proxied requests:
+
+| Header | Value |
+|--------|-------|
+| `X-Forwarded-Host` | Original client host (or `reverseProxyHost` if configured) |
+| `X-Forwarded-Prefix` | Service context path prefix |
+| `X-Forwarded-For` | Client IP address |
+| `X-Forwarded-Proto` | Protocol scheme |
+| `X-Forwarded-Server` | CAPI server hostname |
+| `X-Forwarded-Port` | CAPI server port |

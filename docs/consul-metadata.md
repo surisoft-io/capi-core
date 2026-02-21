@@ -1,0 +1,357 @@
+# Service Registration and Consul Metadata
+
+This guide walks through registering a service with CAPI via Consul, from the simplest case to advanced configurations.
+
+## How CAPI Discovers Services
+
+CAPI polls the Consul catalog at a configurable interval (`consulCatalogDiscoverInterval`, default 60s). For each service it finds, it reads the service metadata (`ServiceMeta`) and automatically creates, updates, or removes routes.
+
+Services do **not** need any CAPI-specific code. CAPI reads metadata from Consul and builds routes accordingly.
+
+## User Journey
+
+### 1. Register a Simple REST Service
+
+The minimum metadata CAPI needs is `group` and `root-context`.
+
+Register a service in Consul via the HTTP API:
+
+```bash
+curl -X PUT http://localhost:8500/v1/agent/service/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Name": "order-service",
+    "Port": 8080,
+    "Address": "10.0.0.10",
+    "Meta": {
+      "group": "v1",
+      "root-context": "/orders",
+      "scheme": "http"
+    }
+  }'
+```
+
+CAPI creates a route at:
+```
+GET http://<capi-host>:8380/api/order-service/v1/orders/**
+```
+
+The route ID becomes `order-service:v1`. Requests to CAPI are proxied to `http://10.0.0.10:8080/orders/**`.
+
+Verify the route was created:
+
+```bash
+curl http://localhost:8381/info/routes
+```
+
+### 2. Add Multiple Instances (Load Balancing)
+
+Register more instances of the same service with the same `Name` and `group`:
+
+```bash
+curl -X PUT http://localhost:8500/v1/agent/service/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ID": "order-service-2",
+    "Name": "order-service",
+    "Port": 8080,
+    "Address": "10.0.0.11",
+    "Meta": {
+      "group": "v1",
+      "root-context": "/orders",
+      "scheme": "http"
+    }
+  }'
+```
+
+CAPI automatically enables **Round Robin load balancing** and **Failover** when more than one instance is registered.
+
+### 3. Secure with OAuth2
+
+Add `secured: true` to require a valid Bearer token on every request:
+
+```bash
+curl -X PUT http://localhost:8500/v1/agent/service/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Name": "order-service",
+    "Port": 8080,
+    "Address": "10.0.0.10",
+    "Meta": {
+      "group": "v1",
+      "root-context": "/orders",
+      "scheme": "http",
+      "secured": "true"
+    }
+  }'
+```
+
+CAPI validates the token against the JWKS endpoints configured in `capi.oauth2.keys`. See [Security](security.md) for details.
+
+Test the secured endpoint:
+
+```bash
+# Without token - returns 401
+curl -i http://localhost:8380/api/order-service/v1/orders
+
+# With token - proxied to backend
+curl -H "Authorization: Bearer <token>" \
+  http://localhost:8380/api/order-service/v1/orders
+```
+
+### 4. Add OPA Authorization
+
+For fine-grained authorization (e.g. role-based access), add an OPA Rego policy:
+
+```bash
+curl -X PUT http://localhost:8500/v1/agent/service/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Name": "order-service",
+    "Port": 8080,
+    "Address": "10.0.0.10",
+    "Meta": {
+      "group": "v1",
+      "root-context": "/orders",
+      "scheme": "http",
+      "secured": "true",
+      "opa-rego": "capi/order_policy"
+    }
+  }'
+```
+
+CAPI sends the request context to OPA at the configured endpoint and enforces the decision. See [Security](security.md) for policy details.
+
+### 5. Enable Throttling
+
+Rate-limit a service by declaring throttle metadata:
+
+```bash
+curl -X PUT http://localhost:8500/v1/agent/service/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Name": "order-service",
+    "Port": 8080,
+    "Address": "10.0.0.10",
+    "Meta": {
+      "group": "v1",
+      "root-context": "/orders",
+      "scheme": "http",
+      "throttle": "true",
+      "throttleTotalCalls": "100",
+      "throttleDuration": "60000"
+    }
+  }'
+```
+
+This allows 100 calls per 60 seconds. Throttle state is distributed across all CAPI instances via Hazelcast. CAPI must have `capi.throttle.enabled: true` in its configuration.
+
+### 6. Expose OpenAPI Spec
+
+If your service has an OpenAPI endpoint, CAPI can fetch and expose it:
+
+```bash
+curl -X PUT http://localhost:8500/v1/agent/service/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Name": "order-service",
+    "Port": 8080,
+    "Address": "10.0.0.10",
+    "Meta": {
+      "group": "v1",
+      "root-context": "/orders",
+      "scheme": "http",
+      "open-api": "http://10.0.0.10:8080/v3/api-docs",
+      "expose-open-api-definition": "true"
+    }
+  }'
+```
+
+Retrieve the spec via the Admin API:
+
+```bash
+curl http://localhost:8381/info/openapi/order-service:v1
+```
+
+Add `"secure-open-api-definition": "true"` to require OAuth2 authentication to view the spec.
+
+### 7. Register a WebSocket Service
+
+```bash
+curl -X PUT http://localhost:8500/v1/agent/service/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Name": "chat-service",
+    "Port": 9090,
+    "Address": "10.0.0.20",
+    "Meta": {
+      "group": "v1",
+      "root-context": "/chat",
+      "scheme": "ws",
+      "type": "websocket"
+    }
+  }'
+```
+
+CAPI routes WebSocket connections through the WebSocket port (default 8382). CAPI must have `capi.websocket.enabled: true`.
+
+### 8. Register an SSE Service
+
+```bash
+curl -X PUT http://localhost:8500/v1/agent/service/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Name": "notifications",
+    "Port": 9091,
+    "Address": "10.0.0.30",
+    "Meta": {
+      "group": "v1",
+      "root-context": "/events",
+      "scheme": "http",
+      "type": "sse"
+    }
+  }'
+```
+
+SSE services are handled on the WebSocket port. CAPI must have `capi.websocket.enabled: true` and `runningMode` set to `full` or `sse`.
+
+### 9. Target a Specific CAPI Instance
+
+When running multiple CAPI instances with different `instanceName` values, target a service to a specific instance:
+
+```bash
+curl -X PUT http://localhost:8500/v1/agent/service/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Name": "order-service",
+    "Port": 8080,
+    "Address": "10.0.0.10",
+    "Meta": {
+      "group": "v1",
+      "root-context": "/orders",
+      "scheme": "http",
+      "capi-instance": "production"
+    }
+  }'
+```
+
+Only the CAPI instance with `instanceName: production` will create a route for this service. If `strictToInstanceName: true`, services without a `capi-instance` declaration are ignored.
+
+#### Multi-Instance Targeting
+
+A single service can target multiple CAPI instances with different settings per instance:
+
+```bash
+curl -X PUT http://localhost:8500/v1/agent/service/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Name": "order-service",
+    "Port": 8080,
+    "Address": "10.0.0.10",
+    "Meta": {
+      "group": "v1",
+      "root-context": "/orders",
+      "scheme": "http",
+      "capi-instance-production": "{\"secured\": true, \"routeGroupFirst\": false}",
+      "capi-instance-staging": "{\"secured\": false, \"routeGroupFirst\": false}"
+    }
+  }'
+```
+
+### 10. Control Route Path Order
+
+By default, the route path is `/<service-name>/<group>`. To reverse it to `/<group>/<service-name>`:
+
+```bash
+curl -X PUT http://localhost:8500/v1/agent/service/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Name": "order-service",
+    "Port": 8080,
+    "Address": "10.0.0.10",
+    "Meta": {
+      "group": "v1",
+      "root-context": "/orders",
+      "scheme": "http",
+      "route-group-first": "true"
+    }
+  }'
+```
+
+This creates a route at `/api/v1/order-service/orders/**` instead of `/api/order-service/v1/orders/**`.
+
+### 11. Deregister a Service
+
+```bash
+curl -X PUT http://localhost:8500/v1/agent/service/deregister/order-service
+```
+
+CAPI automatically detects the removal on the next discovery cycle and removes the route.
+
+## Complete Metadata Reference
+
+### Required Fields
+
+| Key | Description | Example |
+|-----|-------------|---------|
+| `group` | Route group identifier. Combined with service name to form the route path. | `v1` |
+| `root-context` | Backend path prefix. Requests are forwarded to this path on the upstream service. | `/orders` |
+
+### Routing
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `scheme` | `http` | Protocol to use when connecting to the upstream service (`http`, `https`, `ws`, `wss`). |
+| `type` | `rest` | Service type: `rest`, `websocket`, or `sse`. |
+| `route-group-first` | `false` | When `true`, route path becomes `/<group>/<service>` instead of `/<service>/<group>`. |
+| `keep-group` | `false` | When `true`, preserves the group segment in the path forwarded to the backend. |
+| `state` | `PUBLISHED` | Service state. Only `PUBLISHED` services are routed. Set to other values to disable without deregistering. |
+| `version` | — | Service version metadata (informational). |
+
+### Security
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `secured` | `false` | When `true`, requires a valid OAuth2/OIDC Bearer token. |
+| `opa-rego` | — | OPA Rego policy path for fine-grained authorization (e.g. `capi/order_policy`). |
+| `allowed-origins` | — | Comma-separated list of allowed CORS origins for this service. |
+
+### Throttling
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `throttle` | `false` | Enable rate limiting for this service. |
+| `throttleTotalCalls` | `-1` | Maximum number of calls allowed in the time window. |
+| `throttleDuration` | `-1` | Time window in milliseconds. |
+| `throttleGlobal` | `false` | When `true`, throttle state is shared across all CAPI instances. |
+| `rateLimit` | `false` | Enable rate limiting flag. |
+
+### OpenAPI
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `open-api` | — | URL of the service's OpenAPI spec endpoint. |
+| `expose-open-api-definition` | `false` | When `true`, the spec is available via `GET /info/openapi/<service-id>` on the Admin port. |
+| `secure-open-api-definition` | `false` | When `true`, requires OAuth2 authentication to view the OpenAPI spec. |
+
+### Instance Targeting
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `capi-instance` | — | Target a specific CAPI instance by `instanceName`. |
+| `namespace` | — | Alternative field for instance targeting (same as `capi-instance`). |
+| `capi-instance-<name>` | — | JSON object with per-instance overrides. See multi-instance targeting above. |
+
+### Observability
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `X-B3-TraceId` | `false` | When `true`, includes B3 trace IDs in error responses. |
+| `ingress` | — | Ingress metadata (informational). |
+
+### WebSocket / SSE
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `subscription-group` | — | Subscription group for SSE/WebSocket services. |
+| `allow-subscriptions` | `false` | Enable subscription functionality. |

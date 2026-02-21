@@ -14,22 +14,27 @@
   <br>
 </h5>
 
-# CAPI Gateway Documentation
+# CAPI Gateway
 ## _Light Apache Camel API Gateway_
 
+CAPI is a lightweight API Gateway and load balancer powered by Apache Camel dynamic routes. Services register themselves in HashiCorp Consul, and CAPI automatically discovers them, creates routes, and applies security, throttling, and observability policies — no database required.
+
 ## Features
-* Light API Gateway / Load Balancer powered by Apache Camel dynamic routes
-* Protect your services using OAuth2 or OPA (Open Policy Agent)
-* Distributed tracing (OpenTelemetry)
-* Metrics (Prometheus)
-* Route management and metrics
-* Load balancing (Round Robin)
-* Failover (with and without Round Robin)
-* Certificate Manager
-* No database needed — CAPI uses HashiCorp Consul for service discovery
-* Websocket Gateway
-* SSE Gateway
-* Distributed throttling (Hazelcast, with Kubernetes discovery support)
+
+* REST, WebSocket, and SSE gateway with dynamic routing
+* Service discovery via HashiCorp Consul (automatic route creation and removal)
+* OAuth2 / OIDC token validation (multi-provider)
+* Fine-grained authorization via OPA (Open Policy Agent)
+* Distributed throttling (Hazelcast, with Kubernetes discovery)
+* Load balancing (Round Robin) and Failover
+* Distributed tracing (OpenTelemetry / OTLP)
+* Prometheus metrics
+* OpenAPI spec aggregation from upstream services
+* TLS termination and custom truststore management
+* CORS management
+* Admin API with health, metrics, and route inspection
+* Multi-instance support (route targeting per CAPI instance)
+* Reverse proxy headers (`X-Forwarded-*`)
 
 ## Quickstart
 
@@ -75,7 +80,7 @@ See [`helm/capi-core/values.yaml`](helm/capi-core/values.yaml) for all available
 |------|-------------|------------|
 | 8380 | REST API gateway | `capi.rest.port` |
 | 8381 | Admin / metrics | `capi.adminPort` |
-| 8382 | Websocket gateway | `capi.websocket.port` |
+| 8382 | WebSocket gateway | `capi.websocket.port` |
 
 ## Running Modes
 
@@ -83,167 +88,16 @@ The `runningMode` field controls which types of services CAPI will proxy:
 
 | Mode | Description |
 |------|-------------|
-| `full` | Proxies REST, Websocket, and SSE services (default) |
-| `websocket` | Only proxies Websocket services |
+| `full` | Proxies REST, WebSocket, and SSE services (default) |
+| `websocket` | Only proxies WebSocket services |
 | `sse` | Only proxies SSE services |
 
-## Configuration Reference
+## Documentation
 
-CAPI is configured via a YAML file. Below is a complete example with all available fields:
-
-```yaml
-capi:
-  version: 1.0.0
-  instanceName: default
-  strictToInstanceName: true
-  publicEndpoint: http://localhost:8380/api/
-  runningMode: full
-  adminPort: 8381
-  reverseProxyHost:
-  rest:
-    enabled: true
-    port: 8380
-    listeningAddress: 0.0.0.0
-    contextPath: /api
-    connectionRequestTimeout: 5000
-    requestTimeout: 5000
-    responseTimeout: 120000
-  websocket:
-    enabled: false
-    port: 8382
-    listeningAddress: 0.0.0.0
-    contextPath: /api/*
-  ssl:
-    enabled: false
-    keyStoreType: PKCS12
-    path:
-    password:
-  trustStore:
-    enabled: false
-    path:
-    encoded:
-    password:
-  consulCatalogDiscoverInterval: 60000
-  consulHosts:
-    - endpoint: http://localhost:8500
-      token:
-  consulStore:
-    enabled: false
-    endpoint: http://localhost:8500
-    token:
-  oauth2:
-    enabled: false
-    cookieName:
-    keys:
-      - http://localhost:8080/realms/capi/protocol/openid-connect/certs
-  opa:
-    enabled: false
-    endpoint: http://localhost:8181
-  traces:
-    enabled: false
-    serviceName: capi
-    endpoint: http://localhost:4318
-    extraMetadataPrefix:
-  corsEnabled: false
-  allowedHeaders:
-    - Origin
-    - Accept
-    - X-Requested-With
-    - Content-Type
-    - Access-Control-Request-Method
-    - Authorization
-  loggingTraces:
-    enabled: false
-    tenant: capi
-    appName: capi
-    appEnvironment: dev
-    destination: localhost:5444
-  accessLogs:
-    enabled: false
-    tenant: capi
-    service: capi
-    destination: localhost:5444
-  throttle:
-    enabled: false
-    kubernetesNamespace:
-    kubernetesServiceName:
-```
-
-### Config Fields
-
-| Field | Description |
-|-------|-------------|
-| `instanceName` | Name of this CAPI instance (used for multi-instance setups) |
-| `strictToInstanceName` | When `true`, only routes tagged for this instance are proxied |
-| `publicEndpoint` | The externally-reachable URL of this gateway |
-| `runningMode` | Service types to proxy: `full`, `websocket`, or `sse` |
-| `reverseProxyHost` | Override the host header sent to upstream services |
-| `consulCatalogDiscoverInterval` | Interval (ms) for polling Consul for service changes |
-| `consulHosts` | List of Consul agent endpoints for service discovery |
-| `consulStore` | Optional Consul KV store for persisting route configuration |
-| `oauth2` | OAuth2/OIDC protection — provide JWKS endpoint(s) |
-| `opa` | Open Policy Agent integration for fine-grained authorization |
-| `traces` | OpenTelemetry tracing configuration (OTLP HTTP endpoint) |
-| `loggingTraces` | Structured logging traces forwarding |
-| `accessLogs` | Access log forwarding |
-| `throttle` | Rate-limiting via distributed Hazelcast cache |
-
-## Throttling
-
-CAPI supports distributed rate-limiting using a Hazelcast cluster. When enabled, throttle state is shared across all CAPI instances.
-
-```yaml
-capi:
-  throttle:
-    enabled: true
-```
-
-### Kubernetes Discovery
-
-By default, Hazelcast uses multicast to discover cluster members. This works for standalone JARs and Docker containers on the same network, but **not in Kubernetes** where multicast is typically blocked.
-
-To run throttling in Kubernetes, set `kubernetesServiceName` to the name of the Kubernetes `Service` that fronts your CAPI pods. Hazelcast will then use the Kubernetes API to discover members instead of multicast.
-
-```yaml
-capi:
-  throttle:
-    enabled: true
-    kubernetesServiceName: capi-core
-    kubernetesNamespace: default
-```
-
-| Field | Description |
-|-------|-------------|
-| `kubernetesServiceName` | K8s Service name for Hazelcast pod discovery. If empty, multicast is used. |
-| `kubernetesNamespace` | K8s namespace to query. Optional — defaults to the pod's own namespace. |
-
-When deploying with the Helm chart, the required `ServiceAccount`, `Role`, and `RoleBinding` are created automatically:
-
-```bash
-helm install capi-core helm/capi-core \
-  --set capi.throttle.enabled=true \
-  --set capi.throttle.kubernetesServiceName=capi-core \
-  --set capi.throttle.kubernetesNamespace=default
-```
-
-## Health Endpoints
-
-| Endpoint | Port | Purpose |
-|----------|------|---------|
-| `GET /health` | REST (8380) | Readiness — checks Consul connectivity |
-| `GET /info/health` | Admin (8381) | Liveness — confirms the process is running |
-
-## Admin Endpoints
-
-All admin endpoints are served on the admin port (default `8381`):
-
-| Endpoint | Description |
+| Document | Description |
 |----------|-------------|
-| `GET /info/health` | Health check |
-| `GET /info/metrics` | Prometheus metrics |
-| `GET /info/capi` | General CAPI instance info |
-| `GET /info/routes` | List all managed routes |
-| `GET /info/routes/{id}` | Get a specific route by ID |
-| `GET /info/openapi/{id}` | OpenAPI spec for a route |
-| `GET /info/truststore` | Truststore info |
-| `GET /info/wsroutes` | List active Websocket routes |
+| [Service Registration](docs/consul-metadata.md) | How to register services in Consul and configure routing, security, and throttling via metadata |
+| [Security](docs/security.md) | OAuth2/OIDC and OPA authorization configuration |
+| [Admin API](docs/admin-api.md) | Admin endpoints reference (health, metrics, routes, OpenAPI) |
+| [Configuration Reference](docs/configuration.md) | Complete YAML configuration reference with all fields |
+| [MCP Gateway (Proposed)](docs/mcp-gateway.md) | Proposed MCP Gateway capabilities for LLM tool integration |
