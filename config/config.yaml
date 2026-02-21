@@ -18,7 +18,7 @@ capi:
     enabled: false
     port: 8382
     listeningAddress: 0.0.0.0
-    contextPath: /api/*
+    contextPath: /capi/*
   ssl:
     enabled: false
     keyStoreType: PKCS12
@@ -41,7 +41,7 @@ capi:
     enabled: false
     cookieName:
     keys:
-      - http://localhost:8080/realms/capi/protocol/openid-connect/certs
+      - http://localhost:8080/keycloak/realms/capi/protocol/openid-connect/certs
   opa:
     enabled: false
     endpoint: http://localhost:8181
@@ -73,3 +73,8 @@ capi:
     enabled: false
     kubernetesNamespace:
     kubernetesServiceName:
+  mcp:
+    enabled: false
+    port: 8383
+    sessionTtl: 1800000
+    toolCallTimeout: 30000

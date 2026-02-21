@@ -132,4 +132,23 @@ public class Constants {
     public static final String ERROR_SERVICE_HOST = "Problem with Service host";
     public static final String ERROR_NO_SERVER_AVAILABLE = "No server available at the moment. Please try again later.";
     public static final String ERROR_REMOTE_NOT_RESPONDING = "Remote server is not responding, or it has a configuration issue";
+
+    // MCP Gateway
+    public static final String MCP_SESSION_HEADER = "Mcp-Session-Id";
+    public static final String MCP_PROTOCOL_VERSION = "2025-03-26";
+    public static final String MCP_SERVER_NAME = "CAPI MCP Gateway";
+    public static final String MCP_META_PREFIX = "mcp.";
+    public static final String MCP_META_ENABLED = "mcp.enabled";
+    public static final String MCP_META_TOOLS = "mcp.tools";
+    public static final String MCP_META_TOOL_PREFIX = "mcp.toolPrefix";
+    public static final String MCP_META_STREAMING = "mcp.streaming";
+    public static final String MCP_META_CATEGORY = "mcp.category";
+    public static final String MCP_META_TIMEOUT = "mcp.timeout";
+
+    // JSON-RPC error codes
+    public static final int JSONRPC_PARSE_ERROR = -32700;
+    public static final int JSONRPC_INVALID_REQUEST = -32600;
+    public static final int JSONRPC_METHOD_NOT_FOUND = -32601;
+    public static final int JSONRPC_INVALID_PARAMS = -32602;
+    public static final int JSONRPC_INTERNAL_ERROR = -32603;
 }

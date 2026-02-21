@@ -26,6 +26,7 @@ public class CAPIConfiguration {
     private LoggingTraces loggingTraces;
     private AccessLogs accessLogs;
     private Throttle throttle;
+    private Mcp mcp;
 
     public String getVersion() {
         return version;
@@ -531,6 +532,45 @@ public class CAPIConfiguration {
     }
     public void setThrottle(Throttle throttle) {
         this.throttle = throttle;
+    }
+
+    public Mcp getMcp() {
+        return mcp;
+    }
+    public void setMcp(Mcp mcp) {
+        this.mcp = mcp;
+    }
+
+    public static class Mcp {
+        private boolean enabled;
+        private int port = 8383;
+        private long sessionTtl = 1800000;
+        private int toolCallTimeout = 30000;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+        public int getPort() {
+            return port;
+        }
+        public void setPort(int port) {
+            this.port = port;
+        }
+        public long getSessionTtl() {
+            return sessionTtl;
+        }
+        public void setSessionTtl(long sessionTtl) {
+            this.sessionTtl = sessionTtl;
+        }
+        public int getToolCallTimeout() {
+            return toolCallTimeout;
+        }
+        public void setToolCallTimeout(int toolCallTimeout) {
+            this.toolCallTimeout = toolCallTimeout;
+        }
     }
 
     public static class Throttle {

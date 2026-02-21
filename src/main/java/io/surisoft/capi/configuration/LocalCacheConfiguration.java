@@ -1,9 +1,12 @@
 package io.surisoft.capi.configuration;
 
 import io.surisoft.capi.schema.ConsulKeyStoreEntry;
+import io.surisoft.capi.schema.McpSession;
 import io.surisoft.capi.schema.Service;
 import org.cache2k.Cache;
 import org.cache2k.Cache2kBuilder;
+
+import java.util.concurrent.TimeUnit;
 
 public class LocalCacheConfiguration {
 
@@ -26,5 +29,12 @@ public class LocalCacheConfiguration {
                 .build();
     }
 
-
+    public static Cache<String, McpSession> mcpSessionCache(long ttlMillis) {
+        return new Cache2kBuilder<String, McpSession>(){}
+                .name("mcpSessionCache-" + System.currentTimeMillis())
+                .expireAfterWrite(ttlMillis, TimeUnit.MILLISECONDS)
+                .entryCapacity(10000)
+                .storeByReference(true)
+                .build();
+    }
 }

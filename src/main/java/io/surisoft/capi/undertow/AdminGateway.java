@@ -5,10 +5,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import io.surisoft.capi.configuration.CAPIConfiguration;
 import io.surisoft.capi.metrics.*;
+import io.surisoft.capi.schema.McpTool;
 import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.schema.WebsocketClient;
 import io.surisoft.capi.service.CapiTrustManager;
 import io.surisoft.capi.service.ConsulNodeDiscovery;
+import io.surisoft.capi.service.McpSessionStore;
+import io.surisoft.capi.service.McpToolRegistry;
 import io.surisoft.capi.utils.Constants;
 import io.undertow.Undertow;
 import io.undertow.server.HttpServerExchange;
@@ -22,8 +25,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.net.ssl.SSLContext;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 
 public class AdminGateway implements AutoCloseable {
 
@@ -38,6 +41,8 @@ public class AdminGateway implements AutoCloseable {
     ObjectMapper objectMapper = new ObjectMapper();
     private final CapiTrustManager capiTrustManager;
     private Map<String, WebsocketClient> websocketClients;
+    private McpToolRegistry mcpToolRegistry;
+    private McpSessionStore mcpSessionStore;
 
     public AdminGateway(int port, PrometheusMeterRegistry prometheusRegistry, CAPIConfiguration capiConfiguration, CamelContext camelContext, Cache<String, Service> serviceCache, SSLContext sslContext, CapiTrustManager capiTrustManager) {
         this.port = port;
@@ -59,7 +64,10 @@ public class AdminGateway implements AutoCloseable {
                 .addPrefixPath("/info/routes/", this::handleRouteById)
                 .addPrefixPath("/info/openapi/", this::handleOpenApi)
                 .addExactPath("/info/truststore", this::handleTruststore)
-                .addExactPath("/info/wsroutes", this::handleWsRoutes);
+                .addExactPath("/info/wsroutes", this::handleWsRoutes)
+                .addExactPath("/info/mcp", this::handleMcpInfo)
+                .addExactPath("/info/mcp/tools", this::handleMcpTools)
+                .addExactPath("/info/mcp/sessions", this::handleMcpSessions);
 
 
         Undertow.Builder builder = Undertow.builder();
@@ -99,6 +107,9 @@ public class AdminGateway implements AutoCloseable {
             links.put("openapi", Map.of("href", baseUrl + "/info/openapi/{serviceId}"));
             links.put("truststore", Map.of("href", baseUrl + "/info/truststore"));
             links.put("wsroutes", Map.of("href", baseUrl + "/info/wsroutes"));
+            links.put("mcp", Map.of("href", baseUrl + "/info/mcp"));
+            links.put("mcp-tools", Map.of("href", baseUrl + "/info/mcp/tools"));
+            links.put("mcp-sessions", Map.of("href", baseUrl + "/info/mcp/sessions"));
 
             Map<String, Object> response = new LinkedHashMap<>();
             response.put("_links", links);
@@ -247,5 +258,67 @@ public class AdminGateway implements AutoCloseable {
 
     public void setWebsocketClients(Map<String, WebsocketClient> websocketClients) {
         this.websocketClients = websocketClients;
+    }
+
+    public void setMcpToolRegistry(McpToolRegistry mcpToolRegistry) {
+        this.mcpToolRegistry = mcpToolRegistry;
+    }
+
+    public void setMcpSessionStore(McpSessionStore mcpSessionStore) {
+        this.mcpSessionStore = mcpSessionStore;
+    }
+
+    private void handleMcpInfo(HttpServerExchange exchange) {
+        exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+        try {
+            boolean enabled = capiConfiguration.getMcp() != null && capiConfiguration.getMcp().isEnabled();
+            int mcpPort = enabled ? capiConfiguration.getMcp().getPort() : 0;
+            int toolCount = mcpToolRegistry != null ? mcpToolRegistry.getAllTools().size() : 0;
+            int sessionCount = mcpSessionStore != null ? mcpSessionStore.size() : 0;
+
+            Map<String, Object> info = new LinkedHashMap<>();
+            info.put("enabled", enabled);
+            info.put("port", mcpPort);
+            info.put("toolCount", toolCount);
+            info.put("activeSessionCount", sessionCount);
+
+            exchange.setStatusCode(StatusCodes.OK);
+            exchange.getResponseSender().send(objectMapper.writeValueAsString(info));
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void handleMcpTools(HttpServerExchange exchange) {
+        exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+        try {
+            if (mcpToolRegistry == null) {
+                exchange.setStatusCode(StatusCodes.NOT_FOUND);
+                exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.NOT_FOUND, "MCP Gateway not enabled")));
+                return;
+            }
+            List<McpTool> tools = mcpToolRegistry.getAllTools();
+            exchange.setStatusCode(StatusCodes.OK);
+            exchange.getResponseSender().send(objectMapper.writeValueAsString(tools));
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void handleMcpSessions(HttpServerExchange exchange) {
+        exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+        try {
+            if (mcpSessionStore == null) {
+                exchange.setStatusCode(StatusCodes.NOT_FOUND);
+                exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.NOT_FOUND, "MCP Gateway not enabled")));
+                return;
+            }
+            Map<String, Object> info = new LinkedHashMap<>();
+            info.put("activeSessionCount", mcpSessionStore.size());
+            exchange.setStatusCode(StatusCodes.OK);
+            exchange.getResponseSender().send(objectMapper.writeValueAsString(info));
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
     }
 }

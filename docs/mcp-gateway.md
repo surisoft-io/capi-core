@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Experimental
 
 ## Context
 
@@ -208,3 +208,253 @@ These concerns remain client-side or in dedicated agent runtimes.
 - Requires careful observability and rate limiting
 - Tool metadata quality becomes critical (descriptions and schemas directly affect LLM tool selection)
 - Services must declare MCP metadata in Consul for their tools to be discoverable
+
+---
+
+## Implementation Details
+
+### Status
+
+Implemented
+
+### Dedicated Port
+
+The MCP Gateway runs on a dedicated Undertow server on port **8383** (configurable), following the same standalone-server pattern used by AdminGateway and WebsocketGateway. This keeps MCP traffic isolated from Camel's REST port.
+
+### Configuration
+
+Enable the MCP Gateway in `config.yaml`:
+
+```yaml
+capi:
+  mcp:
+    enabled: true
+    port: 8383
+    sessionTtl: 1800000      # 30 minutes (milliseconds)
+    toolCallTimeout: 30000   # 30 seconds (milliseconds)
+```
+
+All fields have sensible defaults. When `enabled: false` (the default), no MCP listener is started.
+
+### Admin Endpoints
+
+When the MCP Gateway is enabled, the Admin API (default port 8381) exposes:
+
+| Endpoint | Description |
+|---|---|
+| `GET /info/mcp` | MCP status: enabled, port, tool count, active sessions |
+| `GET /info/mcp/tools` | Full tool catalog as JSON |
+| `GET /info/mcp/sessions` | Active session count |
+
+---
+
+## Usage Guide
+
+### Registering a Service as an MCP Tool Provider
+
+Register your service in Consul with `mcp.*` metadata tags. The service itself does not need to know about MCP — CAPI translates MCP tool calls into REST calls against the service.
+
+```json
+{
+  "ID": "order-service-1",
+  "Name": "order-service",
+  "Address": "10.0.1.50",
+  "Port": 8080,
+  "Meta": {
+    "scheme": "http",
+    "root-context": "/api",
+    "mcp.enabled": "true",
+    "mcp.toolPrefix": "orders",
+    "mcp.tools": "get,create,search",
+    "mcp.tools.get.description": "Get an order by ID",
+    "mcp.tools.get.inputSchema": "{\"type\":\"object\",\"properties\":{\"orderId\":{\"type\":\"string\"}},\"required\":[\"orderId\"]}",
+    "mcp.tools.create.description": "Create a new order",
+    "mcp.tools.create.inputSchema": "{\"type\":\"object\",\"properties\":{\"product\":{\"type\":\"string\"},\"quantity\":{\"type\":\"integer\"}}}",
+    "mcp.tools.search.description": "Search orders by criteria",
+    "mcp.tools.search.inputSchema": "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}}}",
+    "mcp.category": "commerce",
+    "mcp.timeout": "10000",
+    "mcp.streaming": "search"
+  }
+}
+```
+
+With `mcp.toolPrefix: "orders"`, the tools are exposed as `orders.get`, `orders.create`, and `orders.search`. When an agent calls `orders.get` with `{"orderId": "12345"}`, CAPI POSTs `{"orderId": "12345"}` to `http://10.0.1.50:8080/api`.
+
+### Connecting Claude Desktop or Cursor
+
+Add CAPI as an MCP server in your client configuration:
+
+**Claude Desktop** (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "capi": {
+      "url": "http://localhost:8383/mcp",
+      "headers": {
+        "Authorization": "Bearer <your-jwt-token>"
+      }
+    }
+  }
+}
+```
+
+The MCP client handles the full session lifecycle automatically: `initialize` (gets session ID) -> `tools/list` (discovers tools) -> `tools/call` (invokes tools as the LLM decides).
+
+### curl Walkthrough
+
+```bash
+# 1. Initialize — creates a session, returns capabilities
+curl -s -D- -X POST http://localhost:8383/mcp \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"jsonrpc":"2.0","method":"initialize","id":1}'
+
+# Response headers include: Mcp-Session-Id: <uuid>
+# Response body:
+# {
+#   "jsonrpc": "2.0",
+#   "result": {
+#     "protocolVersion": "2025-03-26",
+#     "capabilities": { "tools": { "listChanged": false } },
+#     "serverInfo": { "name": "CAPI MCP Gateway", "version": "1.0.0" }
+#   },
+#   "id": 1
+# }
+
+# 2. List tools — returns all tools from MCP-enabled Consul services
+curl -s -X POST http://localhost:8383/mcp \
+  -H "Content-Type: application/json" \
+  -H "Mcp-Session-Id: <session-id>" \
+  -d '{"jsonrpc":"2.0","method":"tools/list","id":2}'
+
+# 3. Call a tool — CAPI forwards to the backend service
+curl -s -X POST http://localhost:8383/mcp \
+  -H "Content-Type: application/json" \
+  -H "Mcp-Session-Id: <session-id>" \
+  -d '{"jsonrpc":"2.0","method":"tools/call","id":3,"params":{"name":"orders.get","arguments":{"orderId":"12345"}}}'
+
+# Response:
+# {
+#   "jsonrpc": "2.0",
+#   "result": {
+#     "content": [{ "type": "text", "text": "{\"id\":\"12345\",\"status\":\"shipped\"}" }]
+#   },
+#   "id": 3
+# }
+
+# 4. Streaming tool call (SSE) — for tools that declare streaming
+curl -N -X POST http://localhost:8383/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
+  -H "Mcp-Session-Id: <session-id>" \
+  -d '{"jsonrpc":"2.0","method":"tools/call","id":4,"params":{"name":"orders.search","arguments":{"query":"pending"}}}'
+
+# 5. Ping — simple health check over JSON-RPC
+curl -s -X POST http://localhost:8383/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"ping","id":5}'
+
+# 6. Health endpoint (plain HTTP, no JSON-RPC)
+curl http://localhost:8383/mcp/health
+
+# 7. Admin introspection
+curl http://localhost:8381/info/mcp
+curl http://localhost:8381/info/mcp/tools
+```
+
+### Python Agent Integration
+
+```python
+import requests
+
+BASE = "http://localhost:8383/mcp"
+HEADERS = {"Content-Type": "application/json"}
+
+def jsonrpc(method, params=None, req_id=1, extra_headers=None):
+    body = {"jsonrpc": "2.0", "method": method, "id": req_id}
+    if params:
+        body["params"] = params
+    h = {**HEADERS, **(extra_headers or {})}
+    return requests.post(BASE, json=body, headers=h)
+
+# Initialize
+resp = jsonrpc("initialize", extra_headers={"Authorization": "Bearer <token>"})
+session_id = resp.headers["Mcp-Session-Id"]
+session_headers = {"Mcp-Session-Id": session_id}
+print(f"Session: {session_id}")
+
+# Discover tools
+resp = jsonrpc("tools/list", req_id=2, extra_headers=session_headers)
+tools = resp.json()["result"]["tools"]
+for t in tools:
+    print(f"  {t['name']}: {t['description']}")
+
+# Call a tool
+resp = jsonrpc("tools/call", req_id=3, extra_headers=session_headers,
+               params={"name": "orders.get", "arguments": {"orderId": "12345"}})
+content = resp.json()["result"]["content"][0]["text"]
+print(f"Result: {content}")
+```
+
+### LLM Agent Loop Pattern
+
+A typical agent bridges LLM function-calling with MCP tool invocation:
+
+```python
+def agent_loop(user_message, session_id):
+    # 1. Discover tools from CAPI MCP
+    tools = mcp_list_tools(session_id)
+
+    # 2. Present tools to the LLM as function definitions
+    llm_response = llm.chat(
+        messages=[{"role": "user", "content": user_message}],
+        tools=[{
+            "type": "function",
+            "function": {
+                "name": t["name"],
+                "description": t["description"],
+                "parameters": t["inputSchema"]
+            }
+        } for t in tools]
+    )
+
+    # 3. If the LLM decided to call a tool, forward to CAPI
+    if llm_response.tool_calls:
+        for call in llm_response.tool_calls:
+            result = mcp_call_tool(session_id, call.name, call.arguments)
+            # 4. Feed tool result back to LLM for the final answer
+            return llm.chat(messages=[
+                {"role": "user", "content": user_message},
+                {"role": "assistant", "tool_calls": [call]},
+                {"role": "tool", "content": result, "tool_call_id": call.id}
+            ])
+
+    return llm_response
+```
+
+### Error Handling
+
+All errors are returned as standard JSON-RPC error responses:
+
+| Code | Meaning | When |
+|---|---|---|
+| `-32700` | Parse error | Request body is not valid JSON |
+| `-32600` | Invalid request | Missing `jsonrpc: "2.0"` or missing `method` |
+| `-32601` | Method not found | Unknown JSON-RPC method |
+| `-32602` | Invalid params | Missing tool name, tool not found |
+| `-32603` | Internal error | Backend timeout, connection failure |
+| `-32000` | Auth error | Missing/invalid token, OPA policy denied |
+
+Example error response:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "error": {
+    "code": -32602,
+    "message": "Tool not found: orders.delete"
+  },
+  "id": 3
+}

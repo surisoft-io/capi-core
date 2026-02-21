@@ -590,4 +590,47 @@ class CAPIConfigurationTest {
         config.setThrottle(throttle);
         assertSame(throttle, config.getThrottle());
     }
+
+    // --- Mcp nested class ---
+
+    @Test
+    void mcp_enabled() {
+        CAPIConfiguration.Mcp mcp = new CAPIConfiguration.Mcp();
+        assertFalse(mcp.isEnabled());
+        mcp.setEnabled(true);
+        assertTrue(mcp.isEnabled());
+    }
+
+    @Test
+    void mcp_port_defaultIs8383() {
+        CAPIConfiguration.Mcp mcp = new CAPIConfiguration.Mcp();
+        assertEquals(8383, mcp.getPort());
+        mcp.setPort(9999);
+        assertEquals(9999, mcp.getPort());
+    }
+
+    @Test
+    void mcp_sessionTtl_defaultIs1800000() {
+        CAPIConfiguration.Mcp mcp = new CAPIConfiguration.Mcp();
+        assertEquals(1800000, mcp.getSessionTtl());
+        mcp.setSessionTtl(3600000);
+        assertEquals(3600000, mcp.getSessionTtl());
+    }
+
+    @Test
+    void mcp_toolCallTimeout_defaultIs30000() {
+        CAPIConfiguration.Mcp mcp = new CAPIConfiguration.Mcp();
+        assertEquals(30000, mcp.getToolCallTimeout());
+        mcp.setToolCallTimeout(60000);
+        assertEquals(60000, mcp.getToolCallTimeout());
+    }
+
+    @Test
+    void mcp_getterSetter() {
+        CAPIConfiguration config = new CAPIConfiguration();
+        assertNull(config.getMcp());
+        CAPIConfiguration.Mcp mcp = new CAPIConfiguration.Mcp();
+        config.setMcp(mcp);
+        assertSame(mcp, config.getMcp());
+    }
 }
