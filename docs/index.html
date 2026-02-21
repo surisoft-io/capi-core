@@ -43,8 +43,10 @@
       padding: 0 24px; height: 60px;
     }
     .nav-logo {
+      display: inline-flex; align-items: center; gap: 10px;
       font-size: 1.25rem; font-weight: 700; color: var(--white); text-decoration: none; letter-spacing: -0.5px;
     }
+    .nav-logo img { height: 32px; width: auto; }
     .nav-logo span { color: var(--accent); }
     .nav-links { display: flex; gap: 28px; list-style: none; }
     .nav-links a {
@@ -199,7 +201,7 @@
 <!-- Nav -->
 <nav>
   <div class="nav-inner">
-    <a href="#" class="nav-logo">CAPI <span>Gateway</span></a>
+    <a href="#" class="nav-logo"><img src="https://capi.surisoft.io/capi-4.4.04.png" alt="CAPI Logo">CAPI <span>Gateway</span></a>
     <ul class="nav-links">
       <li><a href="#how-it-works">How it works</a></li>
       <li><a href="#features">Features</a></li>
@@ -215,6 +217,7 @@
 
 <!-- Hero -->
 <section class="hero">
+  <img src="https://capi.surisoft.io/capi-4.4.04.png" alt="CAPI Gateway" style="height:80px;margin-bottom:24px;">
   <h1>The API Gateway that<br><span>discovers your services</span></h1>
   <p>
     CAPI is a lightweight gateway powered by Apache Camel. Register services in Consul — routes, load balancing, security, and observability are handled automatically. No database. No declarative config files. Just register and go.
