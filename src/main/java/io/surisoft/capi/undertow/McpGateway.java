@@ -33,6 +33,9 @@ public class McpGateway implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(McpGateway.class);
     private static final HttpString MCP_SESSION_ID_HEADER = new HttpString(Constants.MCP_SESSION_HEADER);
+    private static final String APPLICATION_JSON = "application/json";
+    private static final String TEXT_EVENT_STREAM = "text/event-stream";
+    private static final String ACCEPT_HEADER = "Accept";
 
     private final int port;
     private final SSLContext sslContext;
@@ -92,7 +95,7 @@ public class McpGateway implements AutoCloseable {
     }
 
     private void handleHealth(HttpServerExchange exchange) {
-        exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+        exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, APPLICATION_JSON);
         exchange.setStatusCode(StatusCodes.OK);
         exchange.getResponseSender().send("{\"status\":\"UP\"}");
     }
@@ -104,7 +107,7 @@ public class McpGateway implements AutoCloseable {
         }
         exchange.startBlocking();
 
-        exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+        exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, APPLICATION_JSON);
 
         if (!"POST".equalsIgnoreCase(exchange.getRequestMethod().toString())) {
             exchange.setStatusCode(StatusCodes.METHOD_NOT_ALLOWED);
@@ -227,23 +230,14 @@ public class McpGateway implements AutoCloseable {
             return;
         }
 
-        Map<String, Object> params;
-        try {
-            params = (Map<String, Object>) request.getParams();
-        } catch (ClassCastException e) {
-            sendJsonRpc(exchange, StatusCodes.OK,
-                    JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INVALID_PARAMS, "Invalid params"));
-            return;
-        }
-
+        Map<String, Object> params = extractToolCallParams(request);
         if (params == null) {
             sendJsonRpc(exchange, StatusCodes.OK,
-                    JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INVALID_PARAMS, "Missing params"));
+                    JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INVALID_PARAMS, "Invalid or missing params"));
             return;
         }
 
         String toolName = (String) params.get("name");
-        Object arguments = params.get("arguments");
         if (toolName == null) {
             sendJsonRpc(exchange, StatusCodes.OK,
                     JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INVALID_PARAMS, "Missing tool name"));
@@ -260,25 +254,12 @@ public class McpGateway implements AutoCloseable {
         McpTool tool = resolution.getTool();
         Service service = resolution.getService();
 
-        // OPA check
-        if (opaService != null && service.getServiceMeta().getOpaRego() != null) {
-            String accessToken = null;
-            try {
-                accessToken = httpUtils.processAuthorizationAccessToken(exchange);
-            } catch (AuthorizationException e) {
-                // ignore
-            }
-            if (accessToken != null) {
-                OpaResult opaResult = opaService.callOpa(service.getServiceMeta().getOpaRego(), accessToken, true);
-                if (opaResult == null || !opaResult.isAllowed()) {
-                    sendJsonRpc(exchange, StatusCodes.OK,
-                            JsonRpcResponse.error(request.getId(), -32000, "Access denied by policy"));
-                    return;
-                }
-            }
+        if (!isOpaAllowed(exchange, service)) {
+            sendJsonRpc(exchange, StatusCodes.OK,
+                    JsonRpcResponse.error(request.getId(), -32000, "Access denied by policy"));
+            return;
         }
 
-        // Build backend URL
         String backendUrl = buildBackendUrl(service);
         if (backendUrl == null) {
             sendJsonRpc(exchange, StatusCodes.OK,
@@ -286,16 +267,45 @@ public class McpGateway implements AutoCloseable {
             return;
         }
 
-        // Check streaming
-        boolean streamResponse = tool.isStreaming()
-                && exchange.getRequestHeaders().contains("Accept")
-                && exchange.getRequestHeaders().get("Accept").contains("text/event-stream");
-
-        if (streamResponse) {
+        Object arguments = params.get("arguments");
+        if (isStreamingRequest(tool, exchange)) {
             handleStreamingToolCall(exchange, request, backendUrl, tool, arguments);
         } else {
             handleSyncToolCall(exchange, request, backendUrl, tool, arguments);
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> extractToolCallParams(JsonRpcRequest request) {
+        try {
+            Map<String, Object> params = (Map<String, Object>) request.getParams();
+            return params != null ? params : null;
+        } catch (ClassCastException e) {
+            return null;
+        }
+    }
+
+    private boolean isOpaAllowed(HttpServerExchange exchange, Service service) {
+        if (opaService == null || service.getServiceMeta().getOpaRego() == null) {
+            return true;
+        }
+        String accessToken = null;
+        try {
+            accessToken = httpUtils.processAuthorizationAccessToken(exchange);
+        } catch (AuthorizationException e) {
+            // no token available
+        }
+        if (accessToken == null) {
+            return true;
+        }
+        OpaResult opaResult = opaService.callOpa(service.getServiceMeta().getOpaRego(), accessToken, true);
+        return opaResult != null && opaResult.isAllowed();
+    }
+
+    private boolean isStreamingRequest(McpTool tool, HttpServerExchange exchange) {
+        return tool.isStreaming()
+                && exchange.getRequestHeaders().contains(ACCEPT_HEADER)
+                && exchange.getRequestHeaders().get(ACCEPT_HEADER).contains(TEXT_EVENT_STREAM);
     }
 
     private void handleSyncToolCall(HttpServerExchange exchange, JsonRpcRequest request,
@@ -305,7 +315,7 @@ public class McpGateway implements AutoCloseable {
             String requestBody = arguments != null ? objectMapper.writeValueAsString(arguments) : "{}";
             HttpRequest backendRequest = HttpRequest.newBuilder()
                     .uri(new URI(backendUrl))
-                    .header("Content-Type", "application/json")
+                    .header("Content-Type", APPLICATION_JSON)
                     .timeout(Duration.ofMillis(timeout))
                     .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                     .build();
@@ -339,13 +349,13 @@ public class McpGateway implements AutoCloseable {
             String requestBody = arguments != null ? objectMapper.writeValueAsString(arguments) : "{}";
             HttpRequest backendRequest = HttpRequest.newBuilder()
                     .uri(new URI(backendUrl))
-                    .header("Content-Type", "application/json")
-                    .header("Accept", "text/event-stream")
+                    .header("Content-Type", APPLICATION_JSON)
+                    .header(ACCEPT_HEADER, TEXT_EVENT_STREAM)
                     .timeout(Duration.ofMillis(timeout))
                     .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                     .build();
 
-            exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "text/event-stream");
+            exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, TEXT_EVENT_STREAM);
             exchange.getResponseHeaders().put(new HttpString("Cache-Control"), "no-cache");
 
             HttpResponse<java.util.stream.Stream<String>> backendResponse =

@@ -18,6 +18,7 @@ import io.undertow.Undertow;
 import io.undertow.util.Headers;
 import io.undertow.util.StatusCodes;
 
+import java.net.ServerSocket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -37,8 +38,8 @@ class McpGatewayTest {
     private int port;
 
     @BeforeEach
-    void setUp() {
-        port = 19200 + (int) (Math.random() * 100);
+    void setUp() throws Exception {
+        port = findFreePort();
         serviceCache = new Cache2kBuilder<String, Service>() {}
                 .name("testMcpGw-svc-" + System.currentTimeMillis())
                 .eternal(true)
@@ -276,7 +277,7 @@ class McpGatewayTest {
     @Test
     void toolsCall_backendReturnsSuccess() throws Exception {
         // Start a mock backend
-        int backendPort = 19500 + (int) (Math.random() * 100);
+        int backendPort = findFreePort();
         Undertow backend = Undertow.builder()
                 .addHttpListener(backendPort, "0.0.0.0")
                 .setHandler(exchange -> {
@@ -307,7 +308,7 @@ class McpGatewayTest {
 
     @Test
     void toolsCall_backendReturns500_returnsError() throws Exception {
-        int backendPort = 19600 + (int) (Math.random() * 100);
+        int backendPort = findFreePort();
         Undertow backend = Undertow.builder()
                 .addHttpListener(backendPort, "0.0.0.0")
                 .setHandler(exchange -> {
@@ -338,8 +339,9 @@ class McpGatewayTest {
     void toolsCall_backendConnectionRefused_returnsError() throws Exception {
         String sessionId = initializeSession();
 
-        // Point to a port where nothing is listening
-        Service service = createMcpServiceWithBackend("dead-svc", "dead", "localhost", 19999);
+        // Find a free port but don't start anything on it
+        int deadPort = findFreePort();
+        Service service = createMcpServiceWithBackend("dead-svc", "dead", "localhost", deadPort);
         serviceCache.put("dead-svc", service);
 
         String body = objectMapper.writeValueAsString(Map.of(
@@ -394,32 +396,17 @@ class McpGatewayTest {
     @Test
     void initialize_withOauth2Enabled_noAuthHeader_returnsUnauthorized() throws Exception {
         // Create a gateway with OAuth2 enabled
-        int oauthPort = 19700 + (int) (Math.random() * 100);
-        Cache<String, Service> oauthSvcCache = new Cache2kBuilder<String, Service>() {}
+        int oauthPort = findFreePort();
+        try (Cache<String, Service> oauthSvcCache = new Cache2kBuilder<String, Service>() {}
                 .name("testOauthSvc-" + System.currentTimeMillis())
                 .eternal(true).entryCapacity(100).storeByReference(true).build();
-        Cache<String, McpSession> oauthSessCache = new Cache2kBuilder<String, McpSession>() {}
+             Cache<String, McpSession> oauthSessCache = new Cache2kBuilder<String, McpSession>() {}
                 .name("testOauthSess-" + System.currentTimeMillis())
                 .expireAfterWrite(60000, TimeUnit.MILLISECONDS).entryCapacity(100).storeByReference(true).build();
+             McpGateway oauthGw = createOauthGateway(oauthPort, oauthSvcCache, oauthSessCache)) {
 
-        CAPIConfiguration oauthConfig = new CAPIConfiguration();
-        CAPIConfiguration.Mcp mcp = new CAPIConfiguration.Mcp();
-        mcp.setEnabled(true);
-        mcp.setPort(oauthPort);
-        mcp.setSessionTtl(60000);
-        mcp.setToolCallTimeout(5000);
-        oauthConfig.setMcp(mcp);
-        oauthConfig.setVersion("1.0.0-test");
-        CAPIConfiguration.Oauth2 oauth2 = new CAPIConfiguration.Oauth2();
-        oauth2.setEnabled(true);
-        oauthConfig.setOauth2(oauth2);
+            oauthGw.start();
 
-        McpGateway oauthGw = new McpGateway(oauthPort, null,
-                new McpToolRegistry(oauthSvcCache), new HttpUtils(null, null),
-                null, HttpClient.newHttpClient(), new LocalMcpSessionStore(oauthSessCache), oauthConfig);
-        oauthGw.start();
-
-        try {
             HttpClient client = HttpClient.newHttpClient();
             String body = objectMapper.writeValueAsString(Map.of("jsonrpc", "2.0", "method", "initialize", "id", 1));
             HttpRequest request = HttpRequest.newBuilder()
@@ -430,16 +417,12 @@ class McpGatewayTest {
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
             assertEquals(401, response.statusCode());
             assertTrue(response.body().contains("Authorization required"));
-        } finally {
-            oauthGw.stop();
-            oauthSvcCache.close();
-            oauthSessCache.close();
         }
     }
 
     @Test
     void toolsCall_withNullArguments_sendsEmptyBody() throws Exception {
-        int backendPort = 19800 + (int) (Math.random() * 100);
+        int backendPort = findFreePort();
         Undertow backend = Undertow.builder()
                 .addHttpListener(backendPort, "0.0.0.0")
                 .setHandler(exchange -> {
@@ -462,6 +445,274 @@ class McpGatewayTest {
             HttpResponse<String> response = sendPostWithSession("/mcp", body, sessionId);
             assertEquals(200, response.statusCode());
             assertTrue(response.body().contains("ok"));
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void toolsCall_streaming_returnsSSEResponse() throws Exception {
+        int backendPort = findFreePort();
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(exchange -> {
+                    exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "text/event-stream");
+                    exchange.getResponseSender().send("line1\nline2\n");
+                }).build();
+        backend.start();
+
+        try {
+            String sessionId = initializeSession();
+
+            Service service = createMcpServiceWithBackend("stream-svc", "streamtool", "localhost", backendPort);
+            service.getServiceMeta().handleUnknown("mcp.streaming", "streamtool");
+            serviceCache.put("stream-svc", service);
+
+            String body = objectMapper.writeValueAsString(Map.of(
+                    "jsonrpc", "2.0", "method", "tools/call", "id", 15,
+                    "params", Map.of("name", "streamtool", "arguments", Map.of())
+            ));
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("http://localhost:" + port + "/mcp"))
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "text/event-stream")
+                    .header("Mcp-Session-Id", sessionId)
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, response.statusCode());
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void toolsCall_streamingTool_withoutAcceptSSE_fallsBackToSync() throws Exception {
+        int backendPort = findFreePort();
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(exchange -> {
+                    exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+                    exchange.setStatusCode(StatusCodes.OK);
+                    exchange.getResponseSender().send("{\"sync\":true}");
+                }).build();
+        backend.start();
+
+        try {
+            String sessionId = initializeSession();
+
+            Service service = createMcpServiceWithBackend("stream-svc2", "streamsync", "localhost", backendPort);
+            service.getServiceMeta().handleUnknown("mcp.streaming", "streamsync");
+            serviceCache.put("stream-svc2", service);
+
+            // No Accept: text/event-stream header → should fall back to sync
+            String body = objectMapper.writeValueAsString(Map.of(
+                    "jsonrpc", "2.0", "method", "tools/call", "id", 16,
+                    "params", Map.of("name", "streamsync", "arguments", Map.of())
+            ));
+            HttpResponse<String> response = sendPostWithSession("/mcp", body, sessionId);
+            assertEquals(200, response.statusCode());
+            assertTrue(response.body().contains("sync"));
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void toolsCall_withOpaService_noOpaRego_allowed() throws Exception {
+        // McpGateway with a non-null OpaService but service without opaRego → OPA skipped
+        int opaPort = findFreePort();
+        int backendPort = findFreePort();
+
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(exchange -> {
+                    exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+                    exchange.setStatusCode(StatusCodes.OK);
+                    exchange.getResponseSender().send("{\"opa\":\"skipped\"}");
+                }).build();
+        backend.start();
+
+        try (Cache<String, Service> opaSvcCache = new Cache2kBuilder<String, Service>() {}
+                .name("testOpaSvc-" + System.currentTimeMillis())
+                .eternal(true).entryCapacity(100).storeByReference(true).build();
+             Cache<String, McpSession> opaSessCache = new Cache2kBuilder<String, McpSession>() {}
+                .name("testOpaSess-" + System.currentTimeMillis())
+                .expireAfterWrite(60000, TimeUnit.MILLISECONDS).entryCapacity(100).storeByReference(true).build()) {
+
+            CAPIConfiguration opaConfig = new CAPIConfiguration();
+            CAPIConfiguration.Mcp mcp = new CAPIConfiguration.Mcp();
+            mcp.setEnabled(true);
+            mcp.setPort(opaPort);
+            mcp.setSessionTtl(60000);
+            mcp.setToolCallTimeout(5000);
+            opaConfig.setMcp(mcp);
+            opaConfig.setVersion("1.0.0-test");
+            CAPIConfiguration.Oauth2 oauth2 = new CAPIConfiguration.Oauth2();
+            oauth2.setEnabled(false);
+            opaConfig.setOauth2(oauth2);
+
+            OpaService opaService = new OpaService("http://localhost:9999", HttpClient.newHttpClient());
+
+            try (McpGateway opaGw = new McpGateway(opaPort, null,
+                    new McpToolRegistry(opaSvcCache), new HttpUtils(null, null),
+                    opaService, HttpClient.newHttpClient(), new LocalMcpSessionStore(opaSessCache), opaConfig)) {
+
+                opaGw.start();
+
+                // Initialize
+                HttpClient client = HttpClient.newHttpClient();
+                String initBody = objectMapper.writeValueAsString(Map.of("jsonrpc", "2.0", "method", "initialize", "id", 1));
+                HttpRequest initReq = HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + opaPort + "/mcp"))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(initBody))
+                        .build();
+                HttpResponse<String> initResp = client.send(initReq, HttpResponse.BodyHandlers.ofString());
+                String sessionId = initResp.headers().firstValue("Mcp-Session-Id").orElseThrow();
+
+                // Service without opaRego → OPA check skipped
+                Service service = createMcpServiceWithBackend("opa-svc", "opatool", "localhost", backendPort);
+                opaSvcCache.put("opa-svc", service);
+
+                String body = objectMapper.writeValueAsString(Map.of(
+                        "jsonrpc", "2.0", "method", "tools/call", "id", 17,
+                        "params", Map.of("name", "opatool", "arguments", Map.of())
+                ));
+                HttpRequest callReq = HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + opaPort + "/mcp"))
+                        .header("Content-Type", "application/json")
+                        .header("Mcp-Session-Id", sessionId)
+                        .POST(HttpRequest.BodyPublishers.ofString(body))
+                        .build();
+                HttpResponse<String> response = client.send(callReq, HttpResponse.BodyHandlers.ofString());
+                assertEquals(200, response.statusCode());
+                assertTrue(response.body().contains("opa"));
+            }
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void toolsCall_withOpaService_opaDenies_returnsAccessDenied() throws Exception {
+        // Mock OPA server that returns deny
+        int opaServerPort = findFreePort();
+        int gatewayPort = findFreePort();
+
+        Undertow opaBackend = Undertow.builder()
+                .addHttpListener(opaServerPort, "0.0.0.0")
+                .setHandler(exchange -> {
+                    exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+                    exchange.setStatusCode(StatusCodes.OK);
+                    exchange.getResponseSender().send("{\"result\":false}");
+                }).build();
+        opaBackend.start();
+
+        try (Cache<String, Service> opaSvcCache = new Cache2kBuilder<String, Service>() {}
+                .name("testOpaDenySvc-" + System.currentTimeMillis())
+                .eternal(true).entryCapacity(100).storeByReference(true).build();
+             Cache<String, McpSession> opaSessCache = new Cache2kBuilder<String, McpSession>() {}
+                .name("testOpaDenySess-" + System.currentTimeMillis())
+                .expireAfterWrite(60000, TimeUnit.MILLISECONDS).entryCapacity(100).storeByReference(true).build()) {
+
+            CAPIConfiguration opaConfig = new CAPIConfiguration();
+            CAPIConfiguration.Mcp mcp = new CAPIConfiguration.Mcp();
+            mcp.setEnabled(true);
+            mcp.setPort(gatewayPort);
+            mcp.setSessionTtl(60000);
+            mcp.setToolCallTimeout(5000);
+            opaConfig.setMcp(mcp);
+            opaConfig.setVersion("1.0.0-test");
+            CAPIConfiguration.Oauth2 oauth2 = new CAPIConfiguration.Oauth2();
+            oauth2.setEnabled(false);
+            opaConfig.setOauth2(oauth2);
+
+            OpaService opaService = new OpaService("http://localhost:" + opaServerPort, HttpClient.newHttpClient());
+            HttpUtils opaHttpUtils = new HttpUtils(null, null);
+
+            try (McpGateway opaGw = new McpGateway(gatewayPort, null,
+                    new McpToolRegistry(opaSvcCache), opaHttpUtils,
+                    opaService, HttpClient.newHttpClient(), new LocalMcpSessionStore(opaSessCache), opaConfig)) {
+
+                opaGw.start();
+
+                // Initialize
+                HttpClient client = HttpClient.newHttpClient();
+                String initBody = objectMapper.writeValueAsString(Map.of("jsonrpc", "2.0", "method", "initialize", "id", 1));
+                HttpRequest initReq = HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + gatewayPort + "/mcp"))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(initBody))
+                        .build();
+                HttpResponse<String> initResp = client.send(initReq, HttpResponse.BodyHandlers.ofString());
+                String sessionId = initResp.headers().firstValue("Mcp-Session-Id").orElseThrow();
+
+                // Service WITH opaRego set
+                Service service = createMcpServiceWithBackend("opa-deny-svc", "denytool", "localhost", findFreePort());
+                service.getServiceMeta().setOpaRego("test-policy");
+                opaSvcCache.put("opa-deny-svc", service);
+
+                // Call with Bearer token → OPA should be checked and deny
+                String body = objectMapper.writeValueAsString(Map.of(
+                        "jsonrpc", "2.0", "method", "tools/call", "id", 18,
+                        "params", Map.of("name", "denytool", "arguments", Map.of())
+                ));
+                HttpRequest callReq = HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + gatewayPort + "/mcp"))
+                        .header("Content-Type", "application/json")
+                        .header("Mcp-Session-Id", sessionId)
+                        .header("Authorization", "Bearer test-token-12345")
+                        .POST(HttpRequest.BodyPublishers.ofString(body))
+                        .build();
+                HttpResponse<String> response = client.send(callReq, HttpResponse.BodyHandlers.ofString());
+                assertEquals(200, response.statusCode());
+                assertTrue(response.body().contains("Access denied by policy") || response.body().contains("-32000"));
+            }
+        } finally {
+            opaBackend.stop();
+        }
+    }
+
+    @Test
+    void toolsCall_backendUrlWithNullSchemeAndContext_usesDefaults() throws Exception {
+        int backendPort = findFreePort();
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(exchange -> {
+                    exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+                    exchange.setStatusCode(StatusCodes.OK);
+                    exchange.getResponseSender().send("{\"default\":true}");
+                }).build();
+        backend.start();
+
+        try {
+            String sessionId = initializeSession();
+
+            Service service = new Service();
+            service.setId("null-scheme-svc");
+            service.setName("null-scheme-svc");
+            ServiceMeta meta = new ServiceMeta();
+            meta.handleUnknown("mcp.enabled", "true");
+            meta.handleUnknown("mcp.tools", "testtool");
+            // Intentionally do NOT set scheme → null → should default to "http"
+            service.setServiceMeta(meta);
+
+            Mapping mapping = new Mapping();
+            mapping.setHostname("localhost");
+            mapping.setPort(backendPort);
+            // Intentionally do NOT set rootContext → null → should default to ""
+            service.setMappingList(Set.of(mapping));
+            serviceCache.put("null-scheme-svc", service);
+
+            String body = objectMapper.writeValueAsString(Map.of(
+                    "jsonrpc", "2.0", "method", "tools/call", "id", 19,
+                    "params", Map.of("name", "testtool", "arguments", Map.of())
+            ));
+            HttpResponse<String> response = sendPostWithSession("/mcp", body, sessionId);
+            assertEquals(200, response.statusCode());
+            assertTrue(response.body().contains("default"));
         } finally {
             backend.stop();
         }
@@ -538,6 +789,23 @@ class McpGatewayTest {
         return client.send(request, HttpResponse.BodyHandlers.ofString());
     }
 
+    private McpGateway createOauthGateway(int oauthPort, Cache<String, Service> svcCache, Cache<String, McpSession> sessCache) {
+        CAPIConfiguration oauthConfig = new CAPIConfiguration();
+        CAPIConfiguration.Mcp mcp = new CAPIConfiguration.Mcp();
+        mcp.setEnabled(true);
+        mcp.setPort(oauthPort);
+        mcp.setSessionTtl(60000);
+        mcp.setToolCallTimeout(5000);
+        oauthConfig.setMcp(mcp);
+        oauthConfig.setVersion("1.0.0-test");
+        CAPIConfiguration.Oauth2 oauth2 = new CAPIConfiguration.Oauth2();
+        oauth2.setEnabled(true);
+        oauthConfig.setOauth2(oauth2);
+        return new McpGateway(oauthPort, null,
+                new McpToolRegistry(svcCache), new HttpUtils(null, null),
+                null, HttpClient.newHttpClient(), new LocalMcpSessionStore(sessCache), oauthConfig);
+    }
+
     private Service createMcpServiceWithBackend(String id, String toolName, String hostname, int backendPort) {
         Service service = new Service();
         service.setId(id);
@@ -555,5 +823,11 @@ class McpGatewayTest {
         service.setMappingList(Set.of(mapping));
 
         return service;
+    }
+
+    private static int findFreePort() throws Exception {
+        try (ServerSocket socket = new ServerSocket(0)) {
+            return socket.getLocalPort();
+        }
     }
 }
