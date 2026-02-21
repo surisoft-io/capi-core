@@ -335,6 +335,10 @@ public class McpGateway implements AutoCloseable {
         } catch (java.net.http.HttpTimeoutException e) {
             sendJsonRpc(exchange, StatusCodes.OK,
                     JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR, "Tool call timed out"));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            sendJsonRpc(exchange, StatusCodes.OK,
+                    JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR, "Tool call interrupted"));
         } catch (Exception e) {
             log.error("Error calling backend for tool {}", tool.getName(), e);
             sendJsonRpc(exchange, StatusCodes.OK,
@@ -369,6 +373,10 @@ public class McpGateway implements AutoCloseable {
         } catch (java.net.http.HttpTimeoutException e) {
             sendJsonRpc(exchange, StatusCodes.OK,
                     JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR, "Streaming tool call timed out"));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            sendJsonRpc(exchange, StatusCodes.OK,
+                    JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR, "Streaming tool call interrupted"));
         } catch (Exception e) {
             log.error("Error streaming from backend for tool {}", tool.getName(), e);
             sendJsonRpc(exchange, StatusCodes.OK,

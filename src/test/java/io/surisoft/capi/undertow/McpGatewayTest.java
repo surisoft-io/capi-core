@@ -719,6 +719,80 @@ class McpGatewayTest {
     }
 
     @Test
+    void toolsCall_backendUrlWithRootContextNoPrefixSlash_prependsSlash() throws Exception {
+        int backendPort = findFreePort();
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(exchange -> {
+                    exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+                    exchange.setStatusCode(StatusCodes.OK);
+                    exchange.getResponseSender().send("{\"slash\":true}");
+                }).build();
+        backend.start();
+
+        try {
+            String sessionId = initializeSession();
+
+            Service service = new Service();
+            service.setId("slash-svc");
+            service.setName("slash-svc");
+            ServiceMeta meta = new ServiceMeta();
+            meta.handleUnknown("mcp.enabled", "true");
+            meta.handleUnknown("mcp.tools", "slashtool");
+            meta.setScheme("http");
+            service.setServiceMeta(meta);
+
+            Mapping mapping = new Mapping();
+            mapping.setHostname("localhost");
+            mapping.setPort(backendPort);
+            mapping.setRootContext("api");  // no leading slash
+            service.setMappingList(Set.of(mapping));
+            serviceCache.put("slash-svc", service);
+
+            String body = objectMapper.writeValueAsString(Map.of(
+                    "jsonrpc", "2.0", "method", "tools/call", "id", 20,
+                    "params", Map.of("name", "slashtool", "arguments", Map.of())
+            ));
+            HttpResponse<String> response = sendPostWithSession("/mcp", body, sessionId);
+            assertEquals(200, response.statusCode());
+            assertTrue(response.body().contains("slash"));
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void toolsCall_withPerToolTimeout_usesToolTimeout() throws Exception {
+        int backendPort = findFreePort();
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(exchange -> {
+                    exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+                    exchange.setStatusCode(StatusCodes.OK);
+                    exchange.getResponseSender().send("{\"timeout\":\"custom\"}");
+                }).build();
+        backend.start();
+
+        try {
+            String sessionId = initializeSession();
+
+            Service service = createMcpServiceWithBackend("timeout-svc", "timed", "localhost", backendPort);
+            service.getServiceMeta().handleUnknown("mcp.tools.timed.timeout", "5000");
+            serviceCache.put("timeout-svc", service);
+
+            String body = objectMapper.writeValueAsString(Map.of(
+                    "jsonrpc", "2.0", "method", "tools/call", "id", 21,
+                    "params", Map.of("name", "timed", "arguments", Map.of())
+            ));
+            HttpResponse<String> response = sendPostWithSession("/mcp", body, sessionId);
+            assertEquals(200, response.statusCode());
+            assertTrue(response.body().contains("timeout"));
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
     void toolsList_emptyCache_returnsEmptyToolsList() throws Exception {
         String sessionId = initializeSession();
         String body = objectMapper.writeValueAsString(Map.of("jsonrpc", "2.0", "method", "tools/list", "id", 14));
