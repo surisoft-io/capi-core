@@ -7,6 +7,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v3.5.3
       - name: Set up JDK 23
@@ -16,10 +18,21 @@ jobs:
       - name: Set Release version env variable
         run: |
           echo "RELEASE_VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)" >> $GITHUB_ENV
+      - name: Check tag does not already exist
+        if: github.event_name == 'push'
+        run: |
+          if git ls-remote --tags origin | grep -q "refs/tags/v${{ env.RELEASE_VERSION }}$"; then
+            echo "::error::Tag v${{ env.RELEASE_VERSION }} already exists. Bump the version in pom.xml before pushing."
+            exit 1
+          fi
+      - name: Build JAR
+        run: mvn package -DskipTests
       - name: Docker login
+        if: github.event_name == 'push'
         run: |
           docker login -u surisoft -p ${{ secrets.DOCKER_HUB_PWD }}
       - name: Build and push multi-platform image
+        if: github.event_name == 'push'
         run: |
           docker buildx create --use
           docker buildx build . \
@@ -29,3 +42,14 @@ jobs:
             --tag surisoft/capi-core:${{ env.RELEASE_VERSION }} \
             --tag surisoft/capi-core:latest \
             --push
+      - name: Create Git tag and GitHub Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git tag "v${{ env.RELEASE_VERSION }}"
+          git push origin "v${{ env.RELEASE_VERSION }}"
+          gh release create "v${{ env.RELEASE_VERSION }}" \
+            target/capi-core-*.jar \
+            --title "v${{ env.RELEASE_VERSION }}" \
+            --generate-notes
