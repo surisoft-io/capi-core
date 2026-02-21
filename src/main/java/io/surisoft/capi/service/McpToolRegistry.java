@@ -14,6 +14,7 @@ import java.util.Map;
 public class McpToolRegistry {
 
     private static final Logger log = LoggerFactory.getLogger(McpToolRegistry.class);
+    private static final String TOOLS_DOT = "tools.";
     private final Cache<String, Service> serviceCache;
 
     public McpToolRegistry(Cache<String, Service> serviceCache) {
@@ -83,14 +84,14 @@ public class McpToolRegistry {
             tool.setTimeout(timeout);
             tool.setStreaming(streamingList.contains(name));
 
-            String descKey = Constants.MCP_META_PREFIX + "tools." + name + ".description";
+            String descKey = Constants.MCP_META_PREFIX + TOOLS_DOT + name + ".description";
             tool.setDescription(props.getOrDefault(descKey, qualifiedName));
 
-            String schemaKey = Constants.MCP_META_PREFIX + "tools." + name + ".inputSchema";
+            String schemaKey = Constants.MCP_META_PREFIX + TOOLS_DOT + name + ".inputSchema";
             tool.setInputSchema(props.getOrDefault(schemaKey, "{\"type\":\"object\"}"));
 
             // Per-tool timeout override
-            String toolTimeoutKey = Constants.MCP_META_PREFIX + "tools." + name + ".timeout";
+            String toolTimeoutKey = Constants.MCP_META_PREFIX + TOOLS_DOT + name + ".timeout";
             String toolTimeout = props.get(toolTimeoutKey);
             if (toolTimeout != null) {
                 tool.setTimeout(parseTimeout(toolTimeout));
