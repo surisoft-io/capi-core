@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.surisoft.capi.configuration.CAPIConfiguration;
 import io.surisoft.capi.exception.AuthorizationException;
 import io.surisoft.capi.schema.*;
+import io.surisoft.capi.service.McpBackendLoadBalancer;
 import io.surisoft.capi.service.McpSessionStore;
 import io.surisoft.capi.service.McpToolRegistry;
 import io.surisoft.capi.service.OpaService;
@@ -46,6 +47,7 @@ public class McpGateway implements AutoCloseable {
     private final HttpClient httpClient;
     private final McpSessionStore sessionStore;
     private final CAPIConfiguration configuration;
+    private final McpBackendLoadBalancer loadBalancer;
     private Undertow server;
 
     public McpGateway(int port,
@@ -55,7 +57,8 @@ public class McpGateway implements AutoCloseable {
                       OpaService opaService,
                       HttpClient httpClient,
                       McpSessionStore sessionStore,
-                      CAPIConfiguration configuration) {
+                      CAPIConfiguration configuration,
+                      McpBackendLoadBalancer loadBalancer) {
         this.port = port;
         this.sslContext = sslContext;
         this.toolRegistry = toolRegistry;
@@ -64,6 +67,7 @@ public class McpGateway implements AutoCloseable {
         this.httpClient = httpClient;
         this.sessionStore = sessionStore;
         this.configuration = configuration;
+        this.loadBalancer = loadBalancer;
     }
 
     public void start() {
@@ -260,8 +264,8 @@ public class McpGateway implements AutoCloseable {
             return;
         }
 
-        String backendUrl = buildBackendUrl(service);
-        if (backendUrl == null) {
+        List<String> backendUrls = loadBalancer.getOrderedBackendUrls(service);
+        if (backendUrls.isEmpty()) {
             sendJsonRpc(exchange, StatusCodes.OK,
                     JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR, "No backend available for tool: " + toolName));
             return;
@@ -269,9 +273,9 @@ public class McpGateway implements AutoCloseable {
 
         Object arguments = params.get("arguments");
         if (isStreamingRequest(tool, exchange)) {
-            handleStreamingToolCall(exchange, request, backendUrl, tool, arguments);
+            handleStreamingToolCall(exchange, request, backendUrls.get(0), tool, arguments);
         } else {
-            handleSyncToolCall(exchange, request, backendUrl, tool, arguments);
+            handleSyncToolCallWithFailover(exchange, request, backendUrls, tool, arguments);
         }
     }
 
@@ -308,42 +312,62 @@ public class McpGateway implements AutoCloseable {
                 && exchange.getRequestHeaders().get(ACCEPT_HEADER).contains(TEXT_EVENT_STREAM);
     }
 
-    private void handleSyncToolCall(HttpServerExchange exchange, JsonRpcRequest request,
-                                    String backendUrl, McpTool tool, Object arguments) {
+    private void handleSyncToolCallWithFailover(HttpServerExchange exchange, JsonRpcRequest request,
+                                                List<String> backendUrls, McpTool tool, Object arguments) {
         int timeout = tool.getTimeout() > 0 ? tool.getTimeout() : configuration.getMcp().getToolCallTimeout();
+        String requestBody;
         try {
-            String requestBody = arguments != null ? objectMapper.writeValueAsString(arguments) : "{}";
-            HttpRequest backendRequest = HttpRequest.newBuilder()
-                    .uri(new URI(backendUrl))
-                    .header("Content-Type", APPLICATION_JSON)
-                    .timeout(Duration.ofMillis(timeout))
-                    .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-                    .build();
-
-            HttpResponse<String> backendResponse = httpClient.send(backendRequest, HttpResponse.BodyHandlers.ofString());
-
-            if (backendResponse.statusCode() >= 200 && backendResponse.statusCode() < 300) {
-                Map<String, Object> content = Map.of("content",
-                        List.of(Map.of("type", "text", "text", backendResponse.body())));
-                sendJsonRpc(exchange, StatusCodes.OK, JsonRpcResponse.success(request.getId(), content));
-            } else {
-                sendJsonRpc(exchange, StatusCodes.OK,
-                        JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR,
-                                "Backend returned status " + backendResponse.statusCode(),
-                                Map.of("status", backendResponse.statusCode(), "body", backendResponse.body())));
-            }
-        } catch (java.net.http.HttpTimeoutException e) {
+            requestBody = arguments != null ? objectMapper.writeValueAsString(arguments) : "{}";
+        } catch (JsonProcessingException e) {
             sendJsonRpc(exchange, StatusCodes.OK,
-                    JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR, "Tool call timed out"));
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            sendJsonRpc(exchange, StatusCodes.OK,
-                    JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR, "Tool call interrupted"));
-        } catch (Exception e) {
-            log.error("Error calling backend for tool {}", tool.getName(), e);
-            sendJsonRpc(exchange, StatusCodes.OK,
-                    JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR, "Backend connection failed: " + e.getMessage()));
+                    JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR, "Failed to serialize arguments"));
+            return;
         }
+
+        Exception lastException = null;
+        for (String backendUrl : backendUrls) {
+            try {
+                HttpRequest backendRequest = HttpRequest.newBuilder()
+                        .uri(new URI(backendUrl))
+                        .header("Content-Type", APPLICATION_JSON)
+                        .timeout(Duration.ofMillis(timeout))
+                        .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                        .build();
+
+                HttpResponse<String> backendResponse = httpClient.send(backendRequest, HttpResponse.BodyHandlers.ofString());
+                loadBalancer.reportSuccess(backendUrl);
+
+                if (backendResponse.statusCode() >= 200 && backendResponse.statusCode() < 300) {
+                    Map<String, Object> content = Map.of("content",
+                            List.of(Map.of("type", "text", "text", backendResponse.body())));
+                    sendJsonRpc(exchange, StatusCodes.OK, JsonRpcResponse.success(request.getId(), content));
+                } else {
+                    sendJsonRpc(exchange, StatusCodes.OK,
+                            JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR,
+                                    "Backend returned status " + backendResponse.statusCode(),
+                                    Map.of("status", backendResponse.statusCode(), "body", backendResponse.body())));
+                }
+                return;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                sendJsonRpc(exchange, StatusCodes.OK,
+                        JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR, "Tool call interrupted"));
+                return;
+            } catch (java.io.IOException e) {
+                log.warn("Backend {} failed for tool {}: {}", backendUrl, tool.getName(), e.getMessage());
+                loadBalancer.reportFailure(backendUrl);
+                lastException = e;
+            } catch (Exception e) {
+                log.error("Unexpected error calling backend {} for tool {}", backendUrl, tool.getName(), e);
+                loadBalancer.reportFailure(backendUrl);
+                lastException = e;
+            }
+        }
+
+        log.error("All backends failed for tool {}", tool.getName(), lastException);
+        sendJsonRpc(exchange, StatusCodes.OK,
+                JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR,
+                        "All backends failed for tool: " + tool.getName()));
     }
 
     private void handleStreamingToolCall(HttpServerExchange exchange, JsonRpcRequest request,
@@ -365,12 +389,14 @@ public class McpGateway implements AutoCloseable {
             HttpResponse<java.util.stream.Stream<String>> backendResponse =
                     httpClient.send(backendRequest, HttpResponse.BodyHandlers.ofLines());
 
-            backendResponse.body().forEach(line -> {
-                exchange.getResponseSender().send("data: " + line + "\n\n");
-            });
+            backendResponse.body().forEach(line ->
+                exchange.getResponseSender().send("data: " + line + "\n\n")
+            );
             exchange.endExchange();
+            loadBalancer.reportSuccess(backendUrl);
 
         } catch (java.net.http.HttpTimeoutException e) {
+            loadBalancer.reportFailure(backendUrl);
             sendJsonRpc(exchange, StatusCodes.OK,
                     JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR, "Streaming tool call timed out"));
         } catch (InterruptedException e) {
@@ -378,6 +404,7 @@ public class McpGateway implements AutoCloseable {
             sendJsonRpc(exchange, StatusCodes.OK,
                     JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR, "Streaming tool call interrupted"));
         } catch (Exception e) {
+            loadBalancer.reportFailure(backendUrl);
             log.error("Error streaming from backend for tool {}", tool.getName(), e);
             sendJsonRpc(exchange, StatusCodes.OK,
                     JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR, "Backend streaming failed: " + e.getMessage()));
@@ -413,25 +440,6 @@ public class McpGateway implements AutoCloseable {
         session.touch();
         sessionStore.put(sessionId, session);
         return session;
-    }
-
-    private String buildBackendUrl(Service service) {
-        if (service.getMappingList() == null || service.getMappingList().isEmpty()) {
-            return null;
-        }
-        Mapping mapping = service.getMappingList().iterator().next();
-        String scheme = service.getServiceMeta().getScheme();
-        if (scheme == null) {
-            scheme = "http";
-        }
-        String rootContext = mapping.getRootContext();
-        if (rootContext == null) {
-            rootContext = "";
-        }
-        if (!rootContext.startsWith("/") && !rootContext.isEmpty()) {
-            rootContext = "/" + rootContext;
-        }
-        return scheme + "://" + mapping.getHostname() + ":" + mapping.getPort() + rootContext;
     }
 
     private String readBody(HttpServerExchange exchange) throws java.io.IOException {
