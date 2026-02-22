@@ -473,11 +473,11 @@ class CAPIConfigurationTest {
     }
 
     @Test
-    void opa_setEndpoint_hasEmptyBody_endpointRemainsNull() {
-        // Opa.setEndpoint has an empty body (bug), so calling it should NOT update the field
+    void opa_endpoint() {
         CAPIConfiguration.Opa opa = new CAPIConfiguration.Opa();
+        assertNull(opa.getEndpoint());
         opa.setEndpoint("http://opa:8181/v1/data");
-        assertNull(opa.getEndpoint(), "Opa.setEndpoint has an empty body - endpoint should remain null");
+        assertEquals("http://opa:8181/v1/data", opa.getEndpoint());
     }
 
     // --- LoggingTraces nested class ---

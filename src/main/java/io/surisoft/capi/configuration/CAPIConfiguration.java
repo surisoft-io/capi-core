@@ -346,7 +346,7 @@ public class CAPIConfiguration {
         public String getEndpoint() {
             return endpoint;
         }
-        public void setEndpoint(String endpoint) {}
+        public void setEndpoint(String endpoint) { this.endpoint = endpoint; }
     }
 
     public static class LoggingTraces {
