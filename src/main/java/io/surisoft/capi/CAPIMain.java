@@ -9,8 +9,9 @@ import io.surisoft.capi.configuration.CAPIConfiguration;
 import io.surisoft.capi.configuration.CamelStartupListener;
 import io.surisoft.capi.service.CamelProxyPeerAddressHandler;
 import io.surisoft.capi.service.CapiAccessLogReceiver;
-import io.surisoft.capi.undertow.AdminGateway;
 import io.surisoft.capi.service.McpBackendLoadBalancer;
+import io.surisoft.capi.service.McpServerClient;
+import io.surisoft.capi.undertow.AdminGateway;
 import io.surisoft.capi.undertow.McpGateway;
 import io.surisoft.capi.undertow.WebsocketGateway;
 import io.surisoft.capi.utils.Constants;
@@ -105,6 +106,9 @@ public class CAPIMain {
                 camelContext.getRegistry().bind("consulStore", startup.getConsulStore());
             }
             camelContext.getRegistry().bind("routeConsistencyChecker", startup.getRouteConsistencyChecker());
+            if(startup.getMcpServerClient() != null) {
+                camelContext.getRegistry().bind("mcpServerClient", startup.getMcpServerClient());
+            }
             camelContext.addRoutes(new ErrorRoute(startup.getHttpUtils()));
 
 
@@ -131,7 +135,8 @@ public class CAPIMain {
                 camelContext.addRoutes(new PrimaryRoute(startup.getRouteUtils(), capiConfiguration.getRest().getPort(), capiConfiguration.getRest().getListeningAddress(), capiConfiguration.getRest().getContextPath(), sslEnabled, capiConfiguration.isCorsEnabled(), managedHeaders, startup.getServiceCache(), primaryEndpoint));
             }
 
-            camelContext.addStartupListener(new CamelStartupListener(capiConfiguration.getConsulCatalogDiscoverInterval(), capiConfiguration.getConsulStore().isEnabled(), capiConfiguration.getTrustStore().isEnabled()));
+            boolean mcpServerEnabled = startup.getMcpServerClient() != null;
+            camelContext.addStartupListener(new CamelStartupListener(capiConfiguration.getConsulCatalogDiscoverInterval(), capiConfiguration.getConsulStore().isEnabled(), capiConfiguration.getTrustStore().isEnabled(), mcpServerEnabled));
             camelContext.start();
 
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -173,8 +178,9 @@ public class CAPIMain {
             java.net.http.HttpClient mcpHttpClient = java.net.http.HttpClient.newBuilder()
                     .connectTimeout(java.time.Duration.ofSeconds(10))
                     .build();
-            McpBackendLoadBalancer loadBalancer = new McpBackendLoadBalancer(
-                    capiConfiguration.getMcp().getCircuitBreakerCooldownMs());
+            McpBackendLoadBalancer loadBalancer = startup.getMcpLoadBalancer() != null
+                    ? startup.getMcpLoadBalancer()
+                    : new McpBackendLoadBalancer(capiConfiguration.getMcp().getCircuitBreakerCooldownMs());
             McpGateway mcpGateway = new McpGateway(
                     capiConfiguration.getMcp().getPort(),
                     startup.getUndertowSslContext(),
@@ -184,7 +190,8 @@ public class CAPIMain {
                     mcpHttpClient,
                     startup.getMcpSessionStore(),
                     capiConfiguration,
-                    loadBalancer
+                    loadBalancer,
+                    startup.getMcpServerClient()
             );
             mcpGateway.start();
             return mcpGateway;

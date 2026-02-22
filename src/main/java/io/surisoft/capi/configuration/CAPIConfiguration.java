@@ -547,6 +547,7 @@ public class CAPIConfiguration {
         private long sessionTtl = 1800000;
         private int toolCallTimeout = 30000;
         private long circuitBreakerCooldownMs = 30000;
+        private int mcpServerDiscoveryTimeoutMs = 10000;
 
         public boolean isEnabled() {
             return enabled;
@@ -577,6 +578,12 @@ public class CAPIConfiguration {
         }
         public void setCircuitBreakerCooldownMs(long circuitBreakerCooldownMs) {
             this.circuitBreakerCooldownMs = circuitBreakerCooldownMs;
+        }
+        public int getMcpServerDiscoveryTimeoutMs() {
+            return mcpServerDiscoveryTimeoutMs;
+        }
+        public void setMcpServerDiscoveryTimeoutMs(int mcpServerDiscoveryTimeoutMs) {
+            this.mcpServerDiscoveryTimeoutMs = mcpServerDiscoveryTimeoutMs;
         }
     }
 

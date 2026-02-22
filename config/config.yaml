@@ -78,3 +78,5 @@ capi:
     port: 8383
     sessionTtl: 1800000
     toolCallTimeout: 30000
+    circuitBreakerCooldownMs: 30000
+    mcpServerDiscoveryTimeoutMs: 10000

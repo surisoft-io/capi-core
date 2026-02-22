@@ -144,6 +144,7 @@ public class Constants {
     public static final String MCP_META_STREAMING = "mcp-streaming";
     public static final String MCP_META_CATEGORY = "mcp-category";
     public static final String MCP_META_TIMEOUT = "mcp-timeout";
+    public static final String MCP_META_TYPE = "mcp-type";
 
     // JSON-RPC error codes
     public static final int JSONRPC_PARSE_ERROR = -32700;

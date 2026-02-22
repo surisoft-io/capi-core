@@ -197,6 +197,38 @@ class McpToolRegistryTest {
         assertEquals("my-service-123", tools.get(0).getServiceId());
     }
 
+    @Test
+    void getAllTools_mcpServerService_setsMcpServerFlag() {
+        Service service = createMcpService("svc1", "hello");
+        service.getServiceMeta().handleUnknown("mcp-type", "server");
+        serviceCache.put("svc1", service);
+
+        List<McpTool> tools = registry.getAllTools();
+        assertEquals(1, tools.size());
+        assertTrue(tools.get(0).isMcpServer());
+    }
+
+    @Test
+    void getAllTools_restService_mcpServerFlagIsFalse() {
+        Service service = createMcpService("svc1", "hello");
+        serviceCache.put("svc1", service);
+
+        List<McpTool> tools = registry.getAllTools();
+        assertEquals(1, tools.size());
+        assertFalse(tools.get(0).isMcpServer());
+    }
+
+    @Test
+    void getAllTools_explicitRestType_mcpServerFlagIsFalse() {
+        Service service = createMcpService("svc1", "hello");
+        service.getServiceMeta().handleUnknown("mcp-type", "rest");
+        serviceCache.put("svc1", service);
+
+        List<McpTool> tools = registry.getAllTools();
+        assertEquals(1, tools.size());
+        assertFalse(tools.get(0).isMcpServer());
+    }
+
     private Service createService(String id) {
         Service service = new Service();
         service.setId(id);

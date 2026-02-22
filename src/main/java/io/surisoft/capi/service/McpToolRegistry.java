@@ -84,6 +84,9 @@ public class McpToolRegistry {
             tool.setTimeout(timeout);
             tool.setStreaming(streamingList.contains(name));
 
+            String mcpType = props.getOrDefault(Constants.MCP_META_TYPE, "rest");
+            tool.setMcpServer("server".equalsIgnoreCase(mcpType));
+
             String descKey = Constants.MCP_META_PREFIX + TOOLS_DOT + name + "-description";
             tool.setDescription(props.getOrDefault(descKey, qualifiedName));
 

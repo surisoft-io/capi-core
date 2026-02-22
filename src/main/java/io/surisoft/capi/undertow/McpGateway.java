@@ -6,6 +6,7 @@ import io.surisoft.capi.configuration.CAPIConfiguration;
 import io.surisoft.capi.exception.AuthorizationException;
 import io.surisoft.capi.schema.*;
 import io.surisoft.capi.service.McpBackendLoadBalancer;
+import io.surisoft.capi.service.McpServerClient;
 import io.surisoft.capi.service.McpSessionStore;
 import io.surisoft.capi.service.McpToolRegistry;
 import io.surisoft.capi.service.OpaService;
@@ -48,6 +49,7 @@ public class McpGateway implements AutoCloseable {
     private final McpSessionStore sessionStore;
     private final CAPIConfiguration configuration;
     private final McpBackendLoadBalancer loadBalancer;
+    private final McpServerClient mcpServerClient;
     private Undertow server;
 
     public McpGateway(int port,
@@ -59,6 +61,19 @@ public class McpGateway implements AutoCloseable {
                       McpSessionStore sessionStore,
                       CAPIConfiguration configuration,
                       McpBackendLoadBalancer loadBalancer) {
+        this(port, sslContext, toolRegistry, httpUtils, opaService, httpClient, sessionStore, configuration, loadBalancer, null);
+    }
+
+    public McpGateway(int port,
+                      SSLContext sslContext,
+                      McpToolRegistry toolRegistry,
+                      HttpUtils httpUtils,
+                      OpaService opaService,
+                      HttpClient httpClient,
+                      McpSessionStore sessionStore,
+                      CAPIConfiguration configuration,
+                      McpBackendLoadBalancer loadBalancer,
+                      McpServerClient mcpServerClient) {
         this.port = port;
         this.sslContext = sslContext;
         this.toolRegistry = toolRegistry;
@@ -68,6 +83,7 @@ public class McpGateway implements AutoCloseable {
         this.sessionStore = sessionStore;
         this.configuration = configuration;
         this.loadBalancer = loadBalancer;
+        this.mcpServerClient = mcpServerClient;
     }
 
     public void start() {
@@ -272,10 +288,30 @@ public class McpGateway implements AutoCloseable {
         }
 
         Object arguments = params.get("arguments");
-        if (isStreamingRequest(tool, exchange)) {
+        if (tool.isMcpServer() && mcpServerClient != null) {
+            handleMcpServerToolCall(exchange, request, tool, service, arguments);
+        } else if (isStreamingRequest(tool, exchange)) {
             handleStreamingToolCall(exchange, request, backendUrls.get(0), tool, arguments);
         } else {
             handleSyncToolCallWithFailover(exchange, request, backendUrls, tool, arguments);
+        }
+    }
+
+    private void handleMcpServerToolCall(HttpServerExchange exchange, JsonRpcRequest request,
+                                          McpTool tool, Service service, Object arguments) {
+        int timeout = tool.getTimeout() > 0 ? tool.getTimeout() : configuration.getMcp().getToolCallTimeout();
+        try {
+            Object result = mcpServerClient.forwardToolCall(service, tool.getName(), arguments, timeout);
+            sendJsonRpc(exchange, StatusCodes.OK, JsonRpcResponse.success(request.getId(), result));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            sendJsonRpc(exchange, StatusCodes.OK,
+                    JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR, "MCP Server tool call interrupted"));
+        } catch (Exception e) {
+            log.error("MCP Server tool call failed for {}: {}", tool.getName(), e.getMessage());
+            sendJsonRpc(exchange, StatusCodes.OK,
+                    JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR,
+                            "MCP Server tool call failed: " + e.getMessage()));
         }
     }
 

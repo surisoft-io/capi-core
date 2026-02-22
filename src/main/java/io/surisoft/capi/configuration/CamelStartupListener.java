@@ -14,14 +14,20 @@ public class CamelStartupListener implements ExtendedStartupListener {
     private final long consulTimerInterval;
     private final boolean consulStoreEnabled;
     private final boolean trustStoreEnabled;
+    private final boolean mcpServerEnabled;
 
     @BeanInject("consulNodeDiscovery")
     private ConsulNodeDiscovery consulNodeDiscovery;
 
     public CamelStartupListener(long consulTimerInterval, boolean consulStoreEnabled, boolean trustStoreEnabled) {
+        this(consulTimerInterval, consulStoreEnabled, trustStoreEnabled, false);
+    }
+
+    public CamelStartupListener(long consulTimerInterval, boolean consulStoreEnabled, boolean trustStoreEnabled, boolean mcpServerEnabled) {
         this.consulTimerInterval = consulTimerInterval;
         this.consulStoreEnabled = consulStoreEnabled;
         this.trustStoreEnabled = trustStoreEnabled;
+        this.mcpServerEnabled = mcpServerEnabled;
     }
 
     @Override
@@ -35,7 +41,9 @@ public class CamelStartupListener implements ExtendedStartupListener {
             context.addRoutes(consulStoreRouteBuilder());
         }
         context.addRoutes(consistencyCheckRouteBuilder());
-
+        if(mcpServerEnabled) {
+            context.addRoutes(mcpServerRefreshRouteBuilder());
+        }
     }
 
     public RouteBuilder consulDiscoveryRouteBuilder() {
@@ -70,6 +78,18 @@ public class CamelStartupListener implements ExtendedStartupListener {
                 from("timer:consistency-checker?period=60000")
                         .to("bean:routeConsistencyChecker?method=process")
                         .routeId("route-consistency-checker-service");
+            }
+        };
+    }
+
+    public RouteBuilder mcpServerRefreshRouteBuilder() {
+        return new RouteBuilder() {
+            @Override
+            public void configure() {
+                log.debug("Creating MCP Server Refresh Timer");
+                from("timer:mcp-server-refresh?period=" + consulTimerInterval)
+                        .to("bean:mcpServerClient?method=refreshMcpServerTools")
+                        .routeId("mcp-server-refresh");
             }
         };
     }

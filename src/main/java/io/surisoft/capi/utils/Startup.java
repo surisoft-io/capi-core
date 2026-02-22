@@ -82,6 +82,10 @@ public class Startup {
     private McpToolRegistry mcpToolRegistry;
     @Nullable
     private McpSessionStore mcpSessionStore;
+    @Nullable
+    private McpServerClient mcpServerClient;
+    @Nullable
+    private McpBackendLoadBalancer mcpLoadBalancer;
 
     private CompositeMeterRegistry meterRegistry;
     private PrometheusMeterRegistry prometheusRegistry;
@@ -391,6 +395,11 @@ public class Startup {
                 mcpSessionStore = new LocalMcpSessionStore(
                         LocalCacheConfiguration.mcpSessionCache(configuration.getMcp().getSessionTtl()));
             }
+            mcpLoadBalancer = new McpBackendLoadBalancer(configuration.getMcp().getCircuitBreakerCooldownMs());
+            HttpClient mcpHttpClient = HttpClient.newBuilder()
+                    .connectTimeout(java.time.Duration.ofSeconds(10))
+                    .build();
+            mcpServerClient = new McpServerClient(serviceCache, mcpLoadBalancer, mcpHttpClient, configuration);
         }
     }
 
@@ -400,6 +409,14 @@ public class Startup {
 
     public @Nullable McpSessionStore getMcpSessionStore() {
         return mcpSessionStore;
+    }
+
+    public @Nullable McpServerClient getMcpServerClient() {
+        return mcpServerClient;
+    }
+
+    public @Nullable McpBackendLoadBalancer getMcpLoadBalancer() {
+        return mcpLoadBalancer;
     }
 
     private void startConsulHttpClient() {
