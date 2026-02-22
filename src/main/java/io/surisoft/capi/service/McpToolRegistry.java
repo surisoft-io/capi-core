@@ -77,7 +77,7 @@ public class McpToolRegistry {
             }
 
             McpTool tool = new McpTool();
-            String qualifiedName = prefix.isEmpty() ? name : prefix + "." + name;
+            String qualifiedName = prefix.isEmpty() ? name : prefix + "_" + name;
             tool.setName(qualifiedName);
             tool.setServiceId(service.getId());
             tool.setCategory(category);

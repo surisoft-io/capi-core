@@ -126,7 +126,7 @@ public class McpServerClient {
         // Strip prefix
         String backendToolName = toolName;
         String prefix = props.getOrDefault(Constants.MCP_META_TOOL_PREFIX, "");
-        if (!prefix.isEmpty() && backendToolName.startsWith(prefix + ".")) {
+        if (!prefix.isEmpty() && backendToolName.startsWith(prefix + "_")) {
             backendToolName = backendToolName.substring(prefix.length() + 1);
         }
 

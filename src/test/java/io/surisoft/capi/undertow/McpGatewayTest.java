@@ -1459,6 +1459,313 @@ class McpGatewayTest {
         assertTrue(response.body().contains("Weather forecast"));
     }
 
+    @Test
+    void toolsCall_mcpServerBackend_backendError_returnsJsonRpcError() throws Exception {
+        // MCP Server backend that always fails on tools/call
+        int backendPort = findFreePort();
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(exchange -> {
+                    if (exchange.isInIoThread()) {
+                        exchange.dispatch(() -> {
+                            try {
+                                exchange.startBlocking();
+                                String body = new String(exchange.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                                @SuppressWarnings("unchecked")
+                                Map<String, Object> req = objectMapper.readValue(body, Map.class);
+                                String method = (String) req.get("method");
+                                exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+                                if ("initialize".equals(method)) {
+                                    exchange.getResponseHeaders().put(io.undertow.util.HttpString.tryFromString("Mcp-Session-Id"), "test-session");
+                                    exchange.getResponseSender().send("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-03-26\"}}");
+                                } else if ("tools/call".equals(method)) {
+                                    // Return a non-session MCP error
+                                    exchange.getResponseSender().send("{\"jsonrpc\":\"2.0\",\"id\":\"x\",\"error\":{\"code\":-32603,\"message\":\"Execution failed\"}}");
+                                }
+                            } catch (Exception e) {
+                                exchange.setStatusCode(500);
+                                exchange.getResponseSender().send("Error");
+                            }
+                        });
+                        return;
+                    }
+                }).build();
+        backend.start();
+
+        try {
+            int gwPort = findFreePort();
+            Cache<String, Service> svcCache = new Cache2kBuilder<String, Service>() {}
+                    .name("testMcpSrvErr-" + System.currentTimeMillis())
+                    .eternal(true).entryCapacity(100).storeByReference(true).build();
+            Cache<String, McpSession> sessCache = new Cache2kBuilder<String, McpSession>() {}
+                    .name("testMcpSrvErrSess-" + System.currentTimeMillis())
+                    .expireAfterWrite(1800000, TimeUnit.MILLISECONDS).entryCapacity(100).storeByReference(true).build();
+
+            CAPIConfiguration config = new CAPIConfiguration();
+            CAPIConfiguration.Mcp mcp = new CAPIConfiguration.Mcp();
+            mcp.setEnabled(true);
+            mcp.setPort(gwPort);
+            mcp.setSessionTtl(1800000);
+            mcp.setToolCallTimeout(5000);
+            mcp.setMcpServerDiscoveryTimeoutMs(5000);
+            config.setMcp(mcp);
+            config.setVersion("1.0.0-test");
+            CAPIConfiguration.Oauth2 oauth2 = new CAPIConfiguration.Oauth2();
+            oauth2.setEnabled(false);
+            config.setOauth2(oauth2);
+
+            McpBackendLoadBalancer lb = new McpBackendLoadBalancer(30000);
+            McpServerClient mcpServerClient = new McpServerClient(svcCache, lb, HttpClient.newHttpClient(), config);
+
+            try (McpGateway gw = new McpGateway(gwPort, null,
+                    new McpToolRegistry(svcCache), new HttpUtils(null, null),
+                    null, HttpClient.newHttpClient(), new LocalMcpSessionStore(sessCache), config, lb, mcpServerClient)) {
+
+                gw.start();
+
+                Service service = new Service();
+                service.setId("mcp-err-svc");
+                service.setName("mcp-err-svc");
+                ServiceMeta meta = new ServiceMeta();
+                meta.handleUnknown("mcp-enabled", "true");
+                meta.handleUnknown("mcp-type", "server");
+                meta.handleUnknown("mcp-tools", "errtool");
+                meta.handleUnknown("mcp-tools-errtool-description", "A tool that errors");
+                meta.setScheme("http");
+                service.setServiceMeta(meta);
+                Mapping mapping = new Mapping();
+                mapping.setHostname("localhost");
+                mapping.setPort(backendPort);
+                mapping.setRootContext("/");
+                service.setMappingList(Set.of(mapping));
+                svcCache.put("mcp-err-svc", service);
+
+                HttpClient client = HttpClient.newHttpClient();
+                String initBody = objectMapper.writeValueAsString(Map.of("jsonrpc", "2.0", "method", "initialize", "id", 1));
+                HttpRequest initReq = HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + gwPort + "/mcp"))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(initBody))
+                        .build();
+                HttpResponse<String> initResp = client.send(initReq, HttpResponse.BodyHandlers.ofString());
+                String sessionId = initResp.headers().firstValue("Mcp-Session-Id").orElseThrow();
+
+                String callBody = objectMapper.writeValueAsString(Map.of(
+                        "jsonrpc", "2.0", "method", "tools/call", "id", 2,
+                        "params", Map.of("name", "errtool", "arguments", Map.of())
+                ));
+                HttpRequest callReq = HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + gwPort + "/mcp"))
+                        .header("Content-Type", "application/json")
+                        .header("Mcp-Session-Id", sessionId)
+                        .POST(HttpRequest.BodyPublishers.ofString(callBody))
+                        .build();
+                HttpResponse<String> response = client.send(callReq, HttpResponse.BodyHandlers.ofString());
+
+                assertEquals(200, response.statusCode());
+                assertTrue(response.body().contains("MCP Server tool call failed"));
+            } finally {
+                svcCache.close();
+                sessCache.close();
+            }
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void toolsCall_mcpServerBackend_connectionRefused_returnsError() throws Exception {
+        int deadPort = findFreePort();
+        int gwPort = findFreePort();
+
+        Cache<String, Service> svcCache = new Cache2kBuilder<String, Service>() {}
+                .name("testMcpSrvDead-" + System.currentTimeMillis())
+                .eternal(true).entryCapacity(100).storeByReference(true).build();
+        Cache<String, McpSession> sessCache = new Cache2kBuilder<String, McpSession>() {}
+                .name("testMcpSrvDeadSess-" + System.currentTimeMillis())
+                .expireAfterWrite(1800000, TimeUnit.MILLISECONDS).entryCapacity(100).storeByReference(true).build();
+
+        CAPIConfiguration config = new CAPIConfiguration();
+        CAPIConfiguration.Mcp mcp = new CAPIConfiguration.Mcp();
+        mcp.setEnabled(true);
+        mcp.setPort(gwPort);
+        mcp.setSessionTtl(1800000);
+        mcp.setToolCallTimeout(5000);
+        mcp.setMcpServerDiscoveryTimeoutMs(5000);
+        config.setMcp(mcp);
+        config.setVersion("1.0.0-test");
+        CAPIConfiguration.Oauth2 oauth2 = new CAPIConfiguration.Oauth2();
+        oauth2.setEnabled(false);
+        config.setOauth2(oauth2);
+
+        McpBackendLoadBalancer lb = new McpBackendLoadBalancer(30000);
+        McpServerClient mcpServerClient = new McpServerClient(svcCache, lb, HttpClient.newHttpClient(), config);
+
+        try (McpGateway gw = new McpGateway(gwPort, null,
+                new McpToolRegistry(svcCache), new HttpUtils(null, null),
+                null, HttpClient.newHttpClient(), new LocalMcpSessionStore(sessCache), config, lb, mcpServerClient)) {
+
+            gw.start();
+
+            Service service = new Service();
+            service.setId("mcp-dead-svc");
+            service.setName("mcp-dead-svc");
+            ServiceMeta meta = new ServiceMeta();
+            meta.handleUnknown("mcp-enabled", "true");
+            meta.handleUnknown("mcp-type", "server");
+            meta.handleUnknown("mcp-tools", "deadtool");
+            meta.setScheme("http");
+            service.setServiceMeta(meta);
+            Mapping mapping = new Mapping();
+            mapping.setHostname("localhost");
+            mapping.setPort(deadPort);
+            mapping.setRootContext("/");
+            service.setMappingList(Set.of(mapping));
+            svcCache.put("mcp-dead-svc", service);
+
+            HttpClient client = HttpClient.newHttpClient();
+            String initBody = objectMapper.writeValueAsString(Map.of("jsonrpc", "2.0", "method", "initialize", "id", 1));
+            HttpRequest initReq = HttpRequest.newBuilder()
+                    .uri(URI.create("http://localhost:" + gwPort + "/mcp"))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(initBody))
+                    .build();
+            HttpResponse<String> initResp = client.send(initReq, HttpResponse.BodyHandlers.ofString());
+            String sessionId = initResp.headers().firstValue("Mcp-Session-Id").orElseThrow();
+
+            String callBody = objectMapper.writeValueAsString(Map.of(
+                    "jsonrpc", "2.0", "method", "tools/call", "id", 2,
+                    "params", Map.of("name", "deadtool", "arguments", Map.of())
+            ));
+            HttpRequest callReq = HttpRequest.newBuilder()
+                    .uri(URI.create("http://localhost:" + gwPort + "/mcp"))
+                    .header("Content-Type", "application/json")
+                    .header("Mcp-Session-Id", sessionId)
+                    .POST(HttpRequest.BodyPublishers.ofString(callBody))
+                    .build();
+            HttpResponse<String> response = client.send(callReq, HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(200, response.statusCode());
+            assertTrue(response.body().contains("MCP Server tool call failed"));
+        } finally {
+            svcCache.close();
+            sessCache.close();
+        }
+    }
+
+    @Test
+    void toolsCall_mcpServerBackend_withCustomTimeout_usesToolTimeout() throws Exception {
+        int backendPort = findFreePort();
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(exchange -> {
+                    if (exchange.isInIoThread()) {
+                        exchange.dispatch(() -> {
+                            try {
+                                exchange.startBlocking();
+                                String body = new String(exchange.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                                @SuppressWarnings("unchecked")
+                                Map<String, Object> req = objectMapper.readValue(body, Map.class);
+                                String method = (String) req.get("method");
+                                exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+                                if ("initialize".equals(method)) {
+                                    exchange.getResponseHeaders().put(io.undertow.util.HttpString.tryFromString("Mcp-Session-Id"), "test-session");
+                                    exchange.getResponseSender().send("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-03-26\"}}");
+                                } else if ("tools/call".equals(method)) {
+                                    exchange.getResponseSender().send("{\"jsonrpc\":\"2.0\",\"id\":\"x\",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"with timeout\"}]}}");
+                                }
+                            } catch (Exception e) {
+                                exchange.setStatusCode(500);
+                                exchange.getResponseSender().send("Error");
+                            }
+                        });
+                        return;
+                    }
+                }).build();
+        backend.start();
+
+        try {
+            int gwPort = findFreePort();
+            Cache<String, Service> svcCache = new Cache2kBuilder<String, Service>() {}
+                    .name("testMcpTimeout-" + System.currentTimeMillis())
+                    .eternal(true).entryCapacity(100).storeByReference(true).build();
+            Cache<String, McpSession> sessCache = new Cache2kBuilder<String, McpSession>() {}
+                    .name("testMcpTimeoutSess-" + System.currentTimeMillis())
+                    .expireAfterWrite(1800000, TimeUnit.MILLISECONDS).entryCapacity(100).storeByReference(true).build();
+
+            CAPIConfiguration config = new CAPIConfiguration();
+            CAPIConfiguration.Mcp mcp = new CAPIConfiguration.Mcp();
+            mcp.setEnabled(true);
+            mcp.setPort(gwPort);
+            mcp.setSessionTtl(1800000);
+            mcp.setToolCallTimeout(5000);
+            mcp.setMcpServerDiscoveryTimeoutMs(5000);
+            config.setMcp(mcp);
+            config.setVersion("1.0.0-test");
+            CAPIConfiguration.Oauth2 oauth2 = new CAPIConfiguration.Oauth2();
+            oauth2.setEnabled(false);
+            config.setOauth2(oauth2);
+
+            McpBackendLoadBalancer lb = new McpBackendLoadBalancer(30000);
+            McpServerClient mcpServerClient = new McpServerClient(svcCache, lb, HttpClient.newHttpClient(), config);
+
+            try (McpGateway gw = new McpGateway(gwPort, null,
+                    new McpToolRegistry(svcCache), new HttpUtils(null, null),
+                    null, HttpClient.newHttpClient(), new LocalMcpSessionStore(sessCache), config, lb, mcpServerClient)) {
+
+                gw.start();
+
+                Service service = new Service();
+                service.setId("mcp-timeout-svc");
+                service.setName("mcp-timeout-svc");
+                ServiceMeta meta = new ServiceMeta();
+                meta.handleUnknown("mcp-enabled", "true");
+                meta.handleUnknown("mcp-type", "server");
+                meta.handleUnknown("mcp-tools", "timed");
+                meta.handleUnknown("mcp-tools-timed-description", "Timed tool");
+                meta.handleUnknown("mcp-tools-timed-timeout", "10000");  // Custom timeout
+                meta.setScheme("http");
+                service.setServiceMeta(meta);
+                Mapping mapping = new Mapping();
+                mapping.setHostname("localhost");
+                mapping.setPort(backendPort);
+                mapping.setRootContext("/");
+                service.setMappingList(Set.of(mapping));
+                svcCache.put("mcp-timeout-svc", service);
+
+                HttpClient client = HttpClient.newHttpClient();
+                String initBody = objectMapper.writeValueAsString(Map.of("jsonrpc", "2.0", "method", "initialize", "id", 1));
+                HttpRequest initReq = HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + gwPort + "/mcp"))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(initBody))
+                        .build();
+                HttpResponse<String> initResp = client.send(initReq, HttpResponse.BodyHandlers.ofString());
+                String sessionId = initResp.headers().firstValue("Mcp-Session-Id").orElseThrow();
+
+                String callBody = objectMapper.writeValueAsString(Map.of(
+                        "jsonrpc", "2.0", "method", "tools/call", "id", 2,
+                        "params", Map.of("name", "timed", "arguments", Map.of())
+                ));
+                HttpRequest callReq = HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + gwPort + "/mcp"))
+                        .header("Content-Type", "application/json")
+                        .header("Mcp-Session-Id", sessionId)
+                        .POST(HttpRequest.BodyPublishers.ofString(callBody))
+                        .build();
+                HttpResponse<String> response = client.send(callReq, HttpResponse.BodyHandlers.ofString());
+
+                assertEquals(200, response.statusCode());
+                assertTrue(response.body().contains("with timeout"));
+            } finally {
+                svcCache.close();
+                sessCache.close();
+            }
+        } finally {
+            backend.stop();
+        }
+    }
+
     private Service createMcpServiceWithBackend(String id, String toolName, String hostname, int backendPort) {
         Service service = new Service();
         service.setId(id);

@@ -383,6 +383,55 @@ class StartupTest {
         assertNotNull(startup.getRouteUtils());
     }
 
+    @Test
+    void start_withMcpEnabled_createsMcpComponents() {
+        CAPIConfiguration.Mcp mcp = new CAPIConfiguration.Mcp();
+        mcp.setEnabled(true);
+        mcp.setPort(8383);
+        mcp.setSessionTtl(1800000);
+        mcp.setToolCallTimeout(30000);
+        mcp.setCircuitBreakerCooldownMs(30000);
+        mcp.setMcpServerDiscoveryTimeoutMs(10000);
+        configuration.setMcp(mcp);
+        when(camelContext.getRegistry()).thenReturn(registry);
+
+        startup = new Startup(configuration, camelContext);
+        startup.start();
+
+        assertNotNull(startup.getMcpToolRegistry());
+        assertNotNull(startup.getMcpSessionStore());
+        assertNotNull(startup.getMcpServerClient());
+        assertNotNull(startup.getMcpLoadBalancer());
+    }
+
+    @Test
+    void start_withMcpDisabled_mcpComponentsAreNull() {
+        CAPIConfiguration.Mcp mcp = new CAPIConfiguration.Mcp();
+        mcp.setEnabled(false);
+        configuration.setMcp(mcp);
+        when(camelContext.getRegistry()).thenReturn(registry);
+
+        startup = new Startup(configuration, camelContext);
+        startup.start();
+
+        assertNull(startup.getMcpToolRegistry());
+        assertNull(startup.getMcpSessionStore());
+        assertNull(startup.getMcpServerClient());
+        assertNull(startup.getMcpLoadBalancer());
+    }
+
+    @Test
+    void start_withNullMcp_mcpComponentsAreNull() {
+        configuration.setMcp(null);
+        when(camelContext.getRegistry()).thenReturn(registry);
+
+        startup = new Startup(configuration, camelContext);
+        startup.start();
+
+        assertNull(startup.getMcpToolRegistry());
+        assertNull(startup.getMcpSessionStore());
+    }
+
     private CAPIConfiguration buildMinimalConfiguration() {
         CAPIConfiguration config = new CAPIConfiguration();
         config.setVersion("1.0.0");

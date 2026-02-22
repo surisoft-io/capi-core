@@ -68,8 +68,8 @@ class McpToolRegistryTest {
 
         List<McpTool> tools = registry.getAllTools();
         assertEquals(2, tools.size());
-        assertEquals("orders.get", tools.get(0).getName());
-        assertEquals("orders.list", tools.get(1).getName());
+        assertEquals("orders_get", tools.get(0).getName());
+        assertEquals("orders_list", tools.get(1).getName());
     }
 
     @Test
@@ -152,9 +152,9 @@ class McpToolRegistryTest {
         service.getServiceMeta().handleUnknown("mcp-toolPrefix", "orders");
         serviceCache.put("svc1", service);
 
-        McpToolRegistry.McpToolResolution resolution = registry.resolveToolByName("orders.get");
+        McpToolRegistry.McpToolResolution resolution = registry.resolveToolByName("orders_get");
         assertNotNull(resolution);
-        assertEquals("orders.get", resolution.getTool().getName());
+        assertEquals("orders_get", resolution.getTool().getName());
     }
 
     @Test
