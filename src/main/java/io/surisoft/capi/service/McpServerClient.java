@@ -267,6 +267,10 @@ public class McpServerClient {
                 log.warn("MCP Server initialization failed at {}: status {}", backendUrl, response.statusCode());
                 return null;
             }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("Interrupted while initializing MCP session with backend {}", backendUrl);
+            return null;
         } catch (Exception e) {
             log.warn("Failed to initialize MCP session with backend {}: {}", backendUrl, e.getMessage());
             return null;
@@ -302,6 +306,10 @@ public class McpServerClient {
                     }
                 }
             }
+            return null;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("Interrupted while listing tools from MCP backend {}", backendUrl);
             return null;
         } catch (Exception e) {
             log.warn("Failed to list tools from MCP backend {}: {}", backendUrl, e.getMessage());

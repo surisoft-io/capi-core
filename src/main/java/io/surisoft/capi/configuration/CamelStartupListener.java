@@ -41,9 +41,6 @@ public class CamelStartupListener implements ExtendedStartupListener {
             context.addRoutes(consulStoreRouteBuilder());
         }
         context.addRoutes(consistencyCheckRouteBuilder());
-        if(mcpServerEnabled) {
-            context.addRoutes(mcpServerRefreshRouteBuilder());
-        }
     }
 
     public RouteBuilder consulDiscoveryRouteBuilder() {
@@ -51,9 +48,16 @@ public class CamelStartupListener implements ExtendedStartupListener {
         return new RouteBuilder() {
             @Override
             public void configure() {
-                from("timer:consul-inspect?period=" + consulTimerInterval)
-                        .to("bean:consulNodeDiscovery?method=processInfo")
-                        .routeId("consul-discovery-service");
+                if (mcpServerEnabled) {
+                    from("timer:consul-inspect?period=" + consulTimerInterval)
+                            .to("bean:consulNodeDiscovery?method=processInfo")
+                            .to("bean:mcpServerClient?method=refreshMcpServerTools")
+                            .routeId("consul-discovery-service");
+                } else {
+                    from("timer:consul-inspect?period=" + consulTimerInterval)
+                            .to("bean:consulNodeDiscovery?method=processInfo")
+                            .routeId("consul-discovery-service");
+                }
             }
         };
     }
@@ -82,15 +86,4 @@ public class CamelStartupListener implements ExtendedStartupListener {
         };
     }
 
-    public RouteBuilder mcpServerRefreshRouteBuilder() {
-        return new RouteBuilder() {
-            @Override
-            public void configure() {
-                log.debug("Creating MCP Server Refresh Timer");
-                from("timer:mcp-server-refresh?period=" + consulTimerInterval)
-                        .to("bean:mcpServerClient?method=refreshMcpServerTools")
-                        .routeId("mcp-server-refresh");
-            }
-        };
-    }
 }
