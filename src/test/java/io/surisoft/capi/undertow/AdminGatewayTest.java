@@ -3,8 +3,10 @@ package io.surisoft.capi.undertow;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import io.surisoft.capi.configuration.CAPIConfiguration;
+import io.surisoft.capi.schema.*;
 import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.schema.WebsocketClient;
+import io.surisoft.capi.service.*;
 import io.surisoft.capi.service.CapiTrustManager;
 import io.surisoft.capi.service.ConsulNodeDiscovery;
 import io.surisoft.capi.utils.Constants;
@@ -1052,6 +1054,251 @@ class AdminGatewayTest {
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
             assertEquals(404, response.statusCode());
+        }
+    }
+
+    // === MCP Admin Endpoints ===
+
+    @Test
+    void handleMcpInfo_mcpEnabled_returnsInfo() throws Exception {
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        HeaderMap headerMap = new HeaderMap();
+        when(exchange.getResponseHeaders()).thenReturn(headerMap);
+        Sender sender = mock(Sender.class);
+        when(exchange.getResponseSender()).thenReturn(sender);
+
+        CAPIConfiguration.Mcp mcp = new CAPIConfiguration.Mcp();
+        mcp.setEnabled(true);
+        mcp.setPort(8383);
+        when(capiConfiguration.getMcp()).thenReturn(mcp);
+
+        org.cache2k.Cache<String, Service> realCache = new org.cache2k.Cache2kBuilder<String, Service>() {}
+                .name("testAdminMcpInfo-" + System.currentTimeMillis())
+                .eternal(true).entryCapacity(10).storeByReference(true).build();
+        McpToolRegistry registry = new McpToolRegistry(realCache);
+        adminGatewayNoSsl.setMcpToolRegistry(registry);
+
+        org.cache2k.Cache<String, McpSession> sessCache = new org.cache2k.Cache2kBuilder<String, McpSession>() {}
+                .name("testAdminMcpSess-" + System.currentTimeMillis())
+                .eternal(true).entryCapacity(10).storeByReference(true).build();
+        McpSessionStore store = new LocalMcpSessionStore(sessCache);
+        store.put("s1", new McpSession("s1", "c1", 60000));
+        adminGatewayNoSsl.setMcpSessionStore(store);
+
+        Method handleMcpInfo = AdminGateway.class.getDeclaredMethod("handleMcpInfo", HttpServerExchange.class);
+        handleMcpInfo.setAccessible(true);
+        handleMcpInfo.invoke(adminGatewayNoSsl, exchange);
+
+        verify(exchange).setStatusCode(200);
+        verify(sender).send(argThat((String s) ->
+                s.contains("\"enabled\":true") &&
+                s.contains("\"port\":8383") &&
+                s.contains("\"toolCount\":0") &&
+                s.contains("\"activeSessionCount\":1")
+        ));
+
+        realCache.close();
+        sessCache.close();
+    }
+
+    @Test
+    void handleMcpInfo_mcpDisabled_returnsDisabled() throws Exception {
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        HeaderMap headerMap = new HeaderMap();
+        when(exchange.getResponseHeaders()).thenReturn(headerMap);
+        Sender sender = mock(Sender.class);
+        when(exchange.getResponseSender()).thenReturn(sender);
+
+        when(capiConfiguration.getMcp()).thenReturn(null);
+
+        Method handleMcpInfo = AdminGateway.class.getDeclaredMethod("handleMcpInfo", HttpServerExchange.class);
+        handleMcpInfo.setAccessible(true);
+        handleMcpInfo.invoke(adminGatewayNoSsl, exchange);
+
+        verify(exchange).setStatusCode(200);
+        verify(sender).send(argThat((String s) ->
+                s.contains("\"enabled\":false") && s.contains("\"port\":0")
+        ));
+    }
+
+    @Test
+    void handleMcpTools_registrySet_returnsTools() throws Exception {
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        HeaderMap headerMap = new HeaderMap();
+        when(exchange.getResponseHeaders()).thenReturn(headerMap);
+        Sender sender = mock(Sender.class);
+        when(exchange.getResponseSender()).thenReturn(sender);
+
+        org.cache2k.Cache<String, Service> realCache = new org.cache2k.Cache2kBuilder<String, Service>() {}
+                .name("testAdminMcpTools-" + System.currentTimeMillis())
+                .eternal(true).entryCapacity(10).storeByReference(true).build();
+
+        Service svc = new Service();
+        svc.setId("tool-svc");
+        svc.setName("tool-svc");
+        ServiceMeta meta = new ServiceMeta();
+        meta.handleUnknown("mcp_enabled", "true");
+        meta.handleUnknown("mcp_tools", "hello");
+        meta.handleUnknown("mcp_tools_hello_description", "Says hello");
+        svc.setServiceMeta(meta);
+        realCache.put("tool-svc", svc);
+
+        McpToolRegistry registry = new McpToolRegistry(realCache);
+        adminGatewayNoSsl.setMcpToolRegistry(registry);
+
+        Method handleMcpTools = AdminGateway.class.getDeclaredMethod("handleMcpTools", HttpServerExchange.class);
+        handleMcpTools.setAccessible(true);
+        handleMcpTools.invoke(adminGatewayNoSsl, exchange);
+
+        verify(exchange).setStatusCode(200);
+        verify(sender).send(argThat((String s) -> s.contains("hello") && s.contains("Says hello")));
+
+        realCache.close();
+    }
+
+    @Test
+    void handleMcpTools_registryNull_returnsNotFound() throws Exception {
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        HeaderMap headerMap = new HeaderMap();
+        when(exchange.getResponseHeaders()).thenReturn(headerMap);
+        Sender sender = mock(Sender.class);
+        when(exchange.getResponseSender()).thenReturn(sender);
+
+        // Don't set mcpToolRegistry — it stays null
+        AdminGateway freshGw = new AdminGateway(9098, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager);
+
+        Method handleMcpTools = AdminGateway.class.getDeclaredMethod("handleMcpTools", HttpServerExchange.class);
+        handleMcpTools.setAccessible(true);
+        handleMcpTools.invoke(freshGw, exchange);
+
+        verify(exchange).setStatusCode(404);
+        verify(sender).send(argThat((String s) -> s.contains("MCP Gateway not enabled")));
+    }
+
+    @Test
+    void handleMcpSessions_storeSet_returnsCount() throws Exception {
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        HeaderMap headerMap = new HeaderMap();
+        when(exchange.getResponseHeaders()).thenReturn(headerMap);
+        Sender sender = mock(Sender.class);
+        when(exchange.getResponseSender()).thenReturn(sender);
+
+        org.cache2k.Cache<String, McpSession> sessCache = new org.cache2k.Cache2kBuilder<String, McpSession>() {}
+                .name("testAdminMcpSess2-" + System.currentTimeMillis())
+                .eternal(true).entryCapacity(10).storeByReference(true).build();
+        McpSessionStore store = new LocalMcpSessionStore(sessCache);
+        store.put("s1", new McpSession("s1", "c1", 60000));
+        store.put("s2", new McpSession("s2", "c2", 60000));
+        adminGatewayNoSsl.setMcpSessionStore(store);
+
+        Method handleMcpSessions = AdminGateway.class.getDeclaredMethod("handleMcpSessions", HttpServerExchange.class);
+        handleMcpSessions.setAccessible(true);
+        handleMcpSessions.invoke(adminGatewayNoSsl, exchange);
+
+        verify(exchange).setStatusCode(200);
+        verify(sender).send(argThat((String s) -> s.contains("\"activeSessionCount\":2")));
+
+        sessCache.close();
+    }
+
+    @Test
+    void handleMcpSessions_storeNull_returnsNotFound() throws Exception {
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        HeaderMap headerMap = new HeaderMap();
+        when(exchange.getResponseHeaders()).thenReturn(headerMap);
+        Sender sender = mock(Sender.class);
+        when(exchange.getResponseSender()).thenReturn(sender);
+
+        AdminGateway freshGw = new AdminGateway(9099, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager);
+
+        Method handleMcpSessions = AdminGateway.class.getDeclaredMethod("handleMcpSessions", HttpServerExchange.class);
+        handleMcpSessions.setAccessible(true);
+        handleMcpSessions.invoke(freshGw, exchange);
+
+        verify(exchange).setStatusCode(404);
+        verify(sender).send(argThat((String s) -> s.contains("MCP Gateway not enabled")));
+    }
+
+    @Test
+    void start_withoutSsl_mcpInfoEndpoint_returnsOk() throws Exception {
+        CAPIConfiguration.Mcp mcp = new CAPIConfiguration.Mcp();
+        mcp.setEnabled(true);
+        mcp.setPort(8383);
+        when(capiConfiguration.getMcp()).thenReturn(mcp);
+
+        int mcpAdminPort = findFreePort();
+        try (AdminGateway gw = new AdminGateway(mcpAdminPort, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager)) {
+            gw.start();
+
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("http://localhost:" + mcpAdminPort + "/info/mcp"))
+                    .GET()
+                    .build();
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(200, response.statusCode());
+            assertTrue(response.body().contains("enabled"));
+        }
+    }
+
+    @Test
+    void start_withoutSsl_mcpToolsEndpoint_noRegistry_returns404() throws Exception {
+        int mcpAdminPort = findFreePort();
+        try (AdminGateway gw = new AdminGateway(mcpAdminPort, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager)) {
+            gw.start();
+
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("http://localhost:" + mcpAdminPort + "/info/mcp/tools"))
+                    .GET()
+                    .build();
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(404, response.statusCode());
+        }
+    }
+
+    @Test
+    void start_withoutSsl_mcpSessionsEndpoint_noStore_returns404() throws Exception {
+        int mcpAdminPort = findFreePort();
+        try (AdminGateway gw = new AdminGateway(mcpAdminPort, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager)) {
+            gw.start();
+
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("http://localhost:" + mcpAdminPort + "/info/mcp/sessions"))
+                    .GET()
+                    .build();
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(404, response.statusCode());
+        }
+    }
+
+    @Test
+    void handleInfo_includesMcpLinks() throws Exception {
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        HeaderMap headerMap = new HeaderMap();
+        when(exchange.getResponseHeaders()).thenReturn(headerMap);
+        Sender sender = mock(Sender.class);
+        when(exchange.getResponseSender()).thenReturn(sender);
+        when(exchange.getHostAndPort()).thenReturn("localhost:9091");
+
+        Method handleInfo = AdminGateway.class.getDeclaredMethod("handleInfo", HttpServerExchange.class);
+        handleInfo.setAccessible(true);
+        handleInfo.invoke(adminGatewayNoSsl, exchange);
+
+        verify(sender).send(argThat((String s) ->
+                s.contains("/info/mcp") &&
+                s.contains("/info/mcp/tools") &&
+                s.contains("/info/mcp/sessions")
+        ));
+    }
+
+    private static int findFreePort() throws Exception {
+        try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
+            return socket.getLocalPort();
         }
     }
 
