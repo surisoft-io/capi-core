@@ -12,6 +12,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import io.undertow.Undertow;
+import io.undertow.util.Headers;
+
+import java.net.ServerSocket;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -90,6 +95,47 @@ class OpenAPIDefinitionTest {
     void getCachedService_doesNotExist_returnsNull() {
         Service result = openAPIDefinition.getCachedService("nonexistent-service");
         assertNull(result);
+    }
+
+    @Test
+    void getCacheOpenApiDefinition_validEndpoint_returnsEnrichedDefinition() throws Exception {
+        int port = findFreePort();
+        String openApiJson = "{\"openapi\":\"3.0.0\",\"info\":{\"title\":\"Original\"},\"servers\":[{\"url\":\"http://old\"}],\"paths\":{}}";
+
+        Undertow backend = Undertow.builder()
+                .addHttpListener(port, "0.0.0.0")
+                .setHandler(exchange -> {
+                    exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+                    exchange.getResponseSender().send(openApiJson);
+                }).build();
+        backend.start();
+
+        try {
+            ServiceMeta meta = new ServiceMeta();
+            meta.setOpenApiEndpoint("http://localhost:" + port + "/api-docs");
+
+            Service service = new Service();
+            service.setId("my-svc");
+            service.setServiceMeta(meta);
+
+            JsonObject result = openAPIDefinition.getCacheOpenApiDefinition(service, objectMapper, "my-svc:v1");
+            assertNotNull(result, "Expected non-null result from valid endpoint");
+            // info should be replaced with CAPI-generated info
+            Object info = result.get("info");
+            assertNotNull(info);
+            // paths should still be present
+            assertNotNull(result.get("paths"));
+            // servers should contain CAPI endpoint
+            assertNotNull(result.get("servers"));
+        } finally {
+            backend.stop();
+        }
+    }
+
+    private static int findFreePort() throws Exception {
+        try (ServerSocket socket = new ServerSocket(0)) {
+            return socket.getLocalPort();
+        }
     }
 
     @Test

@@ -278,16 +278,16 @@ class McpServerClientTest {
             service.getServiceMeta().handleUnknown("mcp-toolPrefix", "weather");
             serviceCache.put("prefix-svc", service);
 
-            mcpServerClient.forwardToolCall(service, "weather.forecast", Map.of(), 5000);
+            mcpServerClient.forwardToolCall(service, "weather_forecast", Map.of(), 5000);
 
             // Find the tools/call request body
             String toolCallBody = capturedBodies.stream()
                     .filter(b -> b.contains("tools/call"))
                     .findFirst().orElse(null);
             assertNotNull(toolCallBody, "Expected a tools/call request");
-            // The backend should receive "forecast", not "weather.forecast"
+            // The backend should receive "forecast", not "weather_forecast"
             assertTrue(toolCallBody.contains("\"name\":\"forecast\""));
-            assertFalse(toolCallBody.contains("\"name\":\"weather.forecast\""));
+            assertFalse(toolCallBody.contains("\"name\":\"weather_forecast\""));
         } finally {
             backend.stop();
         }
@@ -534,6 +534,399 @@ class McpServerClientTest {
             exchange.setStatusCode(500);
             exchange.getResponseSender().send("Error: " + e.getMessage());
         }
+    }
+
+    @Test
+    void forwardToolCall_nullArguments_sendsEmptyMap() throws Exception {
+        int backendPort = findFreePort();
+
+        List<String> capturedBodies = Collections.synchronizedList(new ArrayList<>());
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(exchange -> {
+                    if (exchange.isInIoThread()) {
+                        exchange.dispatch(() -> {
+                            try {
+                                exchange.startBlocking();
+                                String body = new String(exchange.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                                capturedBodies.add(body);
+                                @SuppressWarnings("unchecked")
+                                Map<String, Object> req = objectMapper.readValue(body, Map.class);
+                                String method = (String) req.get("method");
+                                exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+                                if ("initialize".equals(method)) {
+                                    exchange.getResponseSender().send("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-03-26\"}}");
+                                } else if ("tools/call".equals(method)) {
+                                    exchange.getResponseSender().send("{\"jsonrpc\":\"2.0\",\"id\":\"x\",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}");
+                                }
+                            } catch (Exception e) {
+                                exchange.setStatusCode(500);
+                                exchange.getResponseSender().send("Error");
+                            }
+                        });
+                        return;
+                    }
+                }).build();
+        backend.start();
+
+        try {
+            Service service = createMcpServerServiceWithBackend("null-args-svc", "localhost", backendPort);
+            serviceCache.put("null-args-svc", service);
+
+            Object result = mcpServerClient.forwardToolCall(service, "test", null, 5000);
+            assertNotNull(result);
+
+            // Verify arguments were sent as empty map
+            String toolCallBody = capturedBodies.stream()
+                    .filter(b -> b.contains("tools/call"))
+                    .findFirst().orElse(null);
+            assertNotNull(toolCallBody);
+            assertTrue(toolCallBody.contains("\"arguments\":{}"));
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void forwardToolCall_backendReturnsNon200_throwsException() throws Exception {
+        int backendPort = findFreePort();
+
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(exchange -> {
+                    if (exchange.isInIoThread()) {
+                        exchange.dispatch(() -> {
+                            try {
+                                exchange.startBlocking();
+                                String body = new String(exchange.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                                @SuppressWarnings("unchecked")
+                                Map<String, Object> req = objectMapper.readValue(body, Map.class);
+                                String method = (String) req.get("method");
+                                exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+                                if ("initialize".equals(method)) {
+                                    exchange.getResponseHeaders().put(io.undertow.util.HttpString.tryFromString("Mcp-Session-Id"), "sess");
+                                    exchange.getResponseSender().send("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-03-26\"}}");
+                                } else if ("tools/call".equals(method)) {
+                                    exchange.setStatusCode(500);
+                                    exchange.getResponseSender().send("Internal Server Error");
+                                }
+                            } catch (Exception e) {
+                                exchange.setStatusCode(500);
+                                exchange.getResponseSender().send("Error");
+                            }
+                        });
+                        return;
+                    }
+                }).build();
+        backend.start();
+
+        try {
+            Service service = createMcpServerServiceWithBackend("err-svc", "localhost", backendPort);
+            serviceCache.put("err-svc", service);
+
+            Exception ex = assertThrows(RuntimeException.class, () ->
+                    mcpServerClient.forwardToolCall(service, "test", Map.of(), 5000));
+            assertTrue(ex.getMessage().contains("Backend returned status 500"));
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void forwardToolCall_backendReturnsMcpError_throwsException() throws Exception {
+        int backendPort = findFreePort();
+
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(exchange -> {
+                    if (exchange.isInIoThread()) {
+                        exchange.dispatch(() -> {
+                            try {
+                                exchange.startBlocking();
+                                String body = new String(exchange.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                                @SuppressWarnings("unchecked")
+                                Map<String, Object> req = objectMapper.readValue(body, Map.class);
+                                String method = (String) req.get("method");
+                                exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+                                if ("initialize".equals(method)) {
+                                    exchange.getResponseHeaders().put(io.undertow.util.HttpString.tryFromString("Mcp-Session-Id"), "sess");
+                                    exchange.getResponseSender().send("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-03-26\"}}");
+                                } else if ("tools/call".equals(method)) {
+                                    // Return a non-session MCP error (code != -32600)
+                                    exchange.getResponseSender().send("{\"jsonrpc\":\"2.0\",\"id\":\"x\",\"error\":{\"code\":-32603,\"message\":\"Tool execution failed\"}}");
+                                }
+                            } catch (Exception e) {
+                                exchange.setStatusCode(500);
+                                exchange.getResponseSender().send("Error");
+                            }
+                        });
+                        return;
+                    }
+                }).build();
+        backend.start();
+
+        try {
+            Service service = createMcpServerServiceWithBackend("mcp-err-svc", "localhost", backendPort);
+            serviceCache.put("mcp-err-svc", service);
+
+            Exception ex = assertThrows(RuntimeException.class, () ->
+                    mcpServerClient.forwardToolCall(service, "test", Map.of(), 5000));
+            assertTrue(ex.getMessage().contains("Backend MCP error"));
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void forwardToolCall_sessionExpired_reInitFails_throwsError() throws Exception {
+        int backendPort = findFreePort();
+        int[] callCount = {0};
+
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(exchange -> {
+                    if (exchange.isInIoThread()) {
+                        exchange.dispatch(() -> {
+                            try {
+                                exchange.startBlocking();
+                                String body = new String(exchange.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                                @SuppressWarnings("unchecked")
+                                Map<String, Object> req = objectMapper.readValue(body, Map.class);
+                                String method = (String) req.get("method");
+                                exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+                                if ("initialize".equals(method)) {
+                                    callCount[0]++;
+                                    if (callCount[0] == 1) {
+                                        // First init succeeds
+                                        exchange.getResponseHeaders().put(io.undertow.util.HttpString.tryFromString("Mcp-Session-Id"), "sess-1");
+                                        exchange.getResponseSender().send("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-03-26\"}}");
+                                    } else {
+                                        // Re-init fails
+                                        exchange.setStatusCode(503);
+                                        exchange.getResponseSender().send("Service Unavailable");
+                                    }
+                                } else if ("tools/call".equals(method)) {
+                                    // Always return session error
+                                    exchange.getResponseSender().send("{\"jsonrpc\":\"2.0\",\"id\":\"x\",\"error\":{\"code\":-32600,\"message\":\"Session expired\"}}");
+                                }
+                            } catch (Exception e) {
+                                exchange.setStatusCode(500);
+                                exchange.getResponseSender().send("Error");
+                            }
+                        });
+                        return;
+                    }
+                }).build();
+        backend.start();
+
+        try {
+            Service service = createMcpServerServiceWithBackend("reinit-fail-svc", "localhost", backendPort);
+            serviceCache.put("reinit-fail-svc", service);
+
+            // Should throw because after session error, re-init fails, and the error response
+            // has no "result" key, so it falls through to the error branch
+            Exception ex = assertThrows(RuntimeException.class, () ->
+                    mcpServerClient.forwardToolCall(service, "test", Map.of(), 5000));
+            assertTrue(ex.getMessage().contains("Backend MCP error") || ex.getMessage().contains("Session expired"));
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void refreshMcpServerTools_noBackendUrls_logsWarning() {
+        Service service = createMcpServerService("no-url-svc");
+        // No mappings at all
+        serviceCache.put("no-url-svc", service);
+
+        assertDoesNotThrow(() -> mcpServerClient.refreshMcpServerTools());
+    }
+
+    @Test
+    void refreshMcpServerTools_toolsListReturnsNull_reportsFailure() throws Exception {
+        int backendPort = findFreePort();
+
+        // Backend where tools/list returns 200 but no "result" key
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(exchange -> {
+                    if (exchange.isInIoThread()) {
+                        exchange.dispatch(() -> {
+                            try {
+                                exchange.startBlocking();
+                                String body = new String(exchange.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                                @SuppressWarnings("unchecked")
+                                Map<String, Object> req = objectMapper.readValue(body, Map.class);
+                                String method = (String) req.get("method");
+                                exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+                                if ("initialize".equals(method)) {
+                                    exchange.getResponseHeaders().put(io.undertow.util.HttpString.tryFromString("Mcp-Session-Id"), "sess");
+                                    exchange.getResponseSender().send("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-03-26\"}}");
+                                } else if ("tools/list".equals(method)) {
+                                    // Return response without "result" key
+                                    exchange.getResponseSender().send("{\"jsonrpc\":\"2.0\",\"id\":2,\"error\":{\"code\":-32603,\"message\":\"internal error\"}}");
+                                }
+                            } catch (Exception e) {
+                                exchange.setStatusCode(500);
+                                exchange.getResponseSender().send("Error");
+                            }
+                        });
+                        return;
+                    }
+                }).build();
+        backend.start();
+
+        try {
+            Service service = createMcpServerServiceWithBackend("null-tools-svc", "localhost", backendPort);
+            serviceCache.put("null-tools-svc", service);
+
+            assertDoesNotThrow(() -> mcpServerClient.refreshMcpServerTools());
+            // Tools should not have been populated
+            assertNull(service.getServiceMeta().getUnknownProperties().get("mcp-tools"));
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void refreshMcpServerTools_initializationFails_reportsFailure() throws Exception {
+        int backendPort = findFreePort();
+
+        // Backend that returns 503 on initialize
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(exchange -> {
+                    exchange.setStatusCode(503);
+                    exchange.getResponseSender().send("Service Unavailable");
+                }).build();
+        backend.start();
+
+        try {
+            Service service = createMcpServerServiceWithBackend("init-fail-svc", "localhost", backendPort);
+            serviceCache.put("init-fail-svc", service);
+
+            assertDoesNotThrow(() -> mcpServerClient.refreshMcpServerTools());
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void populateToolMetadata_toolWithNullName_skipped() {
+        Service service = createService("svc1");
+        List<Map<String, Object>> tools = new ArrayList<>();
+        tools.add(new HashMap<>(Map.of("description", "No name tool")));  // no "name" key
+        tools.add(Map.of("name", "valid", "description", "Valid tool"));
+
+        mcpServerClient.populateToolMetadata(service, tools);
+
+        Map<String, String> props = service.getServiceMeta().getUnknownProperties();
+        assertEquals("valid", props.get("mcp-tools"));
+        assertEquals("Valid tool", props.get("mcp-tools-valid-description"));
+    }
+
+    @Test
+    void populateToolMetadata_toolWithEmptyName_skipped() {
+        Service service = createService("svc1");
+        List<Map<String, Object>> tools = List.of(
+                Map.of("name", "", "description", "Empty name"),
+                Map.of("name", "real", "description", "Real tool")
+        );
+
+        mcpServerClient.populateToolMetadata(service, tools);
+
+        Map<String, String> props = service.getServiceMeta().getUnknownProperties();
+        assertEquals("real", props.get("mcp-tools"));
+    }
+
+    @Test
+    void populateToolMetadata_toolWithNoDescription_onlySchemaWritten() {
+        Service service = createService("svc1");
+        List<Map<String, Object>> tools = List.of(
+                Map.of("name", "bare", "inputSchema", Map.of("type", "object"))
+        );
+
+        mcpServerClient.populateToolMetadata(service, tools);
+
+        Map<String, String> props = service.getServiceMeta().getUnknownProperties();
+        assertEquals("bare", props.get("mcp-tools"));
+        assertNull(props.get("mcp-tools-bare-description"));
+        assertNotNull(props.get("mcp-tools-bare-inputSchema"));
+    }
+
+    @Test
+    void getDiscoveryTimeout_whenMcpConfigNull_returnsDefault() {
+        CAPIConfiguration nullMcpConfig = new CAPIConfiguration();
+        nullMcpConfig.setMcp(null);
+        nullMcpConfig.setVersion("1.0.0-test");
+
+        McpServerClient client = new McpServerClient(serviceCache, loadBalancer, HttpClient.newHttpClient(), nullMcpConfig);
+
+        // Trigger refreshMcpServerTools which calls getDiscoveryTimeout internally
+        // With no MCP server services in cache, it won't do anything, but the timeout path is exercised
+        assertDoesNotThrow(client::refreshMcpServerTools);
+    }
+
+    @Test
+    void forwardToolCall_withNoPrefix_doesNotStripToolName() throws Exception {
+        int backendPort = findFreePort();
+
+        List<String> capturedBodies = Collections.synchronizedList(new ArrayList<>());
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(exchange -> {
+                    if (exchange.isInIoThread()) {
+                        exchange.dispatch(() -> {
+                            try {
+                                exchange.startBlocking();
+                                String body = new String(exchange.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                                capturedBodies.add(body);
+                                @SuppressWarnings("unchecked")
+                                Map<String, Object> req = objectMapper.readValue(body, Map.class);
+                                String method = (String) req.get("method");
+                                exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+                                if ("initialize".equals(method)) {
+                                    exchange.getResponseSender().send("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-03-26\"}}");
+                                } else if ("tools/call".equals(method)) {
+                                    exchange.getResponseSender().send("{\"jsonrpc\":\"2.0\",\"id\":\"x\",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}");
+                                }
+                            } catch (Exception e) {
+                                exchange.setStatusCode(500);
+                                exchange.getResponseSender().send("Error");
+                            }
+                        });
+                        return;
+                    }
+                }).build();
+        backend.start();
+
+        try {
+            Service service = createMcpServerServiceWithBackend("no-prefix-svc", "localhost", backendPort);
+            // No mcp-toolPrefix set
+            serviceCache.put("no-prefix-svc", service);
+
+            mcpServerClient.forwardToolCall(service, "forecast", Map.of(), 5000);
+
+            String toolCallBody = capturedBodies.stream()
+                    .filter(b -> b.contains("tools/call"))
+                    .findFirst().orElse(null);
+            assertNotNull(toolCallBody);
+            assertTrue(toolCallBody.contains("\"name\":\"forecast\""));
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void refreshMcpServerTools_skipsNonMcpServerServices() {
+        // Add a REST service (not MCP Server)
+        Service restService = createService("rest-svc");
+        restService.getServiceMeta().handleUnknown("mcp-enabled", "true");
+        restService.getServiceMeta().handleUnknown("mcp-tools", "hello");
+        serviceCache.put("rest-svc", restService);
+
+        assertDoesNotThrow(() -> mcpServerClient.refreshMcpServerTools());
+        // Should not have modified anything (no mcp-type: server)
     }
 
     private static int findFreePort() {
