@@ -1,5 +1,8 @@
 package io.surisoft.capi.schema;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class JsonRpcResponse {
     private String jsonrpc = "2.0";
     private Object result;
@@ -66,6 +69,7 @@ public class JsonRpcResponse {
         this.id = id;
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class JsonRpcError {
         private int code;
         private String message;
