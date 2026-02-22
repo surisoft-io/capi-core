@@ -8,6 +8,7 @@ public class McpTool {
     private boolean streaming;
     private String category;
     private int timeout;
+    private boolean mcpServer;
 
     public String getName() {
         return name;
@@ -63,5 +64,13 @@ public class McpTool {
 
     public void setTimeout(int timeout) {
         this.timeout = timeout;
+    }
+
+    public boolean isMcpServer() {
+        return mcpServer;
+    }
+
+    public void setMcpServer(boolean mcpServer) {
+        this.mcpServer = mcpServer;
     }
 }
