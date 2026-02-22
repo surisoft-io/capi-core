@@ -142,6 +142,32 @@
     .feature-card h3 { font-size: 1.05rem; font-weight: 700; margin-bottom: 6px; }
     .feature-card p { font-size: 0.92rem; color: var(--text-muted); line-height: 1.55; }
 
+    /* --- Bridging --- */
+    .bridging { background: var(--surface); }
+    .bridging-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin-top: 40px;
+    }
+    @media (max-width: 768px) { .bridging-grid { grid-template-columns: 1fr; } }
+    .bridging-card {
+      background: var(--white); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 32px; box-shadow: var(--shadow);
+    }
+    .bridging-card h3 { font-size: 1.1rem; font-weight: 700; margin-bottom: 12px; }
+    .bridging-card p { font-size: 0.92rem; color: var(--text-muted); line-height: 1.6; }
+    .bridging-card .tag {
+      display: inline-block; font-size: 0.75rem; font-weight: 700; padding: 3px 10px;
+      border-radius: 4px; margin-bottom: 12px;
+    }
+    .bridging-card .tag-rest { background: #e0f2fe; color: #0369a1; }
+    .bridging-card .tag-mcp { background: #e0f7fa; color: #0096b7; }
+    .bridging-flow {
+      background: var(--primary); border-radius: var(--radius); padding: 24px 28px;
+      font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 0.82rem;
+      line-height: 1.8; color: #e2e8f0; overflow-x: auto; margin-top: 32px;
+    }
+    .bridging-flow .label { color: var(--accent); font-weight: 700; }
+    .bridging-flow .dim { color: #64748b; }
+
     /* --- Quickstart --- */
     .quickstart { background: var(--surface); }
     .code-block {
@@ -205,6 +231,7 @@
     <ul class="nav-links">
       <li><a href="#how-it-works">How it works</a></li>
       <li><a href="#features">Features</a></li>
+      <li><a href="#bridging">MCP Bridging</a></li>
       <li><a href="#quickstart">Quickstart</a></li>
       <li><a href="#compare">Compare</a></li>
     </ul>
@@ -440,9 +467,42 @@
           <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
         </div>
         <h3>MCP Gateway <span style="font-size:0.7rem;background:var(--accent);color:var(--primary);padding:2px 8px;border-radius:4px;vertical-align:middle;font-weight:700;margin-left:6px;">EXPERIMENTAL</span></h3>
-        <p>Expose Consul services as MCP tools for LLM agents. Claude Desktop, Cursor, and custom agents discover and invoke enterprise capabilities via JSON-RPC 2.0 over Streamable HTTP.</p>
+        <p>Turn any REST API into an MCP tool — no code changes on your backends. Also proxies real MCP Servers. Claude Desktop, Cursor, and custom agents discover and invoke everything via JSON-RPC 2.0 over Streamable HTTP.</p>
       </div>
     </div>
+  </div>
+</section>
+
+<!-- REST-to-MCP Bridging -->
+<section class="bridging" id="bridging">
+  <div class="container">
+    <div class="section-label">Key Differentiator</div>
+    <h2 class="section-title">REST-to-MCP Bridging</h2>
+    <p class="section-subtitle">Your REST APIs become MCP tools instantly. No code changes, no MCP SDKs, no protocol rewrites on your backends.</p>
+    <div class="bridging-grid">
+      <div class="bridging-card">
+        <span class="tag tag-rest">REST backends</span>
+        <h3>Zero-change integration</h3>
+        <p>Register any REST API in Consul with MCP metadata (<code>mcp-tools</code>, descriptions, input schemas). CAPI translates MCP <code>tools/call</code> requests into plain HTTP POST calls and wraps the response in MCP format. Your backend never sees JSON-RPC — it just handles normal HTTP.</p>
+      </div>
+      <div class="bridging-card">
+        <span class="tag tag-mcp">MCP Server backends</span>
+        <h3>Native MCP proxy</h3>
+        <p>For services that already speak MCP (JSON-RPC 2.0), register them with <code>mcp-type: server</code>. CAPI discovers tools automatically via <code>tools/list</code> and proxies <code>tools/call</code> transparently — with load balancing, failover, and circuit breaker included.</p>
+      </div>
+    </div>
+    <div class="bridging-flow">
+<span class="label">LLM Agent</span>                      <span class="label">CAPI Gateway</span>                  <span class="label">Your REST API</span> <span class="dim">(unchanged)</span>
+
+  tools/list   ──────────►   reads Consul metadata
+               ◄──────────   returns tool catalog
+
+  tools/call   ──────────►   extracts arguments
+                              POST /endpoint   ──────────►   handles request
+                              wraps response   ◄──────────   returns JSON
+               ◄──────────   MCP-formatted result
+    </div>
+    <p style="margin-top:24px;font-size:0.92rem;color:var(--text-muted);">Unlike dedicated MCP gateways that require all backends to be MCP Servers, CAPI bridges existing REST infrastructure and LLM-native protocols — aggregating both under one unified <code>/mcp</code> endpoint.</p>
   </div>
 </section>
 
@@ -562,7 +622,7 @@
           </tr>
           <tr>
             <td><strong>MCP Gateway (LLM tools)</strong></td>
-            <td class="check">Built-in</td>
+            <td class="check">Built-in (REST + MCP)</td>
             <td class="cross">No</td>
             <td class="cross">No</td>
             <td class="cross">No</td>
