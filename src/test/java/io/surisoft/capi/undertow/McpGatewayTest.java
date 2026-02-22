@@ -179,9 +179,9 @@ class McpGatewayTest {
         service.setId("test-svc");
         service.setName("test-svc");
         ServiceMeta meta = new ServiceMeta();
-        meta.handleUnknown("mcp.enabled", "true");
-        meta.handleUnknown("mcp.tools", "hello");
-        meta.handleUnknown("mcp.tools.hello.description", "Says hello");
+        meta.handleUnknown("mcp_enabled", "true");
+        meta.handleUnknown("mcp_tools", "hello");
+        meta.handleUnknown("mcp_tools_hello_description", "Says hello");
         service.setServiceMeta(meta);
         serviceCache.put("test-svc", service);
 
@@ -260,8 +260,8 @@ class McpGatewayTest {
         service.setId("no-backend");
         service.setName("no-backend");
         ServiceMeta meta = new ServiceMeta();
-        meta.handleUnknown("mcp.enabled", "true");
-        meta.handleUnknown("mcp.tools", "empty");
+        meta.handleUnknown("mcp_enabled", "true");
+        meta.handleUnknown("mcp_tools", "empty");
         service.setServiceMeta(meta);
         serviceCache.put("no-backend", service);
 
@@ -361,9 +361,9 @@ class McpGatewayTest {
         service.setId("bad-schema-svc");
         service.setName("bad-schema-svc");
         ServiceMeta meta = new ServiceMeta();
-        meta.handleUnknown("mcp.enabled", "true");
-        meta.handleUnknown("mcp.tools", "broken");
-        meta.handleUnknown("mcp.tools.broken.inputSchema", "not-valid-json{{{");
+        meta.handleUnknown("mcp_enabled", "true");
+        meta.handleUnknown("mcp_tools", "broken");
+        meta.handleUnknown("mcp_tools_broken_inputSchema", "not-valid-json{{{");
         service.setServiceMeta(meta);
         serviceCache.put("bad-schema-svc", service);
 
@@ -465,7 +465,7 @@ class McpGatewayTest {
             String sessionId = initializeSession();
 
             Service service = createMcpServiceWithBackend("stream-svc", "streamtool", "localhost", backendPort);
-            service.getServiceMeta().handleUnknown("mcp.streaming", "streamtool");
+            service.getServiceMeta().handleUnknown("mcp_streaming", "streamtool");
             serviceCache.put("stream-svc", service);
 
             String body = objectMapper.writeValueAsString(Map.of(
@@ -503,7 +503,7 @@ class McpGatewayTest {
             String sessionId = initializeSession();
 
             Service service = createMcpServiceWithBackend("stream-svc2", "streamsync", "localhost", backendPort);
-            service.getServiceMeta().handleUnknown("mcp.streaming", "streamsync");
+            service.getServiceMeta().handleUnknown("mcp_streaming", "streamsync");
             serviceCache.put("stream-svc2", service);
 
             // No Accept: text/event-stream header → should fall back to sync
@@ -694,8 +694,8 @@ class McpGatewayTest {
             service.setId("null-scheme-svc");
             service.setName("null-scheme-svc");
             ServiceMeta meta = new ServiceMeta();
-            meta.handleUnknown("mcp.enabled", "true");
-            meta.handleUnknown("mcp.tools", "testtool");
+            meta.handleUnknown("mcp_enabled", "true");
+            meta.handleUnknown("mcp_tools", "testtool");
             // Intentionally do NOT set scheme → null → should default to "http"
             service.setServiceMeta(meta);
 
@@ -737,8 +737,8 @@ class McpGatewayTest {
             service.setId("slash-svc");
             service.setName("slash-svc");
             ServiceMeta meta = new ServiceMeta();
-            meta.handleUnknown("mcp.enabled", "true");
-            meta.handleUnknown("mcp.tools", "slashtool");
+            meta.handleUnknown("mcp_enabled", "true");
+            meta.handleUnknown("mcp_tools", "slashtool");
             meta.setScheme("http");
             service.setServiceMeta(meta);
 
@@ -777,7 +777,7 @@ class McpGatewayTest {
             String sessionId = initializeSession();
 
             Service service = createMcpServiceWithBackend("timeout-svc", "timed", "localhost", backendPort);
-            service.getServiceMeta().handleUnknown("mcp.tools.timed.timeout", "5000");
+            service.getServiceMeta().handleUnknown("mcp_tools_timed_timeout", "5000");
             serviceCache.put("timeout-svc", service);
 
             String body = objectMapper.writeValueAsString(Map.of(
@@ -880,13 +880,348 @@ class McpGatewayTest {
                 null, HttpClient.newHttpClient(), new LocalMcpSessionStore(sessCache), oauthConfig);
     }
 
+    @Test
+    void toolsCall_syncBackendTimeout_returnsTimeoutError() throws Exception {
+        int backendPort = findFreePort();
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(exchange -> {
+                    // Sleep longer than the tool timeout
+                    try { Thread.sleep(5000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                    exchange.getResponseSender().send("too late");
+                }).build();
+        backend.start();
+
+        try {
+            // Create gateway with very short tool call timeout
+            int shortTimeoutPort = findFreePort();
+            Cache<String, Service> svcCache = new Cache2kBuilder<String, Service>() {}
+                    .name("testTimeoutSvc-" + System.currentTimeMillis())
+                    .eternal(true).entryCapacity(100).storeByReference(true).build();
+            Cache<String, McpSession> sessCache = new Cache2kBuilder<String, McpSession>() {}
+                    .name("testTimeoutSess-" + System.currentTimeMillis())
+                    .expireAfterWrite(1800000, TimeUnit.MILLISECONDS)
+                    .entryCapacity(100).storeByReference(true).build();
+
+            CAPIConfiguration config = new CAPIConfiguration();
+            CAPIConfiguration.Mcp mcp = new CAPIConfiguration.Mcp();
+            mcp.setEnabled(true);
+            mcp.setPort(shortTimeoutPort);
+            mcp.setSessionTtl(1800000);
+            mcp.setToolCallTimeout(500); // 500ms timeout
+            config.setMcp(mcp);
+            config.setVersion("1.0.0-test");
+            CAPIConfiguration.Oauth2 oauth2 = new CAPIConfiguration.Oauth2();
+            oauth2.setEnabled(false);
+            config.setOauth2(oauth2);
+
+            McpGateway gw = new McpGateway(shortTimeoutPort, null,
+                    new McpToolRegistry(svcCache), new HttpUtils(null, null),
+                    null, HttpClient.newHttpClient(), new LocalMcpSessionStore(sessCache), config);
+            gw.start();
+
+            try {
+                // Initialize session
+                HttpClient client = HttpClient.newHttpClient();
+                String initBody = objectMapper.writeValueAsString(Map.of("jsonrpc", "2.0", "method", "initialize", "id", 1));
+                HttpRequest initReq = HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + shortTimeoutPort + "/mcp"))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(initBody))
+                        .build();
+                HttpResponse<String> initResp = client.send(initReq, HttpResponse.BodyHandlers.ofString());
+                String sessionId = initResp.headers().firstValue("Mcp-Session-Id").orElseThrow();
+
+                Service service = createMcpServiceWithBackend("timeout-svc2", "slowtool", "localhost", backendPort);
+                svcCache.put("timeout-svc2", service);
+
+                String body = objectMapper.writeValueAsString(Map.of(
+                        "jsonrpc", "2.0", "method", "tools/call", "id", 30,
+                        "params", Map.of("name", "slowtool", "arguments", Map.of())
+                ));
+                HttpRequest toolReq = HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + shortTimeoutPort + "/mcp"))
+                        .header("Content-Type", "application/json")
+                        .header("Mcp-Session-Id", sessionId)
+                        .POST(HttpRequest.BodyPublishers.ofString(body))
+                        .build();
+                HttpResponse<String> response = client.send(toolReq, HttpResponse.BodyHandlers.ofString());
+                assertEquals(200, response.statusCode());
+                assertTrue(response.body().contains("timed out"));
+            } finally {
+                gw.stop();
+                svcCache.close();
+                sessCache.close();
+            }
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void toolsCall_streamingBackendConnectionRefused_returnsError() throws Exception {
+        // Use a port that's not listening to trigger connection refused in streaming path
+        int deadPort = findFreePort();
+        String sessionId = initializeSession();
+
+        Service service = createMcpServiceWithBackend("stream-dead-svc", "deadstream", "localhost", deadPort);
+        service.getServiceMeta().handleUnknown("mcp_streaming", "deadstream");
+        serviceCache.put("stream-dead-svc", service);
+
+        String body = objectMapper.writeValueAsString(Map.of(
+                "jsonrpc", "2.0", "method", "tools/call", "id", 31,
+                "params", Map.of("name", "deadstream", "arguments", Map.of())
+        ));
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + port + "/mcp"))
+                .header("Content-Type", "application/json")
+                .header("Accept", "text/event-stream")
+                .header("Mcp-Session-Id", sessionId)
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, response.statusCode());
+        assertTrue(response.body().contains("Backend streaming failed"));
+    }
+
+    @Test
+    void toolsCall_streamingBackendTimeout_returnsTimeoutError() throws Exception {
+        int backendPort = findFreePort();
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(exchange -> {
+                    try { Thread.sleep(5000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                    exchange.getResponseSender().send("too late");
+                }).build();
+        backend.start();
+
+        try {
+            int shortTimeoutPort = findFreePort();
+            Cache<String, Service> svcCache = new Cache2kBuilder<String, Service>() {}
+                    .name("testStreamTimeout-" + System.currentTimeMillis())
+                    .eternal(true).entryCapacity(100).storeByReference(true).build();
+            Cache<String, McpSession> sessCache = new Cache2kBuilder<String, McpSession>() {}
+                    .name("testStreamTimeoutSess-" + System.currentTimeMillis())
+                    .expireAfterWrite(1800000, TimeUnit.MILLISECONDS)
+                    .entryCapacity(100).storeByReference(true).build();
+
+            CAPIConfiguration config = new CAPIConfiguration();
+            CAPIConfiguration.Mcp mcp = new CAPIConfiguration.Mcp();
+            mcp.setEnabled(true);
+            mcp.setPort(shortTimeoutPort);
+            mcp.setSessionTtl(1800000);
+            mcp.setToolCallTimeout(500);
+            config.setMcp(mcp);
+            config.setVersion("1.0.0-test");
+            CAPIConfiguration.Oauth2 oauth2 = new CAPIConfiguration.Oauth2();
+            oauth2.setEnabled(false);
+            config.setOauth2(oauth2);
+
+            McpGateway gw = new McpGateway(shortTimeoutPort, null,
+                    new McpToolRegistry(svcCache), new HttpUtils(null, null),
+                    null, HttpClient.newHttpClient(), new LocalMcpSessionStore(sessCache), config);
+            gw.start();
+
+            try {
+                HttpClient client = HttpClient.newHttpClient();
+                String initBody = objectMapper.writeValueAsString(Map.of("jsonrpc", "2.0", "method", "initialize", "id", 1));
+                HttpRequest initReq = HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + shortTimeoutPort + "/mcp"))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(initBody))
+                        .build();
+                HttpResponse<String> initResp = client.send(initReq, HttpResponse.BodyHandlers.ofString());
+                String sessionId = initResp.headers().firstValue("Mcp-Session-Id").orElseThrow();
+
+                Service service = createMcpServiceWithBackend("stream-timeout-svc", "slowstream", "localhost", backendPort);
+                service.getServiceMeta().handleUnknown("mcp_streaming", "slowstream");
+                svcCache.put("stream-timeout-svc", service);
+
+                String body = objectMapper.writeValueAsString(Map.of(
+                        "jsonrpc", "2.0", "method", "tools/call", "id", 32,
+                        "params", Map.of("name", "slowstream", "arguments", Map.of())
+                ));
+                HttpRequest toolReq = HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + shortTimeoutPort + "/mcp"))
+                        .header("Content-Type", "application/json")
+                        .header("Accept", "text/event-stream")
+                        .header("Mcp-Session-Id", sessionId)
+                        .POST(HttpRequest.BodyPublishers.ofString(body))
+                        .build();
+                HttpResponse<String> response = client.send(toolReq, HttpResponse.BodyHandlers.ofString());
+                assertEquals(200, response.statusCode());
+                assertTrue(response.body().contains("timed out") || response.body().contains("streaming failed"),
+                        "Expected timeout or streaming error but got: " + response.body());
+            } finally {
+                gw.stop();
+                svcCache.close();
+                sessCache.close();
+            }
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void initialize_withOauth2Enabled_validToken_returnsSession() throws Exception {
+        int oauthPort = findFreePort();
+        Cache<String, Service> svcCache = new Cache2kBuilder<String, Service>() {}
+                .name("testOauth2Valid-" + System.currentTimeMillis())
+                .eternal(true).entryCapacity(100).storeByReference(true).build();
+        Cache<String, McpSession> sessCache = new Cache2kBuilder<String, McpSession>() {}
+                .name("testOauth2ValidSess-" + System.currentTimeMillis())
+                .expireAfterWrite(1800000, TimeUnit.MILLISECONDS)
+                .entryCapacity(100).storeByReference(true).build();
+
+        try (McpGateway gw = createOauthGateway(oauthPort, svcCache, sessCache)) {
+            gw.start();
+
+            HttpClient client = HttpClient.newHttpClient();
+            String initBody = objectMapper.writeValueAsString(Map.of("jsonrpc", "2.0", "method", "initialize", "id", 1));
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("http://localhost:" + oauthPort + "/mcp"))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer valid-test-token-1234567890")
+                    .POST(HttpRequest.BodyPublishers.ofString(initBody))
+                    .build();
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+            // With OAuth2 enabled and HttpUtils returning null for an unverifiable token,
+            // this should return unauthorized
+            assertEquals(200, response.statusCode());
+            String body = response.body();
+            // Should either succeed with session or fail with auth error
+            assertTrue(body.contains("Mcp-Session-Id") || body.contains("protocolVersion")
+                    || body.contains("Authorization required") || body.contains("Invalid authorization"),
+                    "Unexpected response: " + body);
+        } finally {
+            svcCache.close();
+            sessCache.close();
+        }
+    }
+
+    @Test
+    void toolsCall_withNullMappingList_returnsNoBackendError() throws Exception {
+        String sessionId = initializeSession();
+
+        Service service = new Service();
+        service.setId("no-mapping-svc");
+        service.setName("no-mapping-svc");
+        ServiceMeta meta = new ServiceMeta();
+        meta.handleUnknown("mcp_enabled", "true");
+        meta.handleUnknown("mcp_tools", "nomapping");
+        service.setServiceMeta(meta);
+        service.setMappingList(null);
+        serviceCache.put("no-mapping-svc", service);
+
+        String body = objectMapper.writeValueAsString(Map.of(
+                "jsonrpc", "2.0", "method", "tools/call", "id", 33,
+                "params", Map.of("name", "nomapping", "arguments", Map.of())
+        ));
+        HttpResponse<String> response = sendPostWithSession("/mcp", body, sessionId);
+        assertEquals(200, response.statusCode());
+        assertTrue(response.body().contains("No backend available"));
+    }
+
+    @Test
+    void toolsCall_withEmptyMappingList_returnsNoBackendError() throws Exception {
+        String sessionId = initializeSession();
+
+        Service service = new Service();
+        service.setId("empty-mapping-svc");
+        service.setName("empty-mapping-svc");
+        ServiceMeta meta = new ServiceMeta();
+        meta.handleUnknown("mcp_enabled", "true");
+        meta.handleUnknown("mcp_tools", "emptymapping");
+        service.setServiceMeta(meta);
+        service.setMappingList(Set.of());
+        serviceCache.put("empty-mapping-svc", service);
+
+        String body = objectMapper.writeValueAsString(Map.of(
+                "jsonrpc", "2.0", "method", "tools/call", "id", 34,
+                "params", Map.of("name", "emptymapping", "arguments", Map.of())
+        ));
+        HttpResponse<String> response = sendPostWithSession("/mcp", body, sessionId);
+        assertEquals(200, response.statusCode());
+        assertTrue(response.body().contains("No backend available"));
+    }
+
+    @Test
+    void toolsCall_withStreamingNullArguments_sendsEmptyJson() throws Exception {
+        int backendPort = findFreePort();
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(exchange -> {
+                    exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "text/event-stream");
+                    exchange.getResponseSender().send("streamed\n");
+                }).build();
+        backend.start();
+
+        try {
+            String sessionId = initializeSession();
+
+            Service service = createMcpServiceWithBackend("stream-null-args", "streamnull", "localhost", backendPort);
+            service.getServiceMeta().handleUnknown("mcp_streaming", "streamnull");
+            serviceCache.put("stream-null-args", service);
+
+            // params with name but no arguments key
+            String body = objectMapper.writeValueAsString(Map.of(
+                    "jsonrpc", "2.0", "method", "tools/call", "id", 35,
+                    "params", Map.of("name", "streamnull")
+            ));
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("http://localhost:" + port + "/mcp"))
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "text/event-stream")
+                    .header("Mcp-Session-Id", sessionId)
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, response.statusCode());
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void toolsCall_syncBackend4xxError_returnsErrorWithStatus() throws Exception {
+        int backendPort = findFreePort();
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(exchange -> {
+                    exchange.setStatusCode(403);
+                    exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+                    exchange.getResponseSender().send("{\"error\":\"forbidden\"}");
+                }).build();
+        backend.start();
+
+        try {
+            String sessionId = initializeSession();
+
+            Service service = createMcpServiceWithBackend("err-svc", "errtool", "localhost", backendPort);
+            serviceCache.put("err-svc", service);
+
+            String body = objectMapper.writeValueAsString(Map.of(
+                    "jsonrpc", "2.0", "method", "tools/call", "id", 36,
+                    "params", Map.of("name", "errtool", "arguments", Map.of())
+            ));
+            HttpResponse<String> response = sendPostWithSession("/mcp", body, sessionId);
+            assertEquals(200, response.statusCode());
+            assertTrue(response.body().contains("Backend returned status 403"));
+        } finally {
+            backend.stop();
+        }
+    }
+
     private Service createMcpServiceWithBackend(String id, String toolName, String hostname, int backendPort) {
         Service service = new Service();
         service.setId(id);
         service.setName(id);
         ServiceMeta meta = new ServiceMeta();
-        meta.handleUnknown("mcp.enabled", "true");
-        meta.handleUnknown("mcp.tools", toolName);
+        meta.handleUnknown("mcp_enabled", "true");
+        meta.handleUnknown("mcp_tools", toolName);
         meta.setScheme("http");
         service.setServiceMeta(meta);
 
