@@ -10,6 +10,7 @@ import io.surisoft.capi.configuration.CamelStartupListener;
 import io.surisoft.capi.service.CamelProxyPeerAddressHandler;
 import io.surisoft.capi.service.CapiAccessLogReceiver;
 import io.surisoft.capi.undertow.AdminGateway;
+import io.surisoft.capi.service.McpBackendLoadBalancer;
 import io.surisoft.capi.undertow.McpGateway;
 import io.surisoft.capi.undertow.WebsocketGateway;
 import io.surisoft.capi.utils.Constants;
@@ -172,6 +173,8 @@ public class CAPIMain {
             java.net.http.HttpClient mcpHttpClient = java.net.http.HttpClient.newBuilder()
                     .connectTimeout(java.time.Duration.ofSeconds(10))
                     .build();
+            McpBackendLoadBalancer loadBalancer = new McpBackendLoadBalancer(
+                    capiConfiguration.getMcp().getCircuitBreakerCooldownMs());
             McpGateway mcpGateway = new McpGateway(
                     capiConfiguration.getMcp().getPort(),
                     startup.getUndertowSslContext(),
@@ -180,7 +183,8 @@ public class CAPIMain {
                     startup.getOpaService(),
                     mcpHttpClient,
                     startup.getMcpSessionStore(),
-                    capiConfiguration
+                    capiConfiguration,
+                    loadBalancer
             );
             mcpGateway.start();
             return mcpGateway;

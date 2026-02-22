@@ -546,6 +546,7 @@ public class CAPIConfiguration {
         private int port = 8383;
         private long sessionTtl = 1800000;
         private int toolCallTimeout = 30000;
+        private long circuitBreakerCooldownMs = 30000;
 
         public boolean isEnabled() {
             return enabled;
@@ -570,6 +571,12 @@ public class CAPIConfiguration {
         }
         public void setToolCallTimeout(int toolCallTimeout) {
             this.toolCallTimeout = toolCallTimeout;
+        }
+        public long getCircuitBreakerCooldownMs() {
+            return circuitBreakerCooldownMs;
+        }
+        public void setCircuitBreakerCooldownMs(long circuitBreakerCooldownMs) {
+            this.circuitBreakerCooldownMs = circuitBreakerCooldownMs;
         }
     }
 

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.surisoft.capi.configuration.CAPIConfiguration;
 import io.surisoft.capi.schema.*;
 import io.surisoft.capi.service.LocalMcpSessionStore;
+import io.surisoft.capi.service.McpBackendLoadBalancer;
 import io.surisoft.capi.service.McpSessionStore;
 import io.surisoft.capi.service.McpToolRegistry;
 import io.surisoft.capi.utils.HttpUtils;
@@ -73,9 +74,10 @@ class McpGatewayTest {
 
         HttpUtils httpUtils = new HttpUtils(null, null);
 
+        McpBackendLoadBalancer loadBalancer = new McpBackendLoadBalancer(30000);
         mcpGateway = new McpGateway(
                 port, null, registry, httpUtils, null,
-                HttpClient.newHttpClient(), sessionStore, config
+                HttpClient.newHttpClient(), sessionStore, config, loadBalancer
         );
         mcpGateway.start();
     }
@@ -350,7 +352,7 @@ class McpGatewayTest {
         ));
         HttpResponse<String> response = sendPostWithSession("/mcp", body, sessionId);
         assertEquals(200, response.statusCode());
-        assertTrue(response.body().contains("Backend connection failed"));
+        assertTrue(response.body().contains("All backends failed"));
     }
 
     @Test
@@ -557,7 +559,8 @@ class McpGatewayTest {
 
             try (McpGateway opaGw = new McpGateway(opaPort, null,
                     new McpToolRegistry(opaSvcCache), new HttpUtils(null, null),
-                    opaService, HttpClient.newHttpClient(), new LocalMcpSessionStore(opaSessCache), opaConfig)) {
+                    opaService, HttpClient.newHttpClient(), new LocalMcpSessionStore(opaSessCache), opaConfig,
+                    new McpBackendLoadBalancer(30000))) {
 
                 opaGw.start();
 
@@ -634,7 +637,8 @@ class McpGatewayTest {
 
             try (McpGateway opaGw = new McpGateway(gatewayPort, null,
                     new McpToolRegistry(opaSvcCache), opaHttpUtils,
-                    opaService, HttpClient.newHttpClient(), new LocalMcpSessionStore(opaSessCache), opaConfig)) {
+                    opaService, HttpClient.newHttpClient(), new LocalMcpSessionStore(opaSessCache), opaConfig,
+                    new McpBackendLoadBalancer(30000))) {
 
                 opaGw.start();
 
@@ -805,7 +809,8 @@ class McpGatewayTest {
     void stop_whenServerNull_doesNotThrow() {
         McpGateway gw = new McpGateway(19399, null, new McpToolRegistry(serviceCache),
                 new HttpUtils(null, null), null, HttpClient.newHttpClient(),
-                new LocalMcpSessionStore(sessionCache), new CAPIConfiguration());
+                new LocalMcpSessionStore(sessionCache), new CAPIConfiguration(),
+                new McpBackendLoadBalancer(30000));
         assertDoesNotThrow(gw::stop);
     }
 
@@ -813,7 +818,8 @@ class McpGatewayTest {
     void close_delegatesToStop() {
         McpGateway gw = new McpGateway(19398, null, new McpToolRegistry(serviceCache),
                 new HttpUtils(null, null), null, HttpClient.newHttpClient(),
-                new LocalMcpSessionStore(sessionCache), new CAPIConfiguration());
+                new LocalMcpSessionStore(sessionCache), new CAPIConfiguration(),
+                new McpBackendLoadBalancer(30000));
         assertDoesNotThrow(gw::close);
     }
 
@@ -877,7 +883,8 @@ class McpGatewayTest {
         oauthConfig.setOauth2(oauth2);
         return new McpGateway(oauthPort, null,
                 new McpToolRegistry(svcCache), new HttpUtils(null, null),
-                null, HttpClient.newHttpClient(), new LocalMcpSessionStore(sessCache), oauthConfig);
+                null, HttpClient.newHttpClient(), new LocalMcpSessionStore(sessCache), oauthConfig,
+                new McpBackendLoadBalancer(30000));
     }
 
     @Test
@@ -917,7 +924,8 @@ class McpGatewayTest {
 
             McpGateway gw = new McpGateway(shortTimeoutPort, null,
                     new McpToolRegistry(svcCache), new HttpUtils(null, null),
-                    null, HttpClient.newHttpClient(), new LocalMcpSessionStore(sessCache), config);
+                    null, HttpClient.newHttpClient(), new LocalMcpSessionStore(sessCache), config,
+                    new McpBackendLoadBalancer(30000));
             gw.start();
 
             try {
@@ -947,7 +955,7 @@ class McpGatewayTest {
                         .build();
                 HttpResponse<String> response = client.send(toolReq, HttpResponse.BodyHandlers.ofString());
                 assertEquals(200, response.statusCode());
-                assertTrue(response.body().contains("timed out"));
+                assertTrue(response.body().contains("All backends failed"));
             } finally {
                 gw.stop();
                 svcCache.close();
@@ -1020,7 +1028,8 @@ class McpGatewayTest {
 
             McpGateway gw = new McpGateway(shortTimeoutPort, null,
                     new McpToolRegistry(svcCache), new HttpUtils(null, null),
-                    null, HttpClient.newHttpClient(), new LocalMcpSessionStore(sessCache), config);
+                    null, HttpClient.newHttpClient(), new LocalMcpSessionStore(sessCache), config,
+                    new McpBackendLoadBalancer(30000));
             gw.start();
 
             try {
@@ -1213,6 +1222,96 @@ class McpGatewayTest {
         } finally {
             backend.stop();
         }
+    }
+
+    @Test
+    void toolsCall_withMultipleBackends_failsOverOnConnectionRefused() throws Exception {
+        // One dead backend + one live backend → should failover and succeed
+        int deadPort = findFreePort();
+        int livePort = findFreePort();
+        Undertow backend = Undertow.builder()
+                .addHttpListener(livePort, "0.0.0.0")
+                .setHandler(exchange -> {
+                    exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+                    exchange.setStatusCode(StatusCodes.OK);
+                    exchange.getResponseSender().send("{\"failover\":\"success\"}");
+                }).build();
+        backend.start();
+
+        try {
+            String sessionId = initializeSession();
+
+            Service service = new Service();
+            service.setId("failover-svc");
+            service.setName("failover-svc");
+            ServiceMeta meta = new ServiceMeta();
+            meta.handleUnknown("mcp-enabled", "true");
+            meta.handleUnknown("mcp-tools", "failovertool");
+            meta.setScheme("http");
+            service.setServiceMeta(meta);
+
+            Mapping deadMapping = new Mapping();
+            deadMapping.setHostname("localhost");
+            deadMapping.setPort(deadPort);
+            deadMapping.setRootContext("/");
+
+            Mapping liveMapping = new Mapping();
+            liveMapping.setHostname("localhost");
+            liveMapping.setPort(livePort);
+            liveMapping.setRootContext("/");
+
+            service.setMappingList(Set.of(deadMapping, liveMapping));
+            serviceCache.put("failover-svc", service);
+
+            String body = objectMapper.writeValueAsString(Map.of(
+                    "jsonrpc", "2.0", "method", "tools/call", "id", 40,
+                    "params", Map.of("name", "failovertool", "arguments", Map.of())
+            ));
+            HttpResponse<String> response = sendPostWithSession("/mcp", body, sessionId);
+            assertEquals(200, response.statusCode());
+            assertTrue(response.body().contains("failover"));
+            assertTrue(response.body().contains("success"));
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void toolsCall_withAllBackendsDead_returnsAllBackendsFailed() throws Exception {
+        int deadPort1 = findFreePort();
+        int deadPort2 = findFreePort();
+
+        String sessionId = initializeSession();
+
+        Service service = new Service();
+        service.setId("alldead-svc");
+        service.setName("alldead-svc");
+        ServiceMeta meta = new ServiceMeta();
+        meta.handleUnknown("mcp-enabled", "true");
+        meta.handleUnknown("mcp-tools", "deadtool");
+        meta.setScheme("http");
+        service.setServiceMeta(meta);
+
+        Mapping m1 = new Mapping();
+        m1.setHostname("localhost");
+        m1.setPort(deadPort1);
+        m1.setRootContext("/");
+
+        Mapping m2 = new Mapping();
+        m2.setHostname("localhost");
+        m2.setPort(deadPort2);
+        m2.setRootContext("/");
+
+        service.setMappingList(Set.of(m1, m2));
+        serviceCache.put("alldead-svc", service);
+
+        String body = objectMapper.writeValueAsString(Map.of(
+                "jsonrpc", "2.0", "method", "tools/call", "id", 41,
+                "params", Map.of("name", "deadtool", "arguments", Map.of())
+        ));
+        HttpResponse<String> response = sendPostWithSession("/mcp", body, sessionId);
+        assertEquals(200, response.statusCode());
+        assertTrue(response.body().contains("All backends failed"));
     }
 
     private Service createMcpServiceWithBackend(String id, String toolName, String hostname, int backendPort) {
