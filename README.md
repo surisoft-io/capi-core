@@ -37,6 +37,28 @@ CAPI is a lightweight API Gateway and load balancer powered by Apache Camel dyna
 * Reverse proxy headers (`X-Forwarded-*`)
 * **[Experimental]** MCP Gateway — expose services as MCP tools for LLM agents (JSON-RPC 2.0 over Streamable HTTP)
 
+## REST-to-MCP Bridging
+
+CAPI's MCP Gateway turns **any existing REST API into an MCP tool** — no code changes on your backends.
+
+Register a service in Consul with MCP metadata, and LLM agents (Claude Desktop, Cursor, custom agents) can discover and invoke it immediately. Your REST services don't need to know anything about MCP, JSON-RPC, or tool schemas. CAPI handles the translation:
+
+```
+LLM Agent                          CAPI                          Your REST API
+                                                                 (unchanged)
+  tools/list  ──────────────►  reads Consul metadata
+              ◄──────────────  returns tool catalog
+
+  tools/call  ──────────────►  extracts arguments
+              {"name":"..."}   POST /endpoint  ──────────────►  handles request
+                               wraps response  ◄──────────────  returns JSON
+              ◄──────────────  MCP-formatted result
+```
+
+CAPI also supports **real MCP Server backends** — services that already speak JSON-RPC 2.0. Register them with `mcp-type: server` and CAPI discovers their tools automatically via `tools/list`, then proxies `tools/call` requests transparently. Both REST and MCP Server backends are aggregated under one unified MCP endpoint.
+
+Unlike dedicated MCP gateways that require all backends to be MCP Servers, CAPI bridges the gap between existing REST infrastructure and LLM-native protocols. See the [MCP Gateway docs](docs/mcp-gateway.md) and the [demo](demo/) for a working example with both backend types.
+
 ## Quickstart
 
 CAPI requires the `CAPI_CONFIG_FILE` environment variable pointing to a valid configuration file.
