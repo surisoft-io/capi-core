@@ -1137,9 +1137,9 @@ class AdminGatewayTest {
         svc.setId("tool-svc");
         svc.setName("tool-svc");
         ServiceMeta meta = new ServiceMeta();
-        meta.handleUnknown("mcp_enabled", "true");
-        meta.handleUnknown("mcp_tools", "hello");
-        meta.handleUnknown("mcp_tools_hello_description", "Says hello");
+        meta.handleUnknown("mcp-enabled", "true");
+        meta.handleUnknown("mcp-tools", "hello");
+        meta.handleUnknown("mcp-tools-hello-description", "Says hello");
         svc.setServiceMeta(meta);
         realCache.put("tool-svc", svc);
 

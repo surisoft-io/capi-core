@@ -137,13 +137,13 @@ public class Constants {
     public static final String MCP_SESSION_HEADER = "Mcp-Session-Id";
     public static final String MCP_PROTOCOL_VERSION = "2025-03-26";
     public static final String MCP_SERVER_NAME = "CAPI MCP Gateway";
-    public static final String MCP_META_PREFIX = "mcp_";
-    public static final String MCP_META_ENABLED = "mcp_enabled";
-    public static final String MCP_META_TOOLS = "mcp_tools";
-    public static final String MCP_META_TOOL_PREFIX = "mcp_toolPrefix";
-    public static final String MCP_META_STREAMING = "mcp_streaming";
-    public static final String MCP_META_CATEGORY = "mcp_category";
-    public static final String MCP_META_TIMEOUT = "mcp_timeout";
+    public static final String MCP_META_PREFIX = "mcp-";
+    public static final String MCP_META_ENABLED = "mcp-enabled";
+    public static final String MCP_META_TOOLS = "mcp-tools";
+    public static final String MCP_META_TOOL_PREFIX = "mcp-toolPrefix";
+    public static final String MCP_META_STREAMING = "mcp-streaming";
+    public static final String MCP_META_CATEGORY = "mcp-category";
+    public static final String MCP_META_TIMEOUT = "mcp-timeout";
 
     // JSON-RPC error codes
     public static final int JSONRPC_PARSE_ERROR = -32700;

@@ -179,9 +179,9 @@ class McpGatewayTest {
         service.setId("test-svc");
         service.setName("test-svc");
         ServiceMeta meta = new ServiceMeta();
-        meta.handleUnknown("mcp_enabled", "true");
-        meta.handleUnknown("mcp_tools", "hello");
-        meta.handleUnknown("mcp_tools_hello_description", "Says hello");
+        meta.handleUnknown("mcp-enabled", "true");
+        meta.handleUnknown("mcp-tools", "hello");
+        meta.handleUnknown("mcp-tools-hello-description", "Says hello");
         service.setServiceMeta(meta);
         serviceCache.put("test-svc", service);
 
@@ -260,8 +260,8 @@ class McpGatewayTest {
         service.setId("no-backend");
         service.setName("no-backend");
         ServiceMeta meta = new ServiceMeta();
-        meta.handleUnknown("mcp_enabled", "true");
-        meta.handleUnknown("mcp_tools", "empty");
+        meta.handleUnknown("mcp-enabled", "true");
+        meta.handleUnknown("mcp-tools", "empty");
         service.setServiceMeta(meta);
         serviceCache.put("no-backend", service);
 
@@ -361,9 +361,9 @@ class McpGatewayTest {
         service.setId("bad-schema-svc");
         service.setName("bad-schema-svc");
         ServiceMeta meta = new ServiceMeta();
-        meta.handleUnknown("mcp_enabled", "true");
-        meta.handleUnknown("mcp_tools", "broken");
-        meta.handleUnknown("mcp_tools_broken_inputSchema", "not-valid-json{{{");
+        meta.handleUnknown("mcp-enabled", "true");
+        meta.handleUnknown("mcp-tools", "broken");
+        meta.handleUnknown("mcp-tools-broken-inputSchema", "not-valid-json{{{");
         service.setServiceMeta(meta);
         serviceCache.put("bad-schema-svc", service);
 
@@ -465,7 +465,7 @@ class McpGatewayTest {
             String sessionId = initializeSession();
 
             Service service = createMcpServiceWithBackend("stream-svc", "streamtool", "localhost", backendPort);
-            service.getServiceMeta().handleUnknown("mcp_streaming", "streamtool");
+            service.getServiceMeta().handleUnknown("mcp-streaming", "streamtool");
             serviceCache.put("stream-svc", service);
 
             String body = objectMapper.writeValueAsString(Map.of(
@@ -503,7 +503,7 @@ class McpGatewayTest {
             String sessionId = initializeSession();
 
             Service service = createMcpServiceWithBackend("stream-svc2", "streamsync", "localhost", backendPort);
-            service.getServiceMeta().handleUnknown("mcp_streaming", "streamsync");
+            service.getServiceMeta().handleUnknown("mcp-streaming", "streamsync");
             serviceCache.put("stream-svc2", service);
 
             // No Accept: text/event-stream header → should fall back to sync
@@ -694,8 +694,8 @@ class McpGatewayTest {
             service.setId("null-scheme-svc");
             service.setName("null-scheme-svc");
             ServiceMeta meta = new ServiceMeta();
-            meta.handleUnknown("mcp_enabled", "true");
-            meta.handleUnknown("mcp_tools", "testtool");
+            meta.handleUnknown("mcp-enabled", "true");
+            meta.handleUnknown("mcp-tools", "testtool");
             // Intentionally do NOT set scheme → null → should default to "http"
             service.setServiceMeta(meta);
 
@@ -737,8 +737,8 @@ class McpGatewayTest {
             service.setId("slash-svc");
             service.setName("slash-svc");
             ServiceMeta meta = new ServiceMeta();
-            meta.handleUnknown("mcp_enabled", "true");
-            meta.handleUnknown("mcp_tools", "slashtool");
+            meta.handleUnknown("mcp-enabled", "true");
+            meta.handleUnknown("mcp-tools", "slashtool");
             meta.setScheme("http");
             service.setServiceMeta(meta);
 
@@ -777,7 +777,7 @@ class McpGatewayTest {
             String sessionId = initializeSession();
 
             Service service = createMcpServiceWithBackend("timeout-svc", "timed", "localhost", backendPort);
-            service.getServiceMeta().handleUnknown("mcp_tools_timed_timeout", "5000");
+            service.getServiceMeta().handleUnknown("mcp-tools-timed-timeout", "5000");
             serviceCache.put("timeout-svc", service);
 
             String body = objectMapper.writeValueAsString(Map.of(
@@ -965,7 +965,7 @@ class McpGatewayTest {
         String sessionId = initializeSession();
 
         Service service = createMcpServiceWithBackend("stream-dead-svc", "deadstream", "localhost", deadPort);
-        service.getServiceMeta().handleUnknown("mcp_streaming", "deadstream");
+        service.getServiceMeta().handleUnknown("mcp-streaming", "deadstream");
         serviceCache.put("stream-dead-svc", service);
 
         String body = objectMapper.writeValueAsString(Map.of(
@@ -1035,7 +1035,7 @@ class McpGatewayTest {
                 String sessionId = initResp.headers().firstValue("Mcp-Session-Id").orElseThrow();
 
                 Service service = createMcpServiceWithBackend("stream-timeout-svc", "slowstream", "localhost", backendPort);
-                service.getServiceMeta().handleUnknown("mcp_streaming", "slowstream");
+                service.getServiceMeta().handleUnknown("mcp-streaming", "slowstream");
                 svcCache.put("stream-timeout-svc", service);
 
                 String body = objectMapper.writeValueAsString(Map.of(
@@ -1109,8 +1109,8 @@ class McpGatewayTest {
         service.setId("no-mapping-svc");
         service.setName("no-mapping-svc");
         ServiceMeta meta = new ServiceMeta();
-        meta.handleUnknown("mcp_enabled", "true");
-        meta.handleUnknown("mcp_tools", "nomapping");
+        meta.handleUnknown("mcp-enabled", "true");
+        meta.handleUnknown("mcp-tools", "nomapping");
         service.setServiceMeta(meta);
         service.setMappingList(null);
         serviceCache.put("no-mapping-svc", service);
@@ -1132,8 +1132,8 @@ class McpGatewayTest {
         service.setId("empty-mapping-svc");
         service.setName("empty-mapping-svc");
         ServiceMeta meta = new ServiceMeta();
-        meta.handleUnknown("mcp_enabled", "true");
-        meta.handleUnknown("mcp_tools", "emptymapping");
+        meta.handleUnknown("mcp-enabled", "true");
+        meta.handleUnknown("mcp-tools", "emptymapping");
         service.setServiceMeta(meta);
         service.setMappingList(Set.of());
         serviceCache.put("empty-mapping-svc", service);
@@ -1162,7 +1162,7 @@ class McpGatewayTest {
             String sessionId = initializeSession();
 
             Service service = createMcpServiceWithBackend("stream-null-args", "streamnull", "localhost", backendPort);
-            service.getServiceMeta().handleUnknown("mcp_streaming", "streamnull");
+            service.getServiceMeta().handleUnknown("mcp-streaming", "streamnull");
             serviceCache.put("stream-null-args", service);
 
             // params with name but no arguments key
@@ -1220,8 +1220,8 @@ class McpGatewayTest {
         service.setId(id);
         service.setName(id);
         ServiceMeta meta = new ServiceMeta();
-        meta.handleUnknown("mcp_enabled", "true");
-        meta.handleUnknown("mcp_tools", toolName);
+        meta.handleUnknown("mcp-enabled", "true");
+        meta.handleUnknown("mcp-tools", toolName);
         meta.setScheme("http");
         service.setServiceMeta(meta);
 

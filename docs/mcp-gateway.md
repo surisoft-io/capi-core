@@ -108,7 +108,7 @@ In CAPI, an MCP tool is a logical abstraction mapped to a Camel route. Tools are
 
 Tools are discovered dynamically via Consul service metadata. CAPI extends its existing discovery pipeline to register MCP tools when services declare MCP-related metadata.
 
-CAPI aggregates tools from all Consul services with `mcp.enabled=true` into a unified catalog. When an MCP client calls `tools/list`, CAPI returns the combined tool list from all registered services. The `mcp.toolPrefix` field prevents name collisions across services (e.g. service `orders` with prefix `orders` exposes `orders.get`, `orders.create`).
+CAPI aggregates tools from all Consul services with `mcp-enabled=true` into a unified catalog. When an MCP client calls `tools/list`, CAPI returns the combined tool list from all registered services. The `mcp-toolPrefix` field prevents name collisions across services (e.g. service `orders` with prefix `orders` exposes `orders.get`, `orders.create`).
 
 ### Tool Routing
 
@@ -139,14 +139,14 @@ New MCP-specific metadata keys are introduced:
 
 | Key | Description |
 |---|---|
-| `mcp.enabled` | Whether the service exposes MCP tools |
-| `mcp.tools` | List of tool names |
-| `mcp.tools.{name}.description` | Human-readable tool description (used by LLMs for tool selection) |
-| `mcp.tools.{name}.inputSchema` | JSON Schema defining the tool's input parameters |
-| `mcp.streaming` | List of tools that may emit SSE events |
-| `mcp.category` | Semantic classification used as OPA input |
-| `mcp.timeout` | Execution timeout budget |
-| `mcp.toolPrefix` | (Optional) Namespace prefix for exposed tool names |
+| `mcp-enabled` | Whether the service exposes MCP tools |
+| `mcp-tools` | List of tool names |
+| `mcp-tools-{name}-description` | Human-readable tool description (used by LLMs for tool selection) |
+| `mcp-tools-{name}-inputSchema` | JSON Schema defining the tool's input parameters |
+| `mcp-streaming` | List of tools that may emit SSE events |
+| `mcp-category` | Semantic classification used as OPA input |
+| `mcp-timeout` | Execution timeout budget |
+| `mcp-toolPrefix` | (Optional) Namespace prefix for exposed tool names |
 
 If a service has an OpenAPI definition and does not provide explicit `inputSchema` metadata, CAPI may derive the tool schema from the OpenAPI spec.
 
@@ -162,7 +162,7 @@ MCP does not mandate streaming for all calls.
 
 Streaming behavior is enabled only when:
 
-1. The tool declares streaming capability (`mcp.streaming`)
+1. The tool declares streaming capability (`mcp-streaming`)
 2. The client explicitly requests streaming (e.g. `Accept: text/event-stream`)
 
 Camel routes never manage SSE connections directly; Undertow owns the SSE lifecycle.
@@ -252,7 +252,7 @@ When the MCP Gateway is enabled, the Admin API (default port 8381) exposes:
 
 ### Registering a Service as an MCP Tool Provider
 
-Register your service in Consul with `mcp.*` metadata tags. The service itself does not need to know about MCP — CAPI translates MCP tool calls into REST calls against the service.
+Register your service in Consul with `mcp-*` metadata tags. The service itself does not need to know about MCP — CAPI translates MCP tool calls into REST calls against the service.
 
 ```json
 {
@@ -263,23 +263,23 @@ Register your service in Consul with `mcp.*` metadata tags. The service itself d
   "Meta": {
     "scheme": "http",
     "root-context": "/api",
-    "mcp.enabled": "true",
-    "mcp.toolPrefix": "orders",
-    "mcp.tools": "get,create,search",
-    "mcp.tools.get.description": "Get an order by ID",
-    "mcp.tools.get.inputSchema": "{\"type\":\"object\",\"properties\":{\"orderId\":{\"type\":\"string\"}},\"required\":[\"orderId\"]}",
-    "mcp.tools.create.description": "Create a new order",
-    "mcp.tools.create.inputSchema": "{\"type\":\"object\",\"properties\":{\"product\":{\"type\":\"string\"},\"quantity\":{\"type\":\"integer\"}}}",
-    "mcp.tools.search.description": "Search orders by criteria",
-    "mcp.tools.search.inputSchema": "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}}}",
-    "mcp.category": "commerce",
-    "mcp.timeout": "10000",
-    "mcp.streaming": "search"
+    "mcp-enabled": "true",
+    "mcp-toolPrefix": "orders",
+    "mcp-tools": "get,create,search",
+    "mcp-tools-get-description": "Get an order by ID",
+    "mcp-tools-get-inputSchema": "{\"type\":\"object\",\"properties\":{\"orderId\":{\"type\":\"string\"}},\"required\":[\"orderId\"]}",
+    "mcp-tools-create-description": "Create a new order",
+    "mcp-tools-create-inputSchema": "{\"type\":\"object\",\"properties\":{\"product\":{\"type\":\"string\"},\"quantity\":{\"type\":\"integer\"}}}",
+    "mcp-tools-search-description": "Search orders by criteria",
+    "mcp-tools-search-inputSchema": "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}}}",
+    "mcp-category": "commerce",
+    "mcp-timeout": "10000",
+    "mcp-streaming": "search"
   }
 }
 ```
 
-With `mcp.toolPrefix: "orders"`, the tools are exposed as `orders.get`, `orders.create`, and `orders.search`. When an agent calls `orders.get` with `{"orderId": "12345"}`, CAPI POSTs `{"orderId": "12345"}` to `http://10.0.1.50:8080/api`.
+With `mcp-toolPrefix: "orders"`, the tools are exposed as `orders.get`, `orders.create`, and `orders.search`. When an agent calls `orders.get` with `{"orderId": "12345"}`, CAPI POSTs `{"orderId": "12345"}` to `http://10.0.1.50:8080/api`.
 
 ### Connecting Claude Desktop or Cursor
 
@@ -287,18 +287,20 @@ Add CAPI as an MCP server in your client configuration:
 
 **Claude Desktop** (`claude_desktop_config.json`):
 
+Claude Desktop only supports local stdio servers in its config file. Use the `mcp-remote` npm package to bridge stdio to CAPI's HTTP endpoint:
+
 ```json
 {
   "mcpServers": {
     "capi": {
-      "url": "http://localhost:8383/mcp",
-      "headers": {
-        "Authorization": "Bearer <your-jwt-token>"
-      }
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://localhost:8383/mcp"]
     }
   }
 }
 ```
+
+> Requires Node.js. The `npx -y` flag auto-installs `mcp-remote` on first use. If authorization is enabled, pass headers via `mcp-remote` flags — see the [mcp-remote docs](https://www.npmjs.com/package/mcp-remote).
 
 The MCP client handles the full session lifecycle automatically: `initialize` (gets session ID) -> `tools/list` (discovers tools) -> `tools/call` (invokes tools as the LLM decides).
 

@@ -63,7 +63,7 @@ class McpToolRegistryTest {
     @Test
     void getAllTools_withPrefix_prefixesToolNames() {
         Service service = createMcpService("svc1", "get,list");
-        service.getServiceMeta().handleUnknown("mcp_toolPrefix", "orders");
+        service.getServiceMeta().handleUnknown("mcp-toolPrefix", "orders");
         serviceCache.put("svc1", service);
 
         List<McpTool> tools = registry.getAllTools();
@@ -75,7 +75,7 @@ class McpToolRegistryTest {
     @Test
     void getAllTools_withDescription_setsDescription() {
         Service service = createMcpService("svc1", "hello");
-        service.getServiceMeta().handleUnknown("mcp_tools_hello_description", "Says hello");
+        service.getServiceMeta().handleUnknown("mcp-tools-hello-description", "Says hello");
         serviceCache.put("svc1", service);
 
         List<McpTool> tools = registry.getAllTools();
@@ -86,7 +86,7 @@ class McpToolRegistryTest {
     @Test
     void getAllTools_withInputSchema_setsSchema() {
         Service service = createMcpService("svc1", "hello");
-        service.getServiceMeta().handleUnknown("mcp_tools_hello_inputSchema", "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}}}");
+        service.getServiceMeta().handleUnknown("mcp-tools-hello-inputSchema", "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}}}");
         serviceCache.put("svc1", service);
 
         List<McpTool> tools = registry.getAllTools();
@@ -97,7 +97,7 @@ class McpToolRegistryTest {
     @Test
     void getAllTools_withStreaming_setsStreamingFlag() {
         Service service = createMcpService("svc1", "stream,normal");
-        service.getServiceMeta().handleUnknown("mcp_streaming", "stream");
+        service.getServiceMeta().handleUnknown("mcp-streaming", "stream");
         serviceCache.put("svc1", service);
 
         List<McpTool> tools = registry.getAllTools();
@@ -113,8 +113,8 @@ class McpToolRegistryTest {
     @Test
     void getAllTools_withCategoryAndTimeout_setsBoth() {
         Service service = createMcpService("svc1", "hello");
-        service.getServiceMeta().handleUnknown("mcp_category", "utils");
-        service.getServiceMeta().handleUnknown("mcp_timeout", "5000");
+        service.getServiceMeta().handleUnknown("mcp-category", "utils");
+        service.getServiceMeta().handleUnknown("mcp-timeout", "5000");
         serviceCache.put("svc1", service);
 
         List<McpTool> tools = registry.getAllTools();
@@ -126,8 +126,8 @@ class McpToolRegistryTest {
     @Test
     void getAllTools_withPerToolTimeout_overridesGlobal() {
         Service service = createMcpService("svc1", "hello");
-        service.getServiceMeta().handleUnknown("mcp_timeout", "5000");
-        service.getServiceMeta().handleUnknown("mcp_tools_hello_timeout", "10000");
+        service.getServiceMeta().handleUnknown("mcp-timeout", "5000");
+        service.getServiceMeta().handleUnknown("mcp-tools-hello-timeout", "10000");
         serviceCache.put("svc1", service);
 
         List<McpTool> tools = registry.getAllTools();
@@ -149,7 +149,7 @@ class McpToolRegistryTest {
     @Test
     void resolveToolByName_withPrefix() {
         Service service = createMcpService("svc1", "get");
-        service.getServiceMeta().handleUnknown("mcp_toolPrefix", "orders");
+        service.getServiceMeta().handleUnknown("mcp-toolPrefix", "orders");
         serviceCache.put("svc1", service);
 
         McpToolRegistry.McpToolResolution resolution = registry.resolveToolByName("orders.get");
@@ -179,8 +179,8 @@ class McpToolRegistryTest {
     @Test
     void getAllTools_emptyToolNames_returnsEmpty() {
         Service service = createService("svc1");
-        service.getServiceMeta().handleUnknown("mcp_enabled", "true");
-        service.getServiceMeta().handleUnknown("mcp_tools", "");
+        service.getServiceMeta().handleUnknown("mcp-enabled", "true");
+        service.getServiceMeta().handleUnknown("mcp-tools", "");
         serviceCache.put("svc1", service);
 
         List<McpTool> tools = registry.getAllTools();
@@ -208,8 +208,8 @@ class McpToolRegistryTest {
 
     private Service createMcpService(String id, String tools) {
         Service service = createService(id);
-        service.getServiceMeta().handleUnknown("mcp_enabled", "true");
-        service.getServiceMeta().handleUnknown("mcp_tools", tools);
+        service.getServiceMeta().handleUnknown("mcp-enabled", "true");
+        service.getServiceMeta().handleUnknown("mcp-tools", tools);
         return service;
     }
 }
