@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CAPI Gateway — Documentation</title>
+  <meta name="description" content="CAPI Gateway documentation — Consul metadata, security, MCP gateway, admin API, and configuration guides.">
+  <style>
+    :root {
+      --primary: #0f2b46;
+      --primary-light: #163d5e;
+      --accent: #00b4d8;
+      --accent-dark: #0096b7;
+      --surface: #f8fafc;
+      --surface-alt: #eef2f7;
+      --text: #1e293b;
+      --text-muted: #64748b;
+      --white: #ffffff;
+      --border: #e2e8f0;
+      --radius: 10px;
+      --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.04);
+      --shadow-lg: 0 4px 24px rgba(0,0,0,0.10);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      color: var(--text);
+      line-height: 1.6;
+      background: var(--white);
+    }
+
+    /* --- Nav --- */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      background: rgba(15,43,70,0.97);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .nav-inner {
+      max-width: 1120px; margin: 0 auto;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 24px; height: 60px;
+    }
+    .nav-logo {
+      display: inline-flex; align-items: center; gap: 10px;
+      font-size: 1.25rem; font-weight: 700; color: var(--white); text-decoration: none; letter-spacing: -0.5px;
+    }
+    .nav-logo img { height: 32px; width: auto; }
+    .nav-logo span { color: var(--accent); }
+    .nav-links { display: flex; gap: 28px; list-style: none; }
+    .nav-links a {
+      color: rgba(255,255,255,0.75); text-decoration: none; font-size: 0.9rem; font-weight: 500;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover, .nav-links a.active { color: var(--white); }
+    .nav-gh {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15);
+      padding: 6px 14px; border-radius: 6px; color: var(--white); text-decoration: none;
+      font-size: 0.85rem; font-weight: 500; transition: background 0.2s;
+    }
+    .nav-gh:hover { background: rgba(255,255,255,0.18); }
+    .nav-gh svg { width: 18px; height: 18px; fill: currentColor; }
+
+    /* --- Layout --- */
+    .docs-layout {
+      display: flex;
+      max-width: 1120px;
+      margin: 60px auto 0;
+      min-height: calc(100vh - 60px);
+    }
+
+    /* --- Sidebar --- */
+    .sidebar {
+      width: 260px;
+      flex-shrink: 0;
+      border-right: 1px solid var(--border);
+      padding: 32px 20px;
+      background: var(--surface);
+      position: sticky;
+      top: 60px;
+      height: calc(100vh - 60px);
+      overflow-y: auto;
+    }
+    .sidebar h2 {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+      font-weight: 700;
+    }
+    .sidebar ul { list-style: none; }
+    .sidebar li { margin-bottom: 4px; }
+    .sidebar a {
+      display: block;
+      padding: 8px 12px;
+      border-radius: 6px;
+      color: var(--text);
+      text-decoration: none;
+      font-size: 0.92rem;
+      font-weight: 500;
+      transition: background 0.15s, color 0.15s;
+    }
+    .sidebar a:hover { background: var(--surface-alt); color: var(--accent-dark); }
+    .sidebar a.active {
+      background: var(--accent);
+      color: var(--primary);
+      font-weight: 600;
+    }
+
+    /* --- Content --- */
+    .doc-content {
+      flex: 1;
+      min-width: 0;
+      padding: 40px 48px 80px;
+    }
+
+    /* --- Docs index (no page selected) --- */
+    .docs-index h1 {
+      font-size: 2rem;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 8px;
+    }
+    .docs-index > p {
+      font-size: 1.05rem;
+      color: var(--text-muted);
+      margin-bottom: 32px;
+    }
+    .docs-index-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+    }
+    .docs-index-card {
+      display: block;
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      text-decoration: none;
+      color: var(--text);
+      box-shadow: var(--shadow);
+      transition: box-shadow 0.2s, border-color 0.2s;
+    }
+    .docs-index-card:hover {
+      box-shadow: var(--shadow-lg);
+      border-color: var(--accent);
+    }
+    .docs-index-card h3 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .docs-index-card p {
+      font-size: 0.88rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    /* --- Markdown content styling --- */
+    .doc-content h1 { font-size: 2rem; font-weight: 800; letter-spacing: -0.5px; margin: 0 0 16px; }
+    .doc-content h2 { font-size: 1.5rem; font-weight: 700; margin: 40px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+    .doc-content h3 { font-size: 1.15rem; font-weight: 700; margin: 32px 0 8px; }
+    .doc-content h4 { font-size: 1rem; font-weight: 600; margin: 24px 0 8px; }
+    .doc-content p { margin: 0 0 16px; line-height: 1.7; }
+    .doc-content a { color: var(--accent-dark); text-decoration: underline; }
+    .doc-content a:hover { color: var(--accent); }
+    .doc-content ul, .doc-content ol { margin: 0 0 16px 24px; }
+    .doc-content li { margin-bottom: 6px; line-height: 1.6; }
+    .doc-content code {
+      font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+      background: var(--surface-alt);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.88em;
+    }
+    .doc-content pre {
+      background: var(--primary);
+      color: #e2e8f0;
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      overflow-x: auto;
+      margin: 0 0 20px;
+      font-size: 0.88rem;
+      line-height: 1.6;
+    }
+    .doc-content pre code {
+      background: none;
+      padding: 0;
+      border-radius: 0;
+      color: inherit;
+      font-size: inherit;
+    }
+    .doc-content table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0 0 20px;
+      font-size: 0.92rem;
+    }
+    .doc-content th, .doc-content td {
+      padding: 10px 14px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    .doc-content th {
+      background: var(--surface);
+      font-weight: 600;
+    }
+    .doc-content blockquote {
+      border-left: 4px solid var(--accent);
+      padding: 12px 20px;
+      margin: 0 0 16px;
+      background: var(--surface);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      color: var(--text-muted);
+    }
+    .doc-content img { max-width: 100%; height: auto; border-radius: var(--radius); }
+    .doc-content hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+
+    /* --- Loading / Error --- */
+    .loading {
+      text-align: center;
+      padding: 80px 20px;
+      color: var(--text-muted);
+      font-size: 1rem;
+    }
+    .error-message {
+      text-align: center;
+      padding: 80px 20px;
+    }
+    .error-message h2 {
+      font-size: 1.5rem;
+      border: none;
+      margin-bottom: 12px;
+    }
+    .error-message p { color: var(--text-muted); }
+    .error-message a {
+      color: var(--accent-dark);
+      text-decoration: underline;
+    }
+
+    /* --- Footer --- */
+    footer {
+      background: var(--primary); color: rgba(255,255,255,0.5);
+      text-align: center; padding: 28px 24px; font-size: 0.85rem;
+    }
+    footer a { color: var(--accent); text-decoration: none; }
+
+    /* --- Responsive --- */
+    @media (max-width: 768px) {
+      .sidebar { display: none; }
+      .doc-content { padding: 24px 20px 60px; }
+
+      /* Mobile menu toggle */
+      .mobile-menu-btn { display: flex; }
+      .sidebar.open {
+        display: block;
+        position: fixed;
+        top: 60px;
+        left: 0;
+        width: 280px;
+        z-index: 99;
+        box-shadow: var(--shadow-lg);
+      }
+      .mobile-overlay {
+        display: block;
+        position: fixed;
+        inset: 0;
+        top: 60px;
+        background: rgba(0,0,0,0.3);
+        z-index: 98;
+      }
+    }
+    @media (min-width: 769px) {
+      .mobile-menu-btn { display: none; }
+      .mobile-overlay { display: none; }
+    }
+    .mobile-menu-btn {
+      align-items: center; justify-content: center;
+      background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15);
+      padding: 6px 10px; border-radius: 6px; color: var(--white);
+      cursor: pointer; font-size: 1.2rem;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav>
+  <div class="nav-inner">
+    <a href="index.html" class="nav-logo"><img src="https://capi.surisoft.io/capi-4.4.04.png" alt="CAPI Logo">CAPI <span>Gateway</span></a>
+    <ul class="nav-links">
+      <li><a href="index.html">Home</a></li>
+      <li><a href="guide.html" class="active">Docs</a></li>
+    </ul>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <button class="mobile-menu-btn" onclick="toggleSidebar()" aria-label="Toggle menu">&#9776;</button>
+      <a href="https://github.com/surisoft-io/capi-core" class="nav-gh" target="_blank" rel="noopener">
+        <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </div>
+</nav>
+
+<!-- Mobile overlay -->
+<div class="mobile-overlay" id="mobileOverlay" style="display:none" onclick="toggleSidebar()"></div>
+
+<!-- Layout -->
+<div class="docs-layout">
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <h2>Documentation</h2>
+    <ul>
+      <li><a href="?page=consul-metadata" data-page="consul-metadata">Consul Metadata</a></li>
+      <li><a href="?page=security" data-page="security">Security (OAuth2 & OPA)</a></li>
+      <li><a href="?page=mcp-gateway" data-page="mcp-gateway">MCP Gateway</a></li>
+      <li><a href="?page=admin-api" data-page="admin-api">Admin API</a></li>
+      <li><a href="?page=configuration" data-page="configuration">Configuration</a></li>
+    </ul>
+  </aside>
+
+  <!-- Content -->
+  <main class="doc-content" id="docContent">
+    <!-- Populated by JS -->
+  </main>
+</div>
+
+<!-- Footer -->
+<footer>
+  CAPI Gateway &mdash; Open-source under <a href="https://opensource.org/licenses/Apache-2.0">Apache 2.0</a> &mdash; Built by <a href="https://github.com/surisoft-io">Surisoft</a>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+  const PAGES = [
+    { id: 'consul-metadata', title: 'Consul Metadata', desc: 'Service registration metadata keys that control routing, protocols, and MCP tool definitions.' },
+    { id: 'security',        title: 'Security (OAuth2 & OPA)', desc: 'JWT validation via OIDC providers and fine-grained OPA policy authorization.' },
+    { id: 'mcp-gateway',     title: 'MCP Gateway', desc: 'REST-to-MCP bridging, native MCP proxy, and JSON-RPC 2.0 over Streamable HTTP.' },
+    { id: 'admin-api',       title: 'Admin API', desc: 'Health checks, metrics, route inspection, and truststore management endpoints.' },
+    { id: 'configuration',   title: 'Configuration', desc: 'Environment variables, Helm values, Docker and Kubernetes deployment options.' },
+  ];
+
+  function getPage() {
+    return new URLSearchParams(window.location.search).get('page');
+  }
+
+  function highlightSidebar(page) {
+    document.querySelectorAll('.sidebar a').forEach(function(a) {
+      a.classList.toggle('active', a.dataset.page === page);
+    });
+  }
+
+  function showIndex() {
+    highlightSidebar(null);
+    document.title = 'CAPI Gateway — Documentation';
+    var html = '<div class="docs-index">';
+    html += '<h1>Documentation</h1>';
+    html += '<p>Guides and reference for the CAPI API Gateway.</p>';
+    html += '<div class="docs-index-grid">';
+    PAGES.forEach(function(p) {
+      html += '<a class="docs-index-card" href="?page=' + p.id + '">';
+      html += '<h3>' + p.title + '</h3>';
+      html += '<p>' + p.desc + '</p>';
+      html += '</a>';
+    });
+    html += '</div></div>';
+    document.getElementById('docContent').innerHTML = html;
+  }
+
+  function showError(page) {
+    document.getElementById('docContent').innerHTML =
+      '<div class="error-message">' +
+      '<h2>Page not found</h2>' +
+      '<p>The page <code>' + page + '</code> does not exist.</p>' +
+      '<p><a href="guide.html">Back to docs index</a></p>' +
+      '</div>';
+  }
+
+  function showLoading() {
+    document.getElementById('docContent').innerHTML = '<div class="loading">Loading...</div>';
+  }
+
+  async function loadPage(page) {
+    highlightSidebar(page);
+    showLoading();
+
+    try {
+      var resp = await fetch(page + '.md');
+      if (!resp.ok) {
+        showError(page);
+        return;
+      }
+      var md = await resp.text();
+      document.getElementById('docContent').innerHTML = marked.parse(md);
+
+      var pageInfo = PAGES.find(function(p) { return p.id === page; });
+      document.title = (pageInfo ? pageInfo.title : page) + ' — CAPI Gateway Docs';
+
+      window.scrollTo(0, 0);
+    } catch (e) {
+      showError(page);
+    }
+  }
+
+  function toggleSidebar() {
+    var sidebar = document.getElementById('sidebar');
+    var overlay = document.getElementById('mobileOverlay');
+    var isOpen = sidebar.classList.toggle('open');
+    overlay.style.display = isOpen ? 'block' : 'none';
+  }
+
+  // Sidebar link click handling (SPA-style navigation)
+  document.getElementById('sidebar').addEventListener('click', function(e) {
+    var a = e.target.closest('a[data-page]');
+    if (!a) return;
+    e.preventDefault();
+    var page = a.dataset.page;
+    history.pushState(null, '', '?page=' + page);
+    loadPage(page);
+
+    // Close mobile sidebar if open
+    var sidebar = document.getElementById('sidebar');
+    if (sidebar.classList.contains('open')) {
+      toggleSidebar();
+    }
+  });
+
+  // Handle browser back/forward
+  window.addEventListener('popstate', function() {
+    var page = getPage();
+    if (page) { loadPage(page); } else { showIndex(); }
+  });
+
+  // Initial load
+  (function() {
+    var page = getPage();
+    if (page) { loadPage(page); } else { showIndex(); }
+  })();
+</script>
+
+</body>
+</html>
