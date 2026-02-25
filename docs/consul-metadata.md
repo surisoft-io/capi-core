@@ -294,7 +294,7 @@ CAPI automatically detects the removal on the next discovery cycle and removes t
 
 | Key | Description | Example |
 |-----|-------------|---------|
-| `group` | Route group identifier. Combined with service name to form the route path. | `v1` |
+| `group` | **(Mandatory)** Route group identifier. Combined with service name to form the route ID and route path (e.g. `order-service:v1`). Services registered without a `group` are ignored by CAPI. | `v1` |
 | `root-context` | Backend path prefix. Requests are forwarded to this path on the upstream service. | `/orders` |
 
 ### Routing
@@ -341,6 +341,12 @@ CAPI automatically detects the removal on the next discovery cycle and removes t
 | `capi-instance` | — | Target a specific CAPI instance by `instanceName`. |
 | `namespace` | — | Alternative field for instance targeting (same as `capi-instance`). |
 | `capi-instance-<name>` | — | JSON object with per-instance overrides. See multi-instance targeting above. |
+
+### Timeouts
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `response-timeout` | `-1` (uses global) | Maximum time in milliseconds to wait for the backend service to respond. When set to a value greater than `0`, overrides the global `rest.responseTimeout` from CAPI configuration. Use this to set shorter timeouts on fast services or longer timeouts on services that are expected to be slow. |
 
 ### Observability
 
