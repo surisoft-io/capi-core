@@ -61,6 +61,9 @@ public class ServiceMeta {
     private long throttleDuration = -1;
     private boolean rateLimit;
 
+    @JsonProperty("response-timeout")
+    private int responseTimeout = -1;
+
     @JsonProperty("expose-open-api-definition")
     private boolean exposeOpenApiDefinition;
     @JsonProperty("secure-open-api-definition")
@@ -322,5 +325,13 @@ public class ServiceMeta {
 
     public void setVersion(String version) {
         this.version = version;
+    }
+
+    public int getResponseTimeout() {
+        return responseTimeout;
+    }
+
+    public void setResponseTimeout(int responseTimeout) {
+        this.responseTimeout = responseTimeout;
     }
 }

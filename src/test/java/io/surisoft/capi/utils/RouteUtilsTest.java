@@ -391,6 +391,48 @@ class RouteUtilsTest {
     }
 
     // ---------------------------------------------------------------
+    // per-service responseTimeout
+    // ---------------------------------------------------------------
+
+    @Test
+    void buildEndpoints_withPerServiceResponseTimeout_overridesGlobal() {
+        Service service = createServiceWithMapping("host1", 8080, "http", "/");
+        service.getServiceMeta().setResponseTimeout(5000);
+        String[] endpoints = routeUtils.buildEndpoints(service);
+
+        assertEquals(1, endpoints.length);
+        assertTrue(endpoints[0].contains("responseTimeout=5000"));
+        assertFalse(endpoints[0].contains("responseTimeout=120000"));
+    }
+
+    @Test
+    void buildEndpoints_withoutPerServiceResponseTimeout_usesGlobal() {
+        Service service = createServiceWithMapping("host1", 8080, "http", "/");
+        String[] endpoints = routeUtils.buildEndpoints(service);
+
+        assertEquals(1, endpoints.length);
+        assertTrue(endpoints[0].contains("responseTimeout=120000"));
+    }
+
+    @Test
+    void buildEndpoints_withPerServiceResponseTimeoutZero_usesGlobal() {
+        Service service = createServiceWithMapping("host1", 8080, "http", "/");
+        service.getServiceMeta().setResponseTimeout(0);
+        String[] endpoints = routeUtils.buildEndpoints(service);
+
+        assertTrue(endpoints[0].contains("responseTimeout=120000"));
+    }
+
+    @Test
+    void buildEndpoints_withPerServiceResponseTimeoutNegative_usesGlobal() {
+        Service service = createServiceWithMapping("host1", 8080, "http", "/");
+        service.getServiceMeta().setResponseTimeout(-1);
+        String[] endpoints = routeUtils.buildEndpoints(service);
+
+        assertTrue(endpoints[0].contains("responseTimeout=120000"));
+    }
+
+    // ---------------------------------------------------------------
     // buildFrom edge cases
     // ---------------------------------------------------------------
 
