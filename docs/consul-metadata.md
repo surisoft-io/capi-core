@@ -12,7 +12,7 @@ Services do **not** need any CAPI-specific code. CAPI reads metadata from Consul
 
 ### 1. Register a Simple REST Service
 
-The minimum metadata CAPI needs is `group` and `root-context`.
+The only mandatory metadata CAPI needs is `group`. Optionally, set `root-context` to specify the backend path prefix (defaults to `/`).
 
 Register a service in Consul via the HTTP API:
 
