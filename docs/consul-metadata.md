@@ -295,12 +295,12 @@ CAPI automatically detects the removal on the next discovery cycle and removes t
 | Key | Description | Example |
 |-----|-------------|---------|
 | `group` | **(Mandatory)** Route group identifier. Combined with service name to form the route ID and route path (e.g. `order-service:v1`). Services registered without a `group` are ignored by CAPI. | `v1` |
-| `root-context` | Backend path prefix. Requests are forwarded to this path on the upstream service. | `/orders` |
 
 ### Routing
 
 | Key | Default | Description |
 |-----|---------|-------------|
+| `root-context` | `/` | Backend path prefix. Requests are forwarded to this path on the upstream service. If not specified, CAPI forwards to `/`. |
 | `scheme` | `http` | Protocol to use when connecting to the upstream service (`http`, `https`, `ws`, `wss`). |
 | `type` | `rest` | Service type: `rest`, `websocket`, or `sse`. |
 | `route-group-first` | `false` | When `true`, route path becomes `/<group>/<service>` instead of `/<service>/<group>`. |
