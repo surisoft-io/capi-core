@@ -22,6 +22,8 @@ capi:
     connectionRequestTimeout: 5000
     requestTimeout: 5000
     responseTimeout: 120000
+    proxyPoolSize: 200
+    proxyMaxPoolSize: 500
 
   websocket:
     enabled: false
@@ -119,6 +121,8 @@ capi:
 | `rest.connectionRequestTimeout` | `5000` | Time (ms) to obtain a connection from the pool. |
 | `rest.requestTimeout` | `5000` | Total request timeout (ms). |
 | `rest.responseTimeout` | `120000` | Time (ms) to wait for a response from the backend. |
+| `rest.proxyPoolSize` | `200` | Core thread pool size for proxying backend calls. Decouples Undertow worker threads from blocking backend I/O. |
+| `rest.proxyMaxPoolSize` | `500` | Maximum thread pool size for proxying backend calls. |
 
 ### WebSocket
 
