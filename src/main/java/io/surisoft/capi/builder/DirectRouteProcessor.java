@@ -71,6 +71,7 @@ public class DirectRouteProcessor extends RouteBuilder {
             log.debug("Fail over enabled for route {}", routeId);
 
             routeDefinition
+                .convertBodyTo(byte[].class)
                 .doTry()
                     .setHeader("CapiServicePath", simple(service.getContext()))
                     .process(metricsProcessor)
@@ -121,6 +122,7 @@ public class DirectRouteProcessor extends RouteBuilder {
                     .routeId(routeId);
         } else {
             routeDefinition
+                    .convertBodyTo(byte[].class)
                     .doTry()
                     .setHeader("CapiServicePath", simple(service.getContext()))
                     .process(metricsProcessor)
