@@ -85,11 +85,13 @@ data:
         appName: {{ .Values.capi.loggingTraces.appName }}
         appEnvironment: {{ .Values.capi.loggingTraces.appEnvironment }}
         destination: {{ .Values.capi.loggingTraces.destination }}
+        filePath: {{ .Values.capi.loggingTraces.filePath | quote }}
       accessLogs:
         enabled: {{ .Values.capi.accessLogs.enabled }}
         tenant: {{ .Values.capi.accessLogs.tenant }}
         service: {{ .Values.capi.accessLogs.service }}
         destination: {{ .Values.capi.accessLogs.destination }}
+        filePath: {{ .Values.capi.accessLogs.filePath | quote }}
       throttle:
         enabled: {{ .Values.capi.throttle.enabled }}
         kubernetesNamespace: {{ .Values.capi.throttle.kubernetesNamespace | quote }}

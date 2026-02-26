@@ -37,7 +37,28 @@
 <property name="accessLogsDestination"
                 value="${logging.logback.access.destination}"/>
 
+<!-- File logging properties -->
+<property name="logsFileEnabled"
+                value="${logging.logback.logs.fileEnabled}" />
+<property name="logsFilePath"
+                value="${logging.logback.logs.filePath}"/>
+<property name="accessFileEnabled"
+                value="${logging.logback.access.fileEnabled}" />
+<property name="accessLogsFilePath"
+                value="${logging.logback.access.filePath}"/>
+
 <property name="logstashDestination" value="${logstash-destination}"/>
+
+<!-- Pattern with trace/span support -->
+<property name="LOG_PATTERN"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"/>
+
+<!-- Console appender -->
+<appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+        <pattern>${LOG_PATTERN}</pattern>
+    </encoder>
+</appender>
 
 <!-- LOGSTASH appender (only created when logs are enabled) -->
 <condition class="ch.qos.logback.core.boolex.PropertyEqualityCondition">
@@ -64,6 +85,28 @@
                 <includeMdc>true</includeMdc>
                 <includeContext>true</includeContext>
                 <includeStructuredArguments>true</includeStructuredArguments>
+            </encoder>
+        </appender>
+    </then>
+</if>
+
+<!-- App logs rolling file appender (only created when filePath is configured) -->
+<condition class="ch.qos.logback.core.boolex.PropertyEqualityCondition">
+    <key>logsFileEnabled</key>
+    <value>true</value>
+</condition>
+<if>
+    <then>
+        <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <file>${logsFilePath}</file>
+            <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+                <fileNamePattern>${logsFilePath}.%d{yyyy-MM-dd}.%i.gz</fileNamePattern>
+                <maxFileSize>100MB</maxFileSize>
+                <maxHistory>30</maxHistory>
+                <totalSizeCap>3GB</totalSizeCap>
+            </rollingPolicy>
+            <encoder>
+                <pattern>${LOG_PATTERN}</pattern>
             </encoder>
         </appender>
     </then>
@@ -96,25 +139,47 @@
         </appender>
     </then>
 </if>
-    <!-- Pattern with trace/span support -->
-    <property name="LOG_PATTERN"
-              value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"/>
-    <!-- Console appender -->
-    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
-        <encoder>
-            <pattern>${LOG_PATTERN}</pattern>
-        </encoder>
-    </appender>
-    <!-- Root logger -->
-    <root level="INFO">
-        <appender-ref ref="CONSOLE"/>
-        <appender-ref ref="LOGSTASH"/>
-    </root>
-    <if condition='Boolean.parseBoolean(property("accessLogsEnabled"))'>
-        <then>
-            <logger name="capi.access" level="INFO" additivity="false">
-                <appender-ref ref="ASYNC-ACCESS"/>
-            </logger>
-        </then>
-    </if>
+
+<!-- Access logs rolling file appender (only created when filePath is configured) -->
+<condition class="ch.qos.logback.core.boolex.PropertyEqualityCondition">
+    <key>accessFileEnabled</key>
+    <value>true</value>
+</condition>
+<if>
+    <then>
+        <appender name="ACCESS-FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <file>${accessLogsFilePath}</file>
+            <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+                <fileNamePattern>${accessLogsFilePath}.%d{yyyy-MM-dd}.%i.gz</fileNamePattern>
+                <maxFileSize>100MB</maxFileSize>
+                <maxHistory>30</maxHistory>
+                <totalSizeCap>3GB</totalSizeCap>
+            </rollingPolicy>
+            <encoder>
+                <pattern>%msg%n</pattern>
+            </encoder>
+        </appender>
+    </then>
+</if>
+
+<!-- Root logger: app logs to console + logstash + file -->
+<root level="INFO">
+    <appender-ref ref="CONSOLE"/>
+    <appender-ref ref="LOGSTASH"/>
+    <appender-ref ref="FILE"/>
+</root>
+
+<!-- Access logger: separate from root, only to access-specific appenders -->
+<condition class="ch.qos.logback.core.boolex.PropertyEqualityCondition">
+    <key>accessLogsEnabled</key>
+    <value>true</value>
+</condition>
+<if>
+    <then>
+        <logger name="capi.access" level="INFO" additivity="false">
+            <appender-ref ref="ASYNC-ACCESS"/>
+            <appender-ref ref="ACCESS-FILE"/>
+        </logger>
+    </then>
+</if>
 </configuration>
