@@ -87,12 +87,14 @@ capi:
     appName: capi
     appEnvironment: dev
     destination: localhost:5444
+    filePath: ""
 
   accessLogs:
     enabled: false
     tenant: capi
     service: capi
     destination: localhost:5444
+    filePath: ""
 
   throttle:
     enabled: false

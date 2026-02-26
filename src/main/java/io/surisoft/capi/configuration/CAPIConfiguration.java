@@ -369,6 +369,7 @@ public class CAPIConfiguration {
         private String appName;
         private String appEnvironment;
         private String destination;
+        private String filePath;
 
         public boolean isEnabled() {
             return enabled;
@@ -400,6 +401,12 @@ public class CAPIConfiguration {
         public void setDestination(String destination) {
             this.destination = destination;
         }
+        public String getFilePath() {
+            return filePath;
+        }
+        public void setFilePath(String filePath) {
+            this.filePath = filePath;
+        }
     }
 
     public static class AccessLogs {
@@ -407,6 +414,7 @@ public class CAPIConfiguration {
         private String tenant;
         private String service;
         private String destination;
+        private String filePath;
 
         public boolean isEnabled() {
             return enabled;
@@ -431,6 +439,12 @@ public class CAPIConfiguration {
         }
         public void setDestination(String destination) {
             this.destination = destination;
+        }
+        public String getFilePath() {
+            return filePath;
+        }
+        public void setFilePath(String filePath) {
+            this.filePath = filePath;
         }
     }
 

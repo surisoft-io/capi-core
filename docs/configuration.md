@@ -83,12 +83,14 @@ capi:
     appName: capi
     appEnvironment: dev
     destination: localhost:5444
+    filePath: /var/log/capi/capi.log
 
   accessLogs:
     enabled: false
     tenant: capi
     service: capi
     destination: localhost:5444
+    filePath: /var/log/capi/capi-access.log
 
   throttle:
     enabled: false
@@ -208,10 +210,12 @@ See [Security](security.md) for details.
 | `loggingTraces.appName` | — | Application name in logs. |
 | `loggingTraces.appEnvironment` | — | Environment label (dev, staging, prod). |
 | `loggingTraces.destination` | — | Remote log destination (host:port). |
+| `loggingTraces.filePath` | — | Path for rolling app log file (e.g. `/var/log/capi/capi.log`). Rotation: 100MB per file, 30 days, 3GB cap. |
 | `accessLogs.enabled` | `false` | Enable access log forwarding. |
 | `accessLogs.tenant` | — | Tenant identifier. |
 | `accessLogs.service` | — | Service identifier. |
 | `accessLogs.destination` | — | Remote log destination (host:port). |
+| `accessLogs.filePath` | — | Path for rolling access log file (e.g. `/var/log/capi/capi-access.log`). Rotation: 100MB per file, 30 days, 3GB cap. |
 
 ### Throttling
 

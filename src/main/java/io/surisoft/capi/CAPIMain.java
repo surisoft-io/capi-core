@@ -208,6 +208,10 @@ public class CAPIMain {
             System.setProperty("logging.logback.logs.appName", configuration.getLoggingTraces().getAppName());
             System.setProperty("logging.logback.logs.appEnvironment", configuration.getLoggingTraces().getAppEnvironment());
             System.setProperty("logging.logback.logs.destination", configuration.getLoggingTraces().getDestination());
+            if(configuration.getLoggingTraces().getFilePath() != null && !configuration.getLoggingTraces().getFilePath().isEmpty()) {
+                System.setProperty("logging.logback.logs.fileEnabled", Boolean.toString(true));
+                System.setProperty("logging.logback.logs.filePath", configuration.getLoggingTraces().getFilePath());
+            }
         }
 
         if(configuration.getAccessLogs().isEnabled()) {
@@ -215,6 +219,10 @@ public class CAPIMain {
             System.setProperty("logging.logback.access.tenant", configuration.getAccessLogs().getTenant());
             System.setProperty("logging.logback.access.service", configuration.getAccessLogs().getService());
             System.setProperty("logging.logback.access.destination", configuration.getAccessLogs().getDestination());
+            if(configuration.getAccessLogs().getFilePath() != null && !configuration.getAccessLogs().getFilePath().isEmpty()) {
+                System.setProperty("logging.logback.access.fileEnabled", Boolean.toString(true));
+                System.setProperty("logging.logback.access.filePath", configuration.getAccessLogs().getFilePath());
+            }
         }
 
         LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
