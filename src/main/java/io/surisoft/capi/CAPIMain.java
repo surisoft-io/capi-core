@@ -10,7 +10,6 @@ import io.surisoft.capi.configuration.CamelStartupListener;
 import io.surisoft.capi.service.CamelProxyPeerAddressHandler;
 import io.surisoft.capi.service.CapiAccessLogReceiver;
 import io.surisoft.capi.service.McpBackendLoadBalancer;
-import io.surisoft.capi.service.McpServerClient;
 import io.surisoft.capi.undertow.AdminGateway;
 import io.surisoft.capi.undertow.McpGateway;
 import io.surisoft.capi.undertow.WebsocketGateway;
@@ -28,10 +27,7 @@ import org.yaml.snakeyaml.constructor.Constructor;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 
 public class CAPIMain {
 
@@ -167,7 +163,9 @@ public class CAPIMain {
         if(capiConfiguration.getWebsocket().isEnabled()
                 && capiConfiguration.getWebsocket().getContextPath() != null
                 && !capiConfiguration.getWebsocket().getContextPath().isEmpty()) {
-            websocketGateway = new WebsocketGateway(capiConfiguration.getWebsocket().getPort(), startup.getWebSocketClientMap(), startup.getWebsocketUtils(), startup.getUndertowSslContext(), new ArrayList<>(), "cookiw");
+            List<String> allowedHeaders = capiConfiguration.getAllowedHeaders() != null ? capiConfiguration.getAllowedHeaders() : new ArrayList<>();
+            String cookieName = capiConfiguration.getOauth2() != null && capiConfiguration.getOauth2().getCookieName() != null ? capiConfiguration.getOauth2().getCookieName() : "";
+            websocketGateway = new WebsocketGateway(capiConfiguration.getWebsocket().getPort(), startup.getWebSocketClientMap(), startup.getWebsocketUtils(), startup.getUndertowSslContext(), allowedHeaders, cookieName);
             websocketGateway.runProxy();
         }
         return websocketGateway;
