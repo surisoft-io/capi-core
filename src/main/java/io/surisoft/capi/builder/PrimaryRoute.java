@@ -33,8 +33,10 @@ public class PrimaryRoute extends RouteBuilder {
     private static final Pattern VALID_ORIGIN_PATTERN = Pattern.compile("^https?://[^\\s]+$");
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final String primaryEndpoint;
+    private final int proxyPoolSize;
+    private final int proxyMaxPoolSize;
 
-    public PrimaryRoute(RouteUtils routeUtils, int capiRestPort, String capiRestListeningAddress, String capiRestPath, boolean sslEnabled, boolean gatewayCorsManagementEnabled, Map<String, String> managedHeaders, Cache<String, Service> serviceCache, String primaryEndpoint) {
+    public PrimaryRoute(RouteUtils routeUtils, int capiRestPort, String capiRestListeningAddress, String capiRestPath, boolean sslEnabled, boolean gatewayCorsManagementEnabled, Map<String, String> managedHeaders, Cache<String, Service> serviceCache, String primaryEndpoint, int proxyPoolSize, int proxyMaxPoolSize) {
         this.routeUtils = routeUtils;
         this.capiRestPort = capiRestPort;
         this.capiRestListeningAddress = capiRestListeningAddress;
@@ -44,6 +46,8 @@ public class PrimaryRoute extends RouteBuilder {
         this.managedHeaders = managedHeaders;
         this.serviceCache = serviceCache;
         this.primaryEndpoint = primaryEndpoint;
+        this.proxyPoolSize = proxyPoolSize;
+        this.proxyMaxPoolSize = proxyMaxPoolSize;
     }
 
     @Override
@@ -102,6 +106,7 @@ public class PrimaryRoute extends RouteBuilder {
                 })
                 .choice()
                 .when().simple("${exchangeProperty.CamelRecipientListEndpoint} != null")
+                .threads(proxyPoolSize, proxyMaxPoolSize)
                 .recipientList(simple("${exchangeProperty.CamelRecipientListEndpoint}"))
                 .routeId("primary-route");
         routeUtils.registerMetric("primary-route");

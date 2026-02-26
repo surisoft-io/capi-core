@@ -229,6 +229,8 @@ public class CAPIConfiguration {
         private int connectionRequestTimeout;
         private int requestTimeout;
         private int responseTimeout;
+        private int proxyPoolSize = 200;
+        private int proxyMaxPoolSize = 500;
 
         public boolean isEnabled() {
             return enabled;
@@ -272,6 +274,18 @@ public class CAPIConfiguration {
         }
         public void setResponseTimeout(int responseTimeout) {
             this.responseTimeout = responseTimeout;
+        }
+        public int getProxyPoolSize() {
+            return proxyPoolSize;
+        }
+        public void setProxyPoolSize(int proxyPoolSize) {
+            this.proxyPoolSize = proxyPoolSize;
+        }
+        public int getProxyMaxPoolSize() {
+            return proxyMaxPoolSize;
+        }
+        public void setProxyMaxPoolSize(int proxyMaxPoolSize) {
+            this.proxyMaxPoolSize = proxyMaxPoolSize;
         }
 
     }

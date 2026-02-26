@@ -396,6 +396,22 @@ class CAPIConfigurationTest {
         assertEquals(10000, rest.getResponseTimeout());
     }
 
+    @Test
+    void rest_proxyPoolSize_defaultIs200() {
+        CAPIConfiguration.Rest rest = new CAPIConfiguration.Rest();
+        assertEquals(200, rest.getProxyPoolSize());
+        rest.setProxyPoolSize(100);
+        assertEquals(100, rest.getProxyPoolSize());
+    }
+
+    @Test
+    void rest_proxyMaxPoolSize_defaultIs500() {
+        CAPIConfiguration.Rest rest = new CAPIConfiguration.Rest();
+        assertEquals(500, rest.getProxyMaxPoolSize());
+        rest.setProxyMaxPoolSize(1000);
+        assertEquals(1000, rest.getProxyMaxPoolSize());
+    }
+
     // --- Websocket nested class ---
 
     @Test

@@ -76,7 +76,9 @@ class PrimaryRouteTest {
                 true,
                 headers,
                 serviceCache,
-                PRIMARY_ENDPOINT
+                PRIMARY_ENDPOINT,
+                200,
+                500
         );
         assertNotNull(primaryRoute);
     }
@@ -95,7 +97,9 @@ class PrimaryRouteTest {
                 true,
                 headers,
                 serviceCache,
-                PRIMARY_ENDPOINT
+                PRIMARY_ENDPOINT,
+                200,
+                500
         );
 
         // Attach the CamelContext so the RouteBuilder can build the route model
@@ -118,7 +122,9 @@ class PrimaryRouteTest {
                 false,
                 headers,
                 serviceCache,
-                PRIMARY_ENDPOINT
+                PRIMARY_ENDPOINT,
+                200,
+                500
         );
 
         assertDoesNotThrow(() -> camelContext.addRoutes(primaryRoute));
@@ -141,7 +147,9 @@ class PrimaryRouteTest {
                 headers,
                 serviceCache,
                 "undertow:https://0.0.0.0:8443/api?matchOnUriPrefix=true&optionsEnabled=true"
-                        + "&httpMethodRestrict=GET,POST,PUT,DELETE,OPTIONS,PATCH"
+                        + "&httpMethodRestrict=GET,POST,PUT,DELETE,OPTIONS,PATCH",
+                200,
+                500
         );
 
         assertDoesNotThrow(() -> camelContext.addRoutes(primaryRoute));
@@ -159,7 +167,8 @@ class PrimaryRouteTest {
         PrimaryRoute primaryRoute = new PrimaryRoute(
                 routeUtils, 8380, "0.0.0.0", "/api", false, true,
                 headers, serviceCache,
-                "direct:primary-options-test"
+                "direct:primary-options-test",
+                200, 500
         );
 
         camelContext.addRoutes(primaryRoute);
@@ -184,7 +193,8 @@ class PrimaryRouteTest {
         PrimaryRoute primaryRoute = new PrimaryRoute(
                 routeUtils, 8380, "0.0.0.0", "/api", false, false,
                 headers, serviceCache,
-                "direct:primary-404-test"
+                "direct:primary-404-test",
+                200, 500
         );
 
         camelContext.addRoutes(primaryRoute);
@@ -208,7 +218,8 @@ class PrimaryRouteTest {
         PrimaryRoute primaryRoute = new PrimaryRoute(
                 routeUtils, 8380, "0.0.0.0", "/api", false, false,
                 headers, serviceCache,
-                "direct:primary-short-path-test"
+                "direct:primary-short-path-test",
+                200, 500
         );
 
         camelContext.addRoutes(primaryRoute);
@@ -232,7 +243,8 @@ class PrimaryRouteTest {
         PrimaryRoute primaryRoute = new PrimaryRoute(
                 routeUtils, 8380, "0.0.0.0", "/api", false, true,
                 headers, serviceCache,
-                "direct:primary-referer-test"
+                "direct:primary-referer-test",
+                200, 500
         );
 
         camelContext.addRoutes(primaryRoute);
@@ -258,7 +270,8 @@ class PrimaryRouteTest {
         PrimaryRoute primaryRoute = new PrimaryRoute(
                 routeUtils, 8380, "0.0.0.0", "/api", false, true,
                 headers, serviceCache,
-                "direct:primary-no-origin-test"
+                "direct:primary-no-origin-test",
+                200, 500
         );
 
         camelContext.addRoutes(primaryRoute);
@@ -290,7 +303,8 @@ class PrimaryRouteTest {
         PrimaryRoute primaryRoute = new PrimaryRoute(
                 routeUtils, 8380, "0.0.0.0", "/api", false, true,
                 headers, serviceCache,
-                "direct:primary-allowed-origin-test"
+                "direct:primary-allowed-origin-test",
+                200, 500
         );
 
         camelContext.addRoutes(primaryRoute);
@@ -322,7 +336,8 @@ class PrimaryRouteTest {
         PrimaryRoute primaryRoute = new PrimaryRoute(
                 routeUtils, 8380, "0.0.0.0", "/api", false, true,
                 headers, serviceCache,
-                "direct:primary-not-allowed-origin-test"
+                "direct:primary-not-allowed-origin-test",
+                200, 500
         );
 
         camelContext.addRoutes(primaryRoute);
@@ -349,7 +364,8 @@ class PrimaryRouteTest {
         PrimaryRoute primaryRoute = new PrimaryRoute(
                 routeUtils, 8380, "0.0.0.0", "/api", false, true,
                 headers, serviceCache,
-                "direct:primary-non-capi-consumer-test"
+                "direct:primary-non-capi-consumer-test",
+                200, 500
         );
 
         camelContext.addRoutes(primaryRoute);
@@ -377,7 +393,8 @@ class PrimaryRouteTest {
         PrimaryRoute primaryRoute = new PrimaryRoute(
                 routeUtils, 8380, "0.0.0.0", "/api", false, true,
                 headers, serviceCache,
-                "direct:primary-invalid-origin-test"
+                "direct:primary-invalid-origin-test",
+                200, 500
         );
 
         camelContext.addRoutes(primaryRoute);
@@ -411,7 +428,8 @@ class PrimaryRouteTest {
         PrimaryRoute primaryRoute = new PrimaryRoute(
                 routeUtils, 8380, "0.0.0.0", "/api", false, true,
                 headers, serviceCache,
-                "direct:primary-null-origins-test"
+                "direct:primary-null-origins-test",
+                200, 500
         );
 
         camelContext.addRoutes(primaryRoute);
@@ -447,7 +465,8 @@ class PrimaryRouteTest {
         PrimaryRoute primaryRoute = new PrimaryRoute(
                 routeUtils, 8380, "0.0.0.0", "/api", false, false,
                 headers, serviceCache,
-                "direct:primary-route-exists-test"
+                "direct:primary-route-exists-test",
+                200, 500
         );
 
         camelContext.addRoutes(primaryRoute);
@@ -479,7 +498,8 @@ class PrimaryRouteTest {
         Map<String, String> headers = new HashMap<>();
         PrimaryRoute primaryRoute = new PrimaryRoute(
                 routeUtils, 8380, "0.0.0.0", "/api", false, false,
-                headers, serviceCache, "direct:primary-health-connected-test"
+                headers, serviceCache, "direct:primary-health-connected-test",
+                200, 500
         );
 
         camelContext.addRoutes(primaryRoute);
@@ -505,7 +525,8 @@ class PrimaryRouteTest {
         Map<String, String> headers = new HashMap<>();
         PrimaryRoute primaryRoute = new PrimaryRoute(
                 routeUtils, 8380, "0.0.0.0", "/api", false, false,
-                headers, serviceCache, "direct:primary-health-not-connected-test"
+                headers, serviceCache, "direct:primary-health-not-connected-test",
+                200, 500
         );
 
         camelContext.addRoutes(primaryRoute);

@@ -72,6 +72,7 @@ public class CAPIMain {
 
         //log.info("Starting CAPI Camel Context");
         CamelContext camelContext = new DefaultCamelContext();
+        camelContext.getGlobalOptions().put("CamelVirtualThreadEnabled", "true");
 
         Startup startup = new Startup(capiConfiguration, camelContext);
         startup.start();
@@ -132,7 +133,7 @@ public class CAPIMain {
                     && capiConfiguration.getRest().getContextPath() != null
                     && !capiConfiguration.getRest().getContextPath().isEmpty()) {
                 boolean sslEnabled = capiConfiguration.getSsl() != null && capiConfiguration.getSsl().isEnabled();
-                camelContext.addRoutes(new PrimaryRoute(startup.getRouteUtils(), capiConfiguration.getRest().getPort(), capiConfiguration.getRest().getListeningAddress(), capiConfiguration.getRest().getContextPath(), sslEnabled, capiConfiguration.isCorsEnabled(), managedHeaders, startup.getServiceCache(), primaryEndpoint));
+                camelContext.addRoutes(new PrimaryRoute(startup.getRouteUtils(), capiConfiguration.getRest().getPort(), capiConfiguration.getRest().getListeningAddress(), capiConfiguration.getRest().getContextPath(), sslEnabled, capiConfiguration.isCorsEnabled(), managedHeaders, startup.getServiceCache(), primaryEndpoint, capiConfiguration.getRest().getProxyPoolSize(), capiConfiguration.getRest().getProxyMaxPoolSize()));
             }
 
             boolean mcpServerEnabled = startup.getMcpServerClient() != null;
