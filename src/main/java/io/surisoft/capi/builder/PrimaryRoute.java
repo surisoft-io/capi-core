@@ -15,6 +15,8 @@ import org.apache.camel.builder.RouteBuilder;
 import org.apache.camel.util.json.JsonObject;
 import org.cache2k.Cache;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -102,6 +104,19 @@ public class PrimaryRoute extends RouteBuilder {
                     } else {
                         exchange.getIn().setHeader("CamelHttpPath", remainingPath.toString());
                         exchange.setProperty("CamelRecipientListEndpoint", "direct:" + routeId);
+                        // Undertow's EagerFormParsingHandler converts form-encoded bodies to HashMap.
+                        // Re-encode as bytes so the HttpProducer can forward them.
+                        Object body = exchange.getIn().getBody();
+                        if (body instanceof Map<?, ?> formData) {
+                            StringBuilder sb = new StringBuilder();
+                            formData.forEach((key, value) -> {
+                                if (!sb.isEmpty()) sb.append("&");
+                                sb.append(URLEncoder.encode(String.valueOf(key), StandardCharsets.UTF_8));
+                                sb.append("=");
+                                sb.append(URLEncoder.encode(String.valueOf(value), StandardCharsets.UTF_8));
+                            });
+                            exchange.getIn().setBody(sb.toString().getBytes(StandardCharsets.UTF_8));
+                        }
                     }
                 })
                 .choice()
