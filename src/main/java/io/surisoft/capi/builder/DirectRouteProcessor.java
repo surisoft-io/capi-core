@@ -7,6 +7,7 @@ import io.surisoft.capi.service.OpaService;
 import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.RouteUtils;
 import org.apache.camel.CamelContext;
+import org.apache.camel.Exchange;
 import org.apache.camel.builder.RouteBuilder;
 import org.apache.camel.model.RouteDefinition;
 import org.apache.hc.client5.http.ConnectTimeoutException;
@@ -14,8 +15,12 @@ import org.apache.hc.core5.http.NoHttpResponseException;
 import org.cache2k.Cache;
 
 import javax.net.ssl.SSLHandshakeException;
+import java.io.ByteArrayInputStream;
 import java.net.SocketException;
+import java.net.URLEncoder;
 import java.net.UnknownHostException;
+import java.nio.charset.StandardCharsets;
+import java.util.Map;
 
 public class DirectRouteProcessor extends RouteBuilder {
 
@@ -71,7 +76,7 @@ public class DirectRouteProcessor extends RouteBuilder {
             log.debug("Fail over enabled for route {}", routeId);
 
             routeDefinition
-                .convertBodyTo(byte[].class)
+                .process(DirectRouteProcessor::preserveRequestBody)
                 .doTry()
                     .setHeader("CapiServicePath", simple(service.getContext()))
                     .process(metricsProcessor)
@@ -93,6 +98,7 @@ public class DirectRouteProcessor extends RouteBuilder {
                             throttleProcessor.process(exchange);
                         }
                     })
+                    .process(DirectRouteProcessor::restoreRequestBody)
                     .loadBalance()
                     .failover(1, false, service.isRoundRobinEnabled(), false)
                     .to(routeUtils.buildEndpoints(service))
@@ -122,7 +128,7 @@ public class DirectRouteProcessor extends RouteBuilder {
                     .routeId(routeId);
         } else {
             routeDefinition
-                    .convertBodyTo(byte[].class)
+                    .process(DirectRouteProcessor::preserveRequestBody)
                     .doTry()
                     .setHeader("CapiServicePath", simple(service.getContext()))
                     .process(metricsProcessor)
@@ -145,6 +151,7 @@ public class DirectRouteProcessor extends RouteBuilder {
                             throttleProcessor.process(exchange);
                         }
                     })
+                    .process(DirectRouteProcessor::restoreRequestBody)
                 .to(routeUtils.buildEndpoints(service))
                     .endDoTry()
                     .doCatch(SSLHandshakeException.class, SocketException.class, UnknownHostException.class, AuthorizationException.class, NoHttpResponseException.class, ConnectTimeoutException.class)
@@ -183,5 +190,36 @@ public class DirectRouteProcessor extends RouteBuilder {
 
     public void setServiceCache(Cache<String, Service> serviceCache) {
         this.serviceCache = serviceCache;
+    }
+
+    @SuppressWarnings("unchecked")
+    static void preserveRequestBody(Exchange exchange) {
+        Object body = exchange.getIn().getBody();
+        if (body instanceof Map) {
+            Map<String, Object> formData = (Map<String, Object>) body;
+            StringBuilder sb = new StringBuilder();
+            formData.forEach((key, value) -> {
+                if (!sb.isEmpty()) sb.append("&");
+                sb.append(URLEncoder.encode(key, StandardCharsets.UTF_8));
+                sb.append("=");
+                sb.append(URLEncoder.encode(String.valueOf(value), StandardCharsets.UTF_8));
+            });
+            byte[] encoded = sb.toString().getBytes(StandardCharsets.UTF_8);
+            exchange.getIn().setBody(encoded);
+            exchange.setProperty("CAPIOriginalRequestBody", encoded);
+        } else {
+            byte[] bytes = exchange.getIn().getBody(byte[].class);
+            exchange.setProperty("CAPIOriginalRequestBody", bytes);
+            if (bytes != null) {
+                exchange.getIn().setBody(bytes);
+            }
+        }
+    }
+
+    static void restoreRequestBody(Exchange exchange) {
+        byte[] saved = exchange.getProperty("CAPIOriginalRequestBody", byte[].class);
+        if (saved != null) {
+            exchange.getIn().setBody(new ByteArrayInputStream(saved));
+        }
     }
 }
