@@ -311,7 +311,7 @@ public class McpGateway implements AutoCloseable {
             log.error("MCP Server tool call failed for {}: {}", tool.getName(), e.getMessage());
             sendJsonRpc(exchange, StatusCodes.OK,
                     JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR,
-                            "MCP Server tool call failed: " + e.getMessage()));
+                            "MCP Server tool call failed"));
         }
     }
 
@@ -443,7 +443,7 @@ public class McpGateway implements AutoCloseable {
             loadBalancer.reportFailure(backendUrl);
             log.error("Error streaming from backend for tool {}", tool.getName(), e);
             sendJsonRpc(exchange, StatusCodes.OK,
-                    JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR, "Backend streaming failed: " + e.getMessage()));
+                    JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR, "Backend streaming failed"));
         }
     }
 

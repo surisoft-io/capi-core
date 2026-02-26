@@ -75,7 +75,7 @@ public class OpenApiProcessor implements Processor {
                                     sendException("No authorization provided", Constants.UNAUTHORIZED_CODE, exchange);
                                 }
                             } catch (AuthorizationException | ParseException e) {
-                                sendException(e.getMessage(), Constants.BAD_REQUEST_CODE, exchange);
+                                sendException("Invalid authorization provided", Constants.BAD_REQUEST_CODE, exchange);
                             }
                         }
                         return true;

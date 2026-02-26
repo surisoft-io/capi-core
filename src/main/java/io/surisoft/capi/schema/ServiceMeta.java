@@ -2,8 +2,8 @@ package io.surisoft.capi.schema;
 
 import com.fasterxml.jackson.annotation.*;
 
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ServiceMeta {
@@ -73,10 +73,10 @@ public class ServiceMeta {
     @JsonProperty("version")
     private String version;
 
-    private Map<String, String> extraServiceMeta = new HashMap<>();
+    private Map<String, String> extraServiceMeta = new ConcurrentHashMap<>();
 
     @JsonIgnore
-    private Map<String, String> unknownProperties = new HashMap<>();
+    private Map<String, String> unknownProperties = new ConcurrentHashMap<>();
 
     public boolean isSecured() {
         return secured;
@@ -300,7 +300,9 @@ public class ServiceMeta {
 
     @JsonAnySetter
     public void handleUnknown(String key, String value) {
-        unknownProperties.put(key, value);
+        if(key != null && value != null) {
+            unknownProperties.put(key, value);
+        }
     }
 
     @JsonAnyGetter
@@ -314,7 +316,7 @@ public class ServiceMeta {
 
     public void addExtraServiceMeta(String key, String value) {
         if(extraServiceMeta == null) {
-            extraServiceMeta = new HashMap<>();
+            extraServiceMeta = new ConcurrentHashMap<>();
         }
         extraServiceMeta.put(key, value);
     }

@@ -13,12 +13,14 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.regex.Pattern;
 
 import static java.time.temporal.ChronoUnit.SECONDS;
 
 public class OpaService {
 
     private static final Logger log = LoggerFactory.getLogger(OpaService.class);
+    private static final Pattern VALID_OPA_REGO = Pattern.compile("^[a-zA-Z0-9_/\\-]+$");
     private final String opaEndpoint;
     private HttpClient httpClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -43,6 +45,9 @@ public class OpaService {
     }
 
     private HttpRequest buildHttpRequest(String opaRego, String value, boolean isAccessToken) throws URISyntaxException {
+        if(opaRego == null || !VALID_OPA_REGO.matcher(opaRego).matches()) {
+            throw new IllegalArgumentException("Invalid OPA rego path");
+        }
         return HttpRequest.newBuilder()
                     .uri(new URI(opaEndpoint + "/v1/data/" + opaRego + "/allow"))
                     .setHeader("Media-Type", "application/json")

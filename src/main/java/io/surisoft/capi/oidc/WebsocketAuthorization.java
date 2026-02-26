@@ -95,7 +95,9 @@ public class WebsocketAuthorization {
         for(DefaultJWTProcessor<SecurityContext> jwtProcessor : jwtProcessorList) {
             try {
                 return jwtProcessor.process(bearerToken, null);
-            } catch (ParseException | BadJOSEException | JOSEException ignored) {}
+            } catch (ParseException | BadJOSEException | JOSEException e) {
+                log.debug("JWT validation failed with processor: {}", e.getMessage());
+            }
         }
         return null;
     }
