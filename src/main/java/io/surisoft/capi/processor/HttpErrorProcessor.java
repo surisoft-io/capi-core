@@ -41,8 +41,9 @@ public class HttpErrorProcessor implements Processor {
             exchange.getIn().setHeader(Constants.REASON_MESSAGE_HEADER, Constants.ERROR_NO_SERVER_AVAILABLE);
             exchange.getIn().setHeader(Constants.REASON_CODE_HEADER, 502);
         } else if(cause instanceof AuthorizationException) {
-            exchange.setProperty(Constants.REASON_MESSAGE_HEADER, cause.getMessage());
-            exchange.getIn().setHeader(Constants.REASON_MESSAGE_HEADER, cause.getMessage());
+            String safeMessage = cause.getMessage() != null ? cause.getMessage().replaceAll("[\\p{Cntrl}]", "") : "Unauthorized";
+            exchange.setProperty(Constants.REASON_MESSAGE_HEADER, safeMessage);
+            exchange.getIn().setHeader(Constants.REASON_MESSAGE_HEADER, safeMessage);
             exchange.getIn().setHeader(Constants.REASON_CODE_HEADER, 401);
         } else if(cause instanceof NoHttpResponseException) {
             exchange.setProperty(Constants.REASON_MESSAGE_HEADER, Constants.ERROR_REMOTE_NOT_RESPONDING);

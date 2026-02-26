@@ -3,7 +3,7 @@ package io.surisoft.capi.configuration;
 import javax.net.ssl.SSLContext;
 
 public class CapiSslContextHolder {
-    private SSLContext sslContext;
+    private volatile SSLContext sslContext;
     public CapiSslContextHolder(SSLContext sslContext) {
         this.sslContext = sslContext;
     }

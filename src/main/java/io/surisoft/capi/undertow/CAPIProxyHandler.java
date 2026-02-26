@@ -157,7 +157,7 @@ public final class CAPIProxyHandler implements HttpHandler {
         @Override
         public void run() {
             proxyClient.getConnection(target, exchange, this, -1, TimeUnit.MILLISECONDS);
-            selectedHost = proxyClient.getSelectedHost();
+            selectedHost = CAPILoadBalancerProxyClient.getSelectedHost(exchange);
         }
 
         @Override

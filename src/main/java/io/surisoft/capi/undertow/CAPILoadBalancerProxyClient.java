@@ -2,33 +2,27 @@ package io.surisoft.capi.undertow;
 
 import io.undertow.server.HttpServerExchange;
 import io.undertow.server.handlers.proxy.LoadBalancingProxyClient;
+import io.undertow.util.AttachmentKey;
 import io.undertow.util.HttpString;
 
 
 public class CAPILoadBalancerProxyClient extends LoadBalancingProxyClient {
 
-    //private final CapiUndertowTracer capiUndertowTracer;
-    private volatile String selectedHost;
-
-   // public CAPILoadBalancerProxyClient(CapiUndertowTracer capiUndertowTracer) {
-   //     this.capiUndertowTracer = capiUndertowTracer;
-   // }
+    public static final AttachmentKey<String> SELECTED_HOST_KEY = AttachmentKey.create(String.class);
 
     public Host selectHost(HttpServerExchange exchange) {
         Host host = super.selectHost(exchange);
         if(host != null) {
-            selectedHost = host.getUri().getHost();
-            exchange.getRequestHeaders().put(HttpString.tryFromString("CapiSelectedHost"), host.getUri().getHost());
-            //if(capiUndertowTracer != null) {
-            //    capiUndertowTracer.capiProxyRequest(host.getUri());
-            //}
+            String hostName = host.getUri().getHost();
+            exchange.putAttachment(SELECTED_HOST_KEY, hostName);
+            exchange.getRequestHeaders().put(HttpString.tryFromString("CapiSelectedHost"), hostName);
             return host;
         }
         //no available hosts
         return null;
     }
 
-    public String getSelectedHost() {
-        return selectedHost;
+    public static String getSelectedHost(HttpServerExchange exchange) {
+        return exchange.getAttachment(SELECTED_HOST_KEY);
     }
 }

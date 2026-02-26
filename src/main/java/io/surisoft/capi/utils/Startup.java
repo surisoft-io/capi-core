@@ -68,7 +68,7 @@ public class Startup {
     private OpaService opaService;
     @Nullable
     private WebsocketUtils websocketUtils;
-    private Map<String, WebsocketClient> webSocketClientMap = new HashMap<>();
+    private Map<String, WebsocketClient> webSocketClientMap = new java.util.concurrent.ConcurrentHashMap<>();
     @Nullable
     private SSLContext undertowSslContext;
     @Nullable

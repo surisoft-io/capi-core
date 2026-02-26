@@ -39,7 +39,7 @@ public class ConsulStore {
     private final String capiTrustStorePassword;
     private final CapiSslContextHolder capiSslContextHolder;
     private final CamelContext camelContext;
-    private HttpClient httpClient;
+    private volatile HttpClient httpClient;
 
     private ObjectMapper objectMapper = new ObjectMapper();
 
@@ -67,7 +67,7 @@ public class ConsulStore {
         syncTrustStore();
     }
 
-    private void syncTrustStore() {
+    private synchronized void syncTrustStore() {
         ConsulKeyStoreEntry cachedTrustStore = consulTrustStoreCache.get(Constants.CONSUL_CAPI_TRUST_STORE_GROUP_KEY);
         ConsulKeyStoreEntry remoteTrustStore = getRemoteTrustStore();
         try {

@@ -382,7 +382,7 @@ class OpenApiProcessorTest {
         boolean result = processor.validateRequest(exchange);
         assertTrue(result); // path matches, returns true even on error
 
-        verify(message).setHeader(eq(Constants.REASON_MESSAGE_HEADER), eq("Invalid token"));
+        verify(message).setHeader(eq(Constants.REASON_MESSAGE_HEADER), eq("Invalid authorization provided"));
         verify(message).setHeader(eq(Constants.REASON_CODE_HEADER), eq(Constants.BAD_REQUEST_CODE));
     }
 

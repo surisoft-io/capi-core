@@ -20,6 +20,8 @@ import java.net.http.HttpResponse;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import io.surisoft.capi.configuration.CAPIConfiguration;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -202,7 +204,7 @@ class ConsulNodeDiscoveryTest {
         co.setServicePort(8080);
         co.setModifyIndex(1);
 
-        ObjectMapper objectMapper = new ObjectMapper();
+        ObjectMapper objectMapper = new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
         String serviceByNameJson = objectMapper.writeValueAsString(List.of(co));
         when(serviceByNameResponse.body()).thenReturn(serviceByNameJson);
 
@@ -310,7 +312,7 @@ class ConsulNodeDiscoveryTest {
         co.setServicePort(8080);
         co.setModifyIndex(1);
 
-        ObjectMapper objectMapper = new ObjectMapper();
+        ObjectMapper objectMapper = new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
         HttpResponse<String> serviceByNameResponse = mock(HttpResponse.class);
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
@@ -358,7 +360,7 @@ class ConsulNodeDiscoveryTest {
         co.setServicePort(8080);
         co.setModifyIndex(1);
 
-        ObjectMapper objectMapper = new ObjectMapper();
+        ObjectMapper objectMapper = new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
         HttpResponse<String> serviceByNameResponse = mock(HttpResponse.class);
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
@@ -411,7 +413,7 @@ class ConsulNodeDiscoveryTest {
         co.setServicePort(8080);
         co.setModifyIndex(1);
 
-        ObjectMapper objectMapper = new ObjectMapper();
+        ObjectMapper objectMapper = new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
         HttpResponse<String> serviceByNameResponse = mock(HttpResponse.class);
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
@@ -458,7 +460,7 @@ class ConsulNodeDiscoveryTest {
         co.setServicePort(8080);
         co.setModifyIndex(1);
 
-        ObjectMapper objectMapper = new ObjectMapper();
+        ObjectMapper objectMapper = new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
         HttpResponse<String> serviceByNameResponse = mock(HttpResponse.class);
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
@@ -508,7 +510,7 @@ class ConsulNodeDiscoveryTest {
         co.setServicePort(8080);
         co.setModifyIndex(1);
 
-        ObjectMapper objectMapper = new ObjectMapper();
+        ObjectMapper objectMapper = new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
         HttpResponse<String> serviceByNameResponse = mock(HttpResponse.class);
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
@@ -543,7 +545,7 @@ class ConsulNodeDiscoveryTest {
         co.setServicePort(8080);
         co.setModifyIndex(1);
 
-        ObjectMapper objectMapper = new ObjectMapper();
+        ObjectMapper objectMapper = new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
         HttpResponse<String> serviceByNameResponse = mock(HttpResponse.class);
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
@@ -580,7 +582,7 @@ class ConsulNodeDiscoveryTest {
         co.setServicePort(8080);
         co.setModifyIndex(1);
 
-        ObjectMapper objectMapper = new ObjectMapper();
+        ObjectMapper objectMapper = new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
         HttpResponse<String> serviceByNameResponse = mock(HttpResponse.class);
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
@@ -616,7 +618,7 @@ class ConsulNodeDiscoveryTest {
         co.setServicePort(8080);
         co.setModifyIndex(1);
 
-        ObjectMapper objectMapper = new ObjectMapper();
+        ObjectMapper objectMapper = new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
         HttpResponse<String> serviceByNameResponse = mock(HttpResponse.class);
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
@@ -678,7 +680,7 @@ class ConsulNodeDiscoveryTest {
         co2.setServicePort(8080);
         co2.setModifyIndex(2);
 
-        ObjectMapper objectMapper = new ObjectMapper();
+        ObjectMapper objectMapper = new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
 
         HttpResponse<String> serviceByNameResponse1 = mock(HttpResponse.class);
         when(serviceByNameResponse1.body()).thenReturn(objectMapper.writeValueAsString(List.of(co1)));
@@ -737,7 +739,7 @@ class ConsulNodeDiscoveryTest {
         co.setServicePort(8080);
         co.setModifyIndex(1);
 
-        ObjectMapper objectMapper = new ObjectMapper();
+        ObjectMapper objectMapper = new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
         HttpResponse<String> serviceByNameResponse = mock(HttpResponse.class);
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
@@ -786,7 +788,7 @@ class ConsulNodeDiscoveryTest {
         co.setServicePort(8080);
         co.setModifyIndex(1);
 
-        ObjectMapper objectMapper = new ObjectMapper();
+        ObjectMapper objectMapper = new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
         HttpResponse<String> serviceByNameResponse = mock(HttpResponse.class);
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
@@ -832,7 +834,7 @@ class ConsulNodeDiscoveryTest {
         co.setServicePort(8080);
         co.setModifyIndex(1);
 
-        ObjectMapper objectMapper = new ObjectMapper();
+        ObjectMapper objectMapper = new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
         HttpResponse<String> serviceByNameResponse = mock(HttpResponse.class);
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
@@ -882,7 +884,7 @@ class ConsulNodeDiscoveryTest {
         co.setServicePort(8080);
         co.setModifyIndex(1);
 
-        ObjectMapper objectMapper = new ObjectMapper();
+        ObjectMapper objectMapper = new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
         HttpResponse<String> serviceByNameResponse = mock(HttpResponse.class);
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
@@ -935,7 +937,7 @@ class ConsulNodeDiscoveryTest {
         co.setServicePort(8080);
         co.setModifyIndex(1);
 
-        ObjectMapper objectMapper = new ObjectMapper();
+        ObjectMapper objectMapper = new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
         HttpResponse<String> serviceByNameResponse = mock(HttpResponse.class);
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
@@ -981,7 +983,7 @@ class ConsulNodeDiscoveryTest {
         co.setServicePort(8080);
         co.setModifyIndex(1);
 
-        ObjectMapper objectMapper = new ObjectMapper();
+        ObjectMapper objectMapper = new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
         HttpResponse<String> serviceByNameResponse = mock(HttpResponse.class);
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
@@ -1031,7 +1033,7 @@ class ConsulNodeDiscoveryTest {
         co.setServicePort(8080);
         co.setModifyIndex(1);
 
-        ObjectMapper objectMapper = new ObjectMapper();
+        ObjectMapper objectMapper = new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
         HttpResponse<String> serviceByNameResponse = mock(HttpResponse.class);
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 
@@ -1078,7 +1080,7 @@ class ConsulNodeDiscoveryTest {
         co.setServicePort(8080);
         co.setModifyIndex(1);
 
-        ObjectMapper objectMapper = new ObjectMapper();
+        ObjectMapper objectMapper = new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
         HttpResponse<String> serviceByNameResponse = mock(HttpResponse.class);
         when(serviceByNameResponse.body()).thenReturn(objectMapper.writeValueAsString(List.of(co)));
 

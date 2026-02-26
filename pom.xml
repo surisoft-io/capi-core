@@ -6,7 +6,7 @@
 
     <groupId>io.surisoft</groupId>
     <artifactId>capi-core</artifactId>
-    <version>1.417.3</version>
+    <version>1.417.4</version>
 
     <properties>
         <maven.compiler.source>23</maven.compiler.source>
