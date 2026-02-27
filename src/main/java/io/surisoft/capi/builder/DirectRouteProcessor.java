@@ -195,7 +195,12 @@ public class DirectRouteProcessor extends RouteBuilder {
     @SuppressWarnings("unchecked")
     static void preserveRequestBody(Exchange exchange) {
         Object body = exchange.getIn().getBody();
-        if (body instanceof Map) {
+        String contentType = exchange.getIn().getHeader(Exchange.CONTENT_TYPE, String.class);
+        // Only re-encode form-urlencoded bodies parsed by Undertow's EagerFormParsingHandler.
+        // Multipart bodies must pass through untouched to preserve file parts.
+        if (body instanceof Map
+                && contentType != null
+                && contentType.toLowerCase().contains("application/x-www-form-urlencoded")) {
             Map<String, Object> formData = (Map<String, Object>) body;
             StringBuilder sb = new StringBuilder();
             formData.forEach((key, value) -> {

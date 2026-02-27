@@ -62,13 +62,13 @@ public class CAPIMain {
             //Initialize Logging
             initializeLogs(capiConfiguration);
         } catch (IOException e) {
-            //log.error(e.getMessage(), e);
+            log.error(e.getMessage(), e);
             throw new RuntimeException("Failed to load CAPI Configuration File");
         }
 
         log.info("Starting CAPI Camel Context");
+        System.setProperty("camel.threads.virtual.enabled", "true");
         CamelContext camelContext = new DefaultCamelContext();
-        camelContext.getGlobalOptions().put("CamelVirtualThreadEnabled", "true");
         camelContext.setStreamCaching(true);
 
         Startup startup = new Startup(capiConfiguration, camelContext);

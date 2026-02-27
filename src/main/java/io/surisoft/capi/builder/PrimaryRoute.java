@@ -104,10 +104,14 @@ public class PrimaryRoute extends RouteBuilder {
                     } else {
                         exchange.getIn().setHeader("CamelHttpPath", remainingPath.toString());
                         exchange.setProperty("CamelRecipientListEndpoint", "direct:" + routeId);
-                        // Undertow's EagerFormParsingHandler converts form-encoded bodies to HashMap.
+                        // Undertow's EagerFormParsingHandler converts form-urlencoded bodies to HashMap.
                         // Re-encode as bytes so the HttpProducer can forward them.
+                        // Only do this for form-urlencoded; multipart bodies must pass through untouched.
                         Object body = exchange.getIn().getBody();
-                        if (body instanceof Map<?, ?> formData) {
+                        String contentType = exchange.getIn().getHeader(Exchange.CONTENT_TYPE, String.class);
+                        if (body instanceof Map<?, ?> formData
+                                && contentType != null
+                                && contentType.toLowerCase().contains("application/x-www-form-urlencoded")) {
                             StringBuilder sb = new StringBuilder();
                             formData.forEach((key, value) -> {
                                 if (!sb.isEmpty()) sb.append("&");
