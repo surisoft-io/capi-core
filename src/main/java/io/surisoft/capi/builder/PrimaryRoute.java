@@ -2,7 +2,6 @@ package io.surisoft.capi.builder;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.surisoft.capi.service.CapiAccessLogReceiver;
 import io.surisoft.capi.service.ConsulNodeDiscovery;
 import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.utils.Constants;
@@ -15,8 +14,6 @@ import org.apache.camel.builder.RouteBuilder;
 import org.apache.camel.util.json.JsonObject;
 import org.cache2k.Cache;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -104,23 +101,6 @@ public class PrimaryRoute extends RouteBuilder {
                     } else {
                         exchange.getIn().setHeader("CamelHttpPath", remainingPath.toString());
                         exchange.setProperty("CamelRecipientListEndpoint", "direct:" + routeId);
-                        // Undertow's EagerFormParsingHandler converts form-urlencoded bodies to HashMap.
-                        // Re-encode as bytes so the HttpProducer can forward them.
-                        // Only do this for form-urlencoded; multipart bodies must pass through untouched.
-                        Object body = exchange.getIn().getBody();
-                        String contentType = exchange.getIn().getHeader(Exchange.CONTENT_TYPE, String.class);
-                        if (body instanceof Map<?, ?> formData
-                                && contentType != null
-                                && contentType.toLowerCase().contains("application/x-www-form-urlencoded")) {
-                            StringBuilder sb = new StringBuilder();
-                            formData.forEach((key, value) -> {
-                                if (!sb.isEmpty()) sb.append("&");
-                                sb.append(URLEncoder.encode(String.valueOf(key), StandardCharsets.UTF_8));
-                                sb.append("=");
-                                sb.append(URLEncoder.encode(String.valueOf(value), StandardCharsets.UTF_8));
-                            });
-                            exchange.getIn().setBody(sb.toString().getBytes(StandardCharsets.UTF_8));
-                        }
                     }
                 })
                 .choice()
