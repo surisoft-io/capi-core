@@ -6,16 +6,24 @@ import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.service.OpaService;
 import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.RouteUtils;
+import jakarta.activation.DataHandler;
 import org.apache.camel.CamelContext;
 import org.apache.camel.Exchange;
 import org.apache.camel.builder.RouteBuilder;
 import org.apache.camel.model.RouteDefinition;
 import org.apache.hc.client5.http.ConnectTimeoutException;
+import org.apache.hc.client5.http.entity.mime.MultipartEntityBuilder;
+import org.apache.hc.core5.http.ContentType;
+import org.apache.hc.core5.http.HttpEntity;
 import org.apache.hc.core5.http.NoHttpResponseException;
 import org.cache2k.Cache;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.net.ssl.SSLHandshakeException;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.net.SocketException;
 import java.net.URLEncoder;
 import java.net.UnknownHostException;
@@ -24,6 +32,7 @@ import java.util.Map;
 
 public class DirectRouteProcessor extends RouteBuilder {
 
+    private static final Logger LOG = LoggerFactory.getLogger(DirectRouteProcessor.class);
     private final RouteUtils routeUtils;
     private final Service service;
     private final String routeId;
@@ -196,11 +205,11 @@ public class DirectRouteProcessor extends RouteBuilder {
     static void preserveRequestBody(Exchange exchange) {
         Object body = exchange.getIn().getBody();
         String contentType = exchange.getIn().getHeader(Exchange.CONTENT_TYPE, String.class);
-        // Only re-encode form-urlencoded bodies parsed by Undertow's EagerFormParsingHandler.
-        // Multipart bodies must pass through untouched to preserve file parts.
-        if (body instanceof Map
-                && contentType != null
-                && contentType.toLowerCase().contains("application/x-www-form-urlencoded")) {
+        String ct = contentType != null ? contentType.toLowerCase() : "";
+
+        if (body instanceof Map && ct.contains("application/x-www-form-urlencoded")) {
+            // Undertow's EagerFormParsingHandler converted form-urlencoded body to HashMap.
+            // Re-encode back to URL-encoded bytes for the backend.
             Map<String, Object> formData = (Map<String, Object>) body;
             StringBuilder sb = new StringBuilder();
             formData.forEach((key, value) -> {
@@ -212,6 +221,47 @@ public class DirectRouteProcessor extends RouteBuilder {
             byte[] encoded = sb.toString().getBytes(StandardCharsets.UTF_8);
             exchange.getIn().setBody(encoded);
             exchange.setProperty("CAPIOriginalRequestBody", encoded);
+        } else if (body instanceof Map && ct.contains("multipart/form-data")) {
+            // Undertow's EagerFormParsingHandler converted multipart body to HashMap.
+            // Reconstruct a proper multipart body using MultipartEntityBuilder.
+            // File parts are stored as DataHandler objects, text fields as Strings.
+            //
+            // IMPORTANT: The body MUST be set as an HttpEntity (not bytes or InputStream).
+            // Camel's HttpProducer handles HttpEntity directly (bypassing ContentType.parse
+            // which strips the multipart boundary parameter, breaking the request).
+            Map<String, Object> formData = (Map<String, Object>) body;
+            try {
+                MultipartEntityBuilder builder = MultipartEntityBuilder.create();
+                formData.forEach((key, value) -> {
+                    if (value instanceof DataHandler dh) {
+                        try {
+                            ContentType partContentType = dh.getContentType() != null
+                                    ? ContentType.parse(dh.getContentType())
+                                    : ContentType.APPLICATION_OCTET_STREAM;
+                            builder.addBinaryBody(key, dh.getInputStream(), partContentType, dh.getName());
+                        } catch (IOException e) {
+                            LOG.error("Failed to read multipart file part: {}", key, e);
+                        }
+                    } else {
+                        builder.addTextBody(key, String.valueOf(value));
+                    }
+                });
+                HttpEntity entity = builder.build();
+                // Serialize to bytes for restore (needed for failover retries)
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                entity.writeTo(baos);
+                byte[] encoded = baos.toByteArray();
+                String multipartContentType = entity.getContentType();
+                exchange.setProperty("CAPIOriginalRequestBody", encoded);
+                exchange.setProperty("CAPIMultipartContentType", multipartContentType);
+                // Set body as HttpEntity so HttpProducer uses it directly
+                exchange.getIn().setBody(
+                        new org.apache.hc.core5.http.io.entity.ByteArrayEntity(encoded,
+                                ContentType.parse(multipartContentType)));
+                exchange.getIn().setHeader(Exchange.CONTENT_TYPE, multipartContentType);
+            } catch (IOException e) {
+                LOG.error("Failed to reconstruct multipart body", e);
+            }
         } else {
             byte[] bytes = exchange.getIn().getBody(byte[].class);
             exchange.setProperty("CAPIOriginalRequestBody", bytes);
@@ -224,7 +274,16 @@ public class DirectRouteProcessor extends RouteBuilder {
     static void restoreRequestBody(Exchange exchange) {
         byte[] saved = exchange.getProperty("CAPIOriginalRequestBody", byte[].class);
         if (saved != null) {
-            exchange.getIn().setBody(new ByteArrayInputStream(saved));
+            String multipartContentType = exchange.getProperty("CAPIMultipartContentType", String.class);
+            if (multipartContentType != null) {
+                // Restore as HttpEntity to preserve multipart boundary in Content-Type
+                exchange.getIn().setBody(
+                        new org.apache.hc.core5.http.io.entity.ByteArrayEntity(saved,
+                                ContentType.parse(multipartContentType)));
+                exchange.getIn().setHeader(Exchange.CONTENT_TYPE, multipartContentType);
+            } else {
+                exchange.getIn().setBody(new ByteArrayInputStream(saved));
+            }
         }
     }
 }
