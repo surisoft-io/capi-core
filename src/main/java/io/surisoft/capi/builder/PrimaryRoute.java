@@ -2,6 +2,7 @@ package io.surisoft.capi.builder;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.surisoft.capi.service.CamelProxyPeerAddressHandler;
 import io.surisoft.capi.service.ConsulNodeDiscovery;
 import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.utils.Constants;
@@ -62,6 +63,14 @@ public class PrimaryRoute extends RouteBuilder {
                 .otherwise()
                 .process(exchange -> {
                     processControlledHeaders(exchange);
+                    // Restore the original Content-Type that was hidden from
+                    // EagerFormParsingHandler by CamelProxyPeerAddressHandler.
+                    String originalContentType = exchange.getIn().getHeader(
+                            CamelProxyPeerAddressHandler.ORIGINAL_CONTENT_TYPE_HEADER, String.class);
+                    if (originalContentType != null) {
+                        exchange.getIn().setHeader(Exchange.CONTENT_TYPE, originalContentType);
+                        exchange.getIn().removeHeader(CamelProxyPeerAddressHandler.ORIGINAL_CONTENT_TYPE_HEADER);
+                    }
                     String path = exchange.getIn().getHeader(Exchange.HTTP_PATH, String.class);
                     String method = exchange.getIn().getHeader(Exchange.HTTP_METHOD, String.class).toLowerCase();
 
