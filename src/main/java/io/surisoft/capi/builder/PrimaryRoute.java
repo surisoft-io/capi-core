@@ -139,7 +139,16 @@ public class PrimaryRoute extends RouteBuilder {
             String path = exchange.getIn().getHeader(Exchange.HTTP_URI, String.class);
             boolean capiConsumer = path.startsWith(capiRestPath);
             String origin = "";
-            if(exchange.getIn().getHeader(Constants.ORIGIN_HEADER, String.class) != null) {
+            // Read Origin from the collision-safe header set by CamelProxyPeerAddressHandler.
+            // Camel merges query parameters into headers, so ?origin=foo would overwrite
+            // the real Origin HTTP header. The fallback handles the case where the
+            // handler didn't set it (e.g. no Origin header on the request).
+            String realOrigin = exchange.getIn().getHeader(
+                    CamelProxyPeerAddressHandler.REAL_ORIGIN_HEADER, String.class);
+            if(realOrigin != null && !realOrigin.equals("null")) {
+                origin = realOrigin;
+                exchange.getIn().removeHeader(CamelProxyPeerAddressHandler.REAL_ORIGIN_HEADER);
+            } else if(exchange.getIn().getHeader(Constants.ORIGIN_HEADER, String.class) != null) {
                 if(!exchange.getIn().getHeader(Constants.ORIGIN_HEADER, String.class).equals("null")) {
                     origin = exchange.getIn().getHeader(Constants.ORIGIN_HEADER, String.class);
                 }
