@@ -31,6 +31,13 @@ public class CamelProxyPeerAddressHandler implements CamelUndertowHttpHandler {
      */
     public static final String ORIGINAL_CONTENT_TYPE_HEADER = "X-CAPI-Original-Content-Type";
 
+    /**
+     * Header carrying the real HTTP Origin, safe from query parameter collisions.
+     * Camel merges query parameters into the same header map as HTTP headers, so
+     * a query parameter {@code ?origin=foo} overwrites the {@code Origin} header.
+     */
+    public static final String REAL_ORIGIN_HEADER = "X-CAPI-Real-Origin";
+
     private HttpHandler next;
 
     @Override
@@ -64,6 +71,15 @@ public class CamelProxyPeerAddressHandler implements CamelUndertowHttpHandler {
             if (!host.isEmpty()) {
                 exchange.getRequestHeaders().put(Headers.HOST, host);
             }
+        }
+
+        // Preserve the real Origin HTTP header before Camel merges it with query parameters.
+        // A query parameter like ?origin=foo would overwrite the Origin header in Camel's
+        // header map, breaking CORS preflight responses.
+        String origin = exchange.getRequestHeaders().getFirst(HttpString.tryFromString("Origin"));
+        if (origin != null) {
+            exchange.getRequestHeaders().put(
+                    HttpString.tryFromString(REAL_ORIGIN_HEADER), origin);
         }
 
         // Hide Content-Type from EagerFormParsingHandler for form/multipart requests.
