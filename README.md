@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/capi-logo-inverted.svg" alt="CAPI" width="20%"/>
+  <img src="docs/capi-logo-white.svg" alt="CAPI" width="20%"/>
 </p>
 
 [![CAPI](https://github.com/surisoft-io/capi-core/actions/workflows/main.yaml/badge.svg)](https://github.com/surisoft-io/capi-core/actions/workflows/main.yml)
