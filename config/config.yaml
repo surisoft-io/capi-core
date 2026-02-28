@@ -21,7 +21,7 @@ capi:
     contextPath: /capi/*
   grpc:
     enabled: false
-    port: 8390
+    port: 8384
   ssl:
     enabled: false
     keyStoreType: PKCS12

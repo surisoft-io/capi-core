@@ -106,7 +106,7 @@ See [`helm/capi-core/values.yaml`](helm/capi-core/values.yaml) for all available
 | 8381 | Admin / metrics | `capi.adminPort` |
 | 8382 | WebSocket gateway | `capi.websocket.port` |
 | 8383 | MCP Gateway (experimental) | `capi.mcp.port` |
-| 8390 | gRPC Gateway (experimental) | `capi.grpc.port` |
+| 8384 | gRPC Gateway (experimental) | `capi.grpc.port` |
 
 ## Running Modes
 

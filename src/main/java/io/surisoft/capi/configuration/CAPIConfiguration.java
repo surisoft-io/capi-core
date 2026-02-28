@@ -579,7 +579,7 @@ public class CAPIConfiguration {
 
     public static class Grpc {
         private boolean enabled;
-        private int port = 8390;
+        private int port = 8384;
 
         public boolean isEnabled() {
             return enabled;

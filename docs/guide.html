@@ -7,16 +7,16 @@
   <meta name="description" content="CAPI Gateway documentation — Consul metadata, security, MCP gateway, admin API, and configuration guides.">
   <style>
     :root {
-      --primary: #0f2b46;
-      --primary-light: #163d5e;
-      --accent: #00b4d8;
-      --accent-dark: #0096b7;
-      --surface: #f8fafc;
-      --surface-alt: #eef2f7;
-      --text: #1e293b;
-      --text-muted: #64748b;
+      --primary: #111111;
+      --primary-light: #222222;
+      --accent: #000000;
+      --accent-dark: #333333;
+      --surface: #f5f5f5;
+      --surface-alt: #e8e8e8;
+      --text: #111111;
+      --text-muted: #666666;
       --white: #ffffff;
-      --border: #e2e8f0;
+      --border: #d4d4d4;
       --radius: 10px;
       --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.04);
       --shadow-lg: 0 4px 24px rgba(0,0,0,0.10);
@@ -33,7 +33,7 @@
     /* --- Nav --- */
     nav {
       position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-      background: rgba(15,43,70,0.97);
+      background: rgba(17,17,17,0.97);
       backdrop-filter: blur(8px);
       border-bottom: 1px solid rgba(255,255,255,0.06);
     }
@@ -47,7 +47,7 @@
       font-size: 1.25rem; font-weight: 700; color: var(--white); text-decoration: none; letter-spacing: -0.5px;
     }
     .nav-logo img { height: 32px; width: auto; }
-    .nav-logo span { color: var(--accent); }
+    .nav-logo span { color: #cccccc; }
     .nav-links { display: flex; gap: 28px; list-style: none; }
     .nav-links a {
       color: rgba(255,255,255,0.75); text-decoration: none; font-size: 0.9rem; font-weight: 500;
@@ -103,10 +103,10 @@
       font-weight: 500;
       transition: background 0.15s, color 0.15s;
     }
-    .sidebar a:hover { background: var(--surface-alt); color: var(--accent-dark); }
+    .sidebar a:hover { background: var(--surface-alt); color: var(--text); }
     .sidebar a.active {
-      background: var(--accent);
-      color: var(--primary);
+      background: #111111;
+      color: #ffffff;
       font-weight: 600;
     }
 
@@ -147,7 +147,7 @@
     }
     .docs-index-card:hover {
       box-shadow: var(--shadow-lg);
-      border-color: var(--accent);
+      border-color: #333333;
     }
     .docs-index-card h3 {
       font-size: 1.05rem;
@@ -166,8 +166,8 @@
     .doc-content h3 { font-size: 1.15rem; font-weight: 700; margin: 32px 0 8px; }
     .doc-content h4 { font-size: 1rem; font-weight: 600; margin: 24px 0 8px; }
     .doc-content p { margin: 0 0 16px; line-height: 1.7; }
-    .doc-content a { color: var(--accent-dark); text-decoration: underline; }
-    .doc-content a:hover { color: var(--accent); }
+    .doc-content a { color: #333333; text-decoration: underline; }
+    .doc-content a:hover { color: #000000; }
     .doc-content ul, .doc-content ol { margin: 0 0 16px 24px; }
     .doc-content li { margin-bottom: 6px; line-height: 1.6; }
     .doc-content code {
@@ -210,7 +210,7 @@
       font-weight: 600;
     }
     .doc-content blockquote {
-      border-left: 4px solid var(--accent);
+      border-left: 4px solid #333333;
       padding: 12px 20px;
       margin: 0 0 16px;
       background: var(--surface);
@@ -238,7 +238,7 @@
     }
     .error-message p { color: var(--text-muted); }
     .error-message a {
-      color: var(--accent-dark);
+      color: #333333;
       text-decoration: underline;
     }
 
@@ -247,7 +247,7 @@
       background: var(--primary); color: rgba(255,255,255,0.5);
       text-align: center; padding: 28px 24px; font-size: 0.85rem;
     }
-    footer a { color: var(--accent); text-decoration: none; }
+    footer a { color: #cccccc; text-decoration: none; }
 
     /* --- Responsive --- */
     @media (max-width: 768px) {
@@ -291,7 +291,7 @@
 <!-- Nav -->
 <nav>
   <div class="nav-inner">
-    <a href="index.html" class="nav-logo"><img src="https://capi.surisoft.io/capi-4.4.04.png" alt="CAPI Logo">CAPI <span>Gateway</span></a>
+    <a href="index.html" class="nav-logo"><img src="capi-logo-white.svg" alt="CAPI Logo">CAPI <span>Gateway</span></a>
     <ul class="nav-links">
       <li><a href="index.html">Home</a></li>
       <li><a href="guide.html" class="active">Docs</a></li>
