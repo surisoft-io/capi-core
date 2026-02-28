@@ -31,6 +31,10 @@ capi:
     listeningAddress: 0.0.0.0
     contextPath: /api/*
 
+  grpc:
+    enabled: false
+    port: 8384
+
   ssl:
     enabled: false
     keyStoreType: PKCS12
@@ -135,6 +139,15 @@ capi:
 | `websocket.listeningAddress` | `0.0.0.0` | Bind address. |
 | `websocket.contextPath` | `/api/*` | Path pattern for WebSocket routes. |
 
+### gRPC
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `grpc.enabled` | `false` | Enable the gRPC Gateway (HTTP/2 reverse proxy). |
+| `grpc.port` | `8384` | Listening port. |
+
+See [gRPC Gateway](grpc-gateway.md) for details on header-based routing and service registration.
+
 ### SSL
 
 | Field | Default | Description |
@@ -234,6 +247,8 @@ Per-service throttle settings are configured via Consul metadata. See [Service R
 | 8380 | REST gateway | `capi.rest.port` |
 | 8381 | Admin API | `capi.adminPort` |
 | 8382 | WebSocket/SSE gateway | `capi.websocket.port` |
+| 8383 | MCP Gateway | `capi.mcp.port` |
+| 8384 | gRPC Gateway | `capi.grpc.port` |
 
 ## Reverse Proxy Headers
 
