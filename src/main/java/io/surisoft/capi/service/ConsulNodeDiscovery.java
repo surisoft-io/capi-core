@@ -11,6 +11,7 @@ import io.surisoft.capi.processor.ServiceCapiInstanceMapper;
 import io.surisoft.capi.processor.ThrottleProcessor;
 import io.surisoft.capi.schema.*;
 import io.surisoft.capi.utils.*;
+import io.surisoft.capi.schema.GrpcClient;
 import jakarta.annotation.Nullable;
 import org.apache.camel.CamelContext;
 import org.apache.camel.Route;
@@ -52,8 +53,10 @@ public class ConsulNodeDiscovery {
     private String capiRunningMode;
 
     private WebsocketUtils websocketUtils;
+    private GrpcUtils grpcUtils;
 
     private Map<String, WebsocketClient> websocketClientMap;
+    private Map<String, GrpcClient> grpcClientMap;
 
     private MetricsProcessor metricsProcessor;
     private ThrottleProcessor throttleProcessor;
@@ -449,6 +452,11 @@ public class ConsulNodeDiscovery {
                 if(websocketClient != null && websocketClientMap != null) {
                     websocketClientMap.put(websocketClient.getServiceId(), websocketClient);
                 }
+            } else if(incomingService.getServiceMeta().getType().equalsIgnoreCase(Constants.GRPC_TYPE) && grpcUtils != null) {
+                GrpcClient grpcClient = grpcUtils.createGrpcClient(incomingService);
+                if(grpcClient != null && grpcClientMap != null) {
+                    grpcClientMap.put(grpcClient.getServiceId(), grpcClient);
+                }
             } else if(capiContext != null && capiRunningMode.equalsIgnoreCase(Constants.FULL_TYPE) && (incomingService.getServiceMeta().getType() == null || incomingService.getServiceMeta().getType().equals("rest"))) {
                 List<String> apiRouteIdList = routeUtils.getAllRouteIdForAGivenService(incomingService);
                 for(String routeId : apiRouteIdList) {
@@ -514,5 +522,13 @@ public class ConsulNodeDiscovery {
 
     public void setCapiInstanceNamespace(String capiInstanceName) {
         this.capiInstanceName = capiInstanceName;
+    }
+
+    public void setGrpcUtils(GrpcUtils grpcUtils) {
+        this.grpcUtils = grpcUtils;
+    }
+
+    public void setGrpcClientMap(Map<String, GrpcClient> grpcClientMap) {
+        this.grpcClientMap = grpcClientMap;
     }
 }

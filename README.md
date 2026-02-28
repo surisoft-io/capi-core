@@ -1,15 +1,15 @@
-<img src="https://capi.surisoft.io/capi-4.4.04.png" alt="CAPI" width="20%"/>
+<p align="center">
+  <img src="docs/capi-logo-standard.svg" alt="CAPI" width="20%"/>
+</p>
 
 [![CAPI](https://github.com/surisoft-io/capi-core/actions/workflows/main.yaml/badge.svg)](https://github.com/surisoft-io/capi-core/actions/workflows/main.yml)
-[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=surisoft-io_capi-core&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=surisoft-io_capi-core)
-[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=surisoft-io_capi-core&metric=coverage)](https://sonarcloud.io/summary/new_code?id=surisoft-io_capi-core)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 ![Docker Image Version (latest by date)](https://img.shields.io/docker/v/surisoft/capi-core)
 
 <h5 align="center">
   <br>
   <a href="https://github.com/surisoft-io/capi-core/issues/new?assignees=&labels=use+case&template=use_case.md&title=%5BUSECASE%5D+">
-    <img src="https://dummyimage.com/1000x80/15273c/ffffff.png&text=If+you+are+using+CAPI,+please+let+us+know+by+clicking+here" alt="Share your use case with us">
+    <img src="https://dummyimage.com/1000x80/000000/ffffff.png&text=If+you+are+using+CAPI,+please+let+us+know+by+clicking+here" alt="Share your use case with us">
   </a>
   <br>
 </h5>
@@ -36,6 +36,7 @@ CAPI is a lightweight API Gateway and load balancer powered by Apache Camel dyna
 * Multi-instance support (route targeting per CAPI instance)
 * Reverse proxy headers (`X-Forwarded-*`)
 * **[Experimental]** MCP Gateway — expose services as MCP tools for LLM agents (JSON-RPC 2.0 over Streamable HTTP)
+* **[Experimental]** gRPC Gateway — transparent HTTP/2 reverse proxy for gRPC services with header-based routing
 
 ## REST-to-MCP Bridging
 
@@ -105,6 +106,7 @@ See [`helm/capi-core/values.yaml`](helm/capi-core/values.yaml) for all available
 | 8381 | Admin / metrics | `capi.adminPort` |
 | 8382 | WebSocket gateway | `capi.websocket.port` |
 | 8383 | MCP Gateway (experimental) | `capi.mcp.port` |
+| 8390 | gRPC Gateway (experimental) | `capi.grpc.port` |
 
 ## Running Modes
 
@@ -125,3 +127,4 @@ The `runningMode` field controls which types of services CAPI will proxy:
 | [Admin API](docs/admin-api.md) | Admin endpoints reference (health, metrics, routes, OpenAPI) |
 | [Configuration Reference](docs/configuration.md) | Complete YAML configuration reference with all fields |
 | [MCP Gateway (Experimental)](docs/mcp-gateway.md) | MCP Gateway for LLM tool integration via JSON-RPC 2.0 |
+| [gRPC Gateway (Experimental)](docs/grpc-gateway.md) | Transparent gRPC reverse proxy with header-based routing |

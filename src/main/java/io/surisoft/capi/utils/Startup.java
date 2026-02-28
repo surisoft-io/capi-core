@@ -10,6 +10,7 @@ import io.surisoft.capi.configuration.*;
 import io.surisoft.capi.oidc.Oauth2Provider;
 import io.surisoft.capi.processor.*;
 import io.surisoft.capi.schema.ConsulKeyStoreEntry;
+import io.surisoft.capi.schema.GrpcClient;
 import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.schema.WebsocketClient;
 import io.surisoft.capi.service.*;
@@ -68,7 +69,10 @@ public class Startup {
     private OpaService opaService;
     @Nullable
     private WebsocketUtils websocketUtils;
+    @Nullable
+    private GrpcUtils grpcUtils;
     private Map<String, WebsocketClient> webSocketClientMap = new java.util.concurrent.ConcurrentHashMap<>();
+    private Map<String, GrpcClient> grpcClientMap = new java.util.concurrent.ConcurrentHashMap<>();
     @Nullable
     private SSLContext undertowSslContext;
     @Nullable
@@ -106,6 +110,7 @@ public class Startup {
         startHttpUtils();
         startTraceService();
         startWebsocketUtils();
+        startGrpcUtils();
         createRouteProcessors();
         startRouteUtils();
         startServiceUtils();
@@ -171,6 +176,16 @@ public class Startup {
         }
     }
 
+    private void startGrpcUtils() {
+        if(configuration.getGrpc() != null && configuration.getGrpc().isEnabled()) {
+            boolean trustStoreEnabled = configuration.getTrustStore() != null && configuration.getTrustStore().isEnabled();
+            String trustStorePath = trustStoreEnabled ? configuration.getTrustStore().getPath() : null;
+            String trustStorePassword = trustStoreEnabled ? configuration.getTrustStore().getPassword() : null;
+            String trustStoreEncoded = trustStoreEnabled ? configuration.getTrustStore().getEncoded() : null;
+            grpcUtils = new GrpcUtils(trustStoreEnabled, trustStorePath, trustStorePassword, trustStoreEncoded);
+        }
+    }
+
     private void startConsulStore() {
         if(configuration.getConsulStore().isEnabled() && configuration.getTrustStore().isEnabled()) {
             consulStore = new ConsulStore(consulStoreCache, routeUtils, configuration.getConsulStore().getEndpoint(), configuration.getConsulStore().getToken(), configuration.getTrustStore().getPassword(), capiSslContextHolder, camelContext, consulHttpClient);
@@ -208,6 +223,11 @@ public class Startup {
 
         if(websocketUtils != null) {
             consulNodeDiscovery.setWebsocketClientMap(webSocketClientMap);
+        }
+
+        if(grpcUtils != null) {
+            consulNodeDiscovery.setGrpcUtils(grpcUtils);
+            consulNodeDiscovery.setGrpcClientMap(grpcClientMap);
         }
     }
 
@@ -356,8 +376,16 @@ public class Startup {
         return websocketUtils;
     }
 
+    public @Nullable GrpcUtils getGrpcUtils() {
+        return grpcUtils;
+    }
+
     public Map<String, WebsocketClient> getWebSocketClientMap() {
         return webSocketClientMap;
+    }
+
+    public Map<String, GrpcClient> getGrpcClientMap() {
+        return grpcClientMap;
     }
 
     public @Nullable SSLContext getUndertowSslContext() {

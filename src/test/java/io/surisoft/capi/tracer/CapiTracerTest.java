@@ -343,12 +343,13 @@ class CapiTracerTest {
     // ---------------------------------------------------------------
 
     @Test
-    void init_whenServiceAlreadyAdded_doesNotAddAgain() {
+    void init_whenServiceAlreadyAdded_doesNotAddAgain() throws Exception {
         when(camelContext.hasService(CapiTracer.class)).thenReturn(null);
         when(camelContext.hasService(capiTracer)).thenReturn(true);
 
-        // Should not throw and should not try to add the service
         capiTracer.init(camelContext);
+
+        verify(camelContext, never()).addService(eq(capiTracer), anyBoolean(), anyBoolean());
     }
 
     @Test

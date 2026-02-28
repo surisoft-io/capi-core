@@ -232,11 +232,13 @@ class WebsocketGatewayTest {
 
         Method processOrigin = WebsocketGateway.class.getDeclaredMethod("processOrigin", HttpServerExchange.class, String.class);
         processOrigin.setAccessible(true);
-        // URL with trailing path that parses but contains \n
         processOrigin.invoke(gateway, exchange, "http://example.com\n");
 
-        // isValidOrigin may return false for URL with newline, so header might not be set
-        // This tests the sanitization branch
+        // The newline should be stripped from the header value
+        String value = responseHeaders.getFirst(HttpString.tryFromString(Constants.ACCESS_CONTROL_ALLOW_ORIGIN));
+        assertNotNull(value);
+        assertFalse(value.contains("\n"));
+        assertEquals("http://example.com", value);
     }
 
     @Test

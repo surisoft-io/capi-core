@@ -19,6 +19,9 @@ capi:
     port: 8382
     listeningAddress: 0.0.0.0
     contextPath: /capi/*
+  grpc:
+    enabled: false
+    port: 8390
   ssl:
     enabled: false
     keyStoreType: PKCS12

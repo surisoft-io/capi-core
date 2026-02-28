@@ -94,6 +94,7 @@ public class Constants {
     public static final String CAPI_GROUP_HEADER = "Capi-Group";
     public static final String WEBSOCKET_TYPE = "websocket";
     public static final String SSE_TYPE = "sse";
+    public static final String GRPC_TYPE = "grpc";
     public static final String FULL_TYPE = "full";
     public static final String ACCESS_CONTROL_ALLOW_ORIGIN = "Access-Control-Allow-Origin";
     public static final String ACCESS_CONTROL_ALLOW_CREDENTIALS = "Access-Control-Allow-Credentials";
@@ -145,6 +146,9 @@ public class Constants {
     public static final String MCP_META_CATEGORY = "mcp-category";
     public static final String MCP_META_TIMEOUT = "mcp-timeout";
     public static final String MCP_META_TYPE = "mcp-type";
+
+    // gRPC Gateway
+    public static final String GRPC_SERVICE_HEADER = "x-capi-service";
 
     // JSON-RPC error codes
     public static final int JSONRPC_PARSE_ERROR = -32700;

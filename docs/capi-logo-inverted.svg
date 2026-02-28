@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-180 -180 360 360" fill="none">
+  <!-- CAPI Gateway Logo — Inverted -->
+  <rect x="-120" y="-120" width="240" height="240" rx="30" transform="rotate(45 0 0)" fill="#000"/>
+  <path d="M 42 -66 L -8 -66 Q -63 -66 -63 -11 L -63 11 Q -63 66 -8 66 L 42 66" stroke="#fff" stroke-width="13" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <circle cx="42" cy="-66" r="16" fill="#fff"/>
+  <circle cx="42" cy="-66" r="6.5" fill="#000"/>
+  <circle cx="42" cy="66" r="16" fill="#fff"/>
+  <circle cx="42" cy="66" r="6.5" fill="#000"/>
+</svg>

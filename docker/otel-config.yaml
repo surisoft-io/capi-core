@@ -5,14 +5,14 @@ receivers:
         endpoint: 0.0.0.0:4317
       http:
         endpoint: 0.0.0.0:4318
-  tcplog:
-    listen_address: 0.0.0.0:5444
-    operators:
-      - id: json_parser
-        type: json_parser
-        parse_from: body
-        parse_to: body
-        if: 'body matches "^\\{.*\\}$"'
+    tcplog:
+      listen_address: 0.0.0.0:5444
+      operators:
+        - id: json_parser
+          type: json_parser
+          parse_from: body
+          parse_to: body
+          if: 'body matches "^\\{.*\\}$"'
 
 processors:
   batch:
