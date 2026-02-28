@@ -7,16 +7,16 @@
   <meta name="description" content="A lightweight API Gateway powered by Apache Camel that discovers services from Consul automatically. No database, no declarative routes — just register and go.">
   <style>
     :root {
-      --primary: #0f2b46;
-      --primary-light: #163d5e;
-      --accent: #00b4d8;
-      --accent-dark: #0096b7;
-      --surface: #f8fafc;
-      --surface-alt: #eef2f7;
-      --text: #1e293b;
-      --text-muted: #64748b;
+      --primary: #111111;
+      --primary-light: #222222;
+      --accent: #000000;
+      --accent-dark: #333333;
+      --surface: #f5f5f5;
+      --surface-alt: #e8e8e8;
+      --text: #111111;
+      --text-muted: #666666;
       --white: #ffffff;
-      --border: #e2e8f0;
+      --border: #d4d4d4;
       --radius: 10px;
       --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.04);
       --shadow-lg: 0 4px 24px rgba(0,0,0,0.10);
@@ -33,7 +33,7 @@
     /* --- Nav --- */
     nav {
       position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-      background: rgba(15,43,70,0.97);
+      background: rgba(17,17,17,0.97);
       backdrop-filter: blur(8px);
       border-bottom: 1px solid rgba(255,255,255,0.06);
     }
@@ -47,7 +47,7 @@
       font-size: 1.25rem; font-weight: 700; color: var(--white); text-decoration: none; letter-spacing: -0.5px;
     }
     .nav-logo img { height: 32px; width: auto; }
-    .nav-logo span { color: var(--accent); }
+    .nav-logo span { color: #cccccc; }
     .nav-links { display: flex; gap: 28px; list-style: none; }
     .nav-links a {
       color: rgba(255,255,255,0.75); text-decoration: none; font-size: 0.9rem; font-weight: 500;
@@ -65,7 +65,7 @@
 
     /* --- Hero --- */
     .hero {
-      background: linear-gradient(160deg, var(--primary) 0%, var(--primary-light) 60%, #1a4971 100%);
+      background: linear-gradient(160deg, var(--primary) 0%, var(--primary-light) 60%, #333333 100%);
       color: var(--white);
       padding: 140px 24px 80px;
       text-align: center;
@@ -75,7 +75,7 @@
       font-weight: 800; letter-spacing: -1px;
       margin-bottom: 16px;
     }
-    .hero h1 span { color: var(--accent); }
+    .hero h1 span { color: #cccccc; }
     .hero p {
       font-size: 1.2rem; color: rgba(255,255,255,0.8);
       max-width: 640px; margin: 0 auto 32px;
@@ -86,8 +86,8 @@
       padding: 12px 28px; border-radius: 8px; font-size: 1rem; font-weight: 600;
       text-decoration: none; transition: all 0.2s; border: none; cursor: pointer;
     }
-    .btn-primary { background: var(--accent); color: var(--primary); }
-    .btn-primary:hover { background: var(--accent-dark); }
+    .btn-primary { background: var(--white); color: var(--primary); }
+    .btn-primary:hover { background: #e0e0e0; }
     .btn-secondary {
       background: transparent; color: var(--white);
       border: 1.5px solid rgba(255,255,255,0.3);
@@ -103,7 +103,7 @@
     .container { max-width: 1120px; margin: 0 auto; }
     .section-label {
       text-transform: uppercase; font-size: 0.8rem; font-weight: 700; letter-spacing: 1.5px;
-      color: var(--accent-dark); margin-bottom: 8px;
+      color: #333333; margin-bottom: 8px;
     }
     .section-title {
       font-size: clamp(1.6rem, 3.5vw, 2.2rem); font-weight: 800;
@@ -137,7 +137,7 @@
       width: 44px; height: 44px; border-radius: 10px;
       display: flex; align-items: center; justify-content: center;
       font-size: 1.3rem; margin-bottom: 16px;
-      background: var(--surface-alt); color: var(--accent-dark);
+      background: var(--surface-alt); color: var(--text);
     }
     .feature-card h3 { font-size: 1.05rem; font-weight: 700; margin-bottom: 6px; }
     .feature-card p { font-size: 0.92rem; color: var(--text-muted); line-height: 1.55; }
@@ -158,16 +158,16 @@
       display: inline-block; font-size: 0.75rem; font-weight: 700; padding: 3px 10px;
       border-radius: 4px; margin-bottom: 12px;
     }
-    .bridging-card .tag-rest { background: #e0f2fe; color: #0369a1; }
-    .bridging-card .tag-mcp { background: #e0f7fa; color: #0096b7; }
+    .bridging-card .tag-rest { background: #e8e8e8; color: #111111; }
+    .bridging-card .tag-mcp { background: #d4d4d4; color: #111111; }
     .bridging-flow {
       background: var(--primary); border-radius: var(--radius); padding: 24px 28px;
       font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 0.82rem;
       line-height: 1.8; color: #e2e8f0; overflow-x: auto; margin-top: 32px;
       white-space: pre;
     }
-    .bridging-flow .label { color: var(--accent); font-weight: 700; }
-    .bridging-flow .dim { color: #64748b; }
+    .bridging-flow .label { color: #ffffff; font-weight: 700; }
+    .bridging-flow .dim { color: #888888; }
 
     /* --- Quickstart --- */
     .quickstart { background: var(--surface); }
@@ -178,8 +178,8 @@
       box-shadow: var(--shadow-lg); position: relative;
       white-space: pre;
     }
-    .code-block .comment { color: #64748b; }
-    .code-block .cmd { color: var(--accent); }
+    .code-block .comment { color: #888888; }
+    .code-block .cmd { color: #ffffff; }
 
     /* --- Compare --- */
     .compare-table {
@@ -201,7 +201,7 @@
 
     /* --- CTA --- */
     .cta {
-      background: linear-gradient(160deg, var(--primary) 0%, var(--primary-light) 100%);
+      background: linear-gradient(160deg, var(--primary) 0%, #333333 100%);
       color: var(--white); text-align: center;
     }
     .cta .section-title { color: var(--white); }
@@ -212,7 +212,7 @@
       background: var(--primary); color: rgba(255,255,255,0.5);
       text-align: center; padding: 28px 24px; font-size: 0.85rem;
     }
-    footer a { color: var(--accent); text-decoration: none; }
+    footer a { color: #cccccc; text-decoration: none; }
 
     /* --- Responsive --- */
     @media (max-width: 640px) {
@@ -229,7 +229,7 @@
 <!-- Nav -->
 <nav>
   <div class="nav-inner">
-    <a href="#" class="nav-logo"><img src="https://capi.surisoft.io/capi-4.4.04.png" alt="CAPI Logo">CAPI <span>Gateway</span></a>
+    <a href="#" class="nav-logo"><img src="capi-logo-standard.svg" alt="CAPI Logo">CAPI <span>Gateway</span></a>
     <ul class="nav-links">
       <li><a href="#how-it-works">How it works</a></li>
       <li><a href="#features">Features</a></li>
@@ -247,7 +247,7 @@
 
 <!-- Hero -->
 <section class="hero">
-  <img src="https://capi.surisoft.io/capi-4.4.04.png" alt="CAPI Gateway" style="height:80px;margin-bottom:24px;">
+  <img src="capi-logo-standard.svg" alt="CAPI Gateway" style="height:80px;margin-bottom:24px;">
   <h1>The API Gateway that<br><span>discovers your services</span></h1>
   <p>
     CAPI is a lightweight gateway powered by Apache Camel. Register services in Consul — routes, load balancing, security, and observability are handled automatically. No database. No declarative config files. Just register and go.
@@ -274,120 +274,120 @@
     <div class="diagram-wrapper">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 490" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
         <!-- Background -->
-        <rect width="880" height="490" fill="#f8fafc" rx="8"/>
+        <rect width="880" height="490" fill="#f5f5f5" rx="8"/>
 
         <!-- Clients -->
-        <rect x="20" y="120" width="120" height="100" rx="10" fill="#0f2b46" stroke="#1a4971" stroke-width="1.5"/>
+        <rect x="20" y="120" width="120" height="100" rx="10" fill="#111111" stroke="#333333" stroke-width="1.5"/>
         <text x="80" y="158" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">Clients</text>
-        <text x="80" y="178" text-anchor="middle" fill="#94a3b8" font-size="10">REST / WS / SSE</text>
-        <rect x="42" y="192" width="76" height="20" rx="4" fill="#1a4971"/>
-        <text x="80" y="206" text-anchor="middle" fill="#94a3b8" font-size="9">curl, browser, SDK</text>
+        <text x="80" y="178" text-anchor="middle" fill="#999999" font-size="10">REST / WS / SSE</text>
+        <rect x="42" y="192" width="76" height="20" rx="4" fill="#333333"/>
+        <text x="80" y="206" text-anchor="middle" fill="#999999" font-size="9">curl, browser, SDK</text>
 
         <!-- Arrow: Clients -> CAPI -->
-        <line x1="140" y1="170" x2="196" y2="200" stroke="#00b4d8" stroke-width="2" marker-end="url(#arrow)"/>
+        <line x1="140" y1="170" x2="196" y2="200" stroke="#333333" stroke-width="2" marker-end="url(#arrow)"/>
 
         <!-- MCP Clients -->
-        <rect x="20" y="330" width="120" height="100" rx="10" fill="#0f2b46" stroke="#00b4d8" stroke-width="1.5"/>
-        <text x="80" y="365" text-anchor="middle" fill="#00b4d8" font-size="13" font-weight="700">MCP Clients</text>
-        <text x="80" y="385" text-anchor="middle" fill="#94a3b8" font-size="10">LLMs / Agents</text>
-        <rect x="32" y="395" width="96" height="20" rx="4" fill="#1a4971"/>
-        <text x="80" y="409" text-anchor="middle" fill="#94a3b8" font-size="8">Claude, Cursor, IDEs</text>
-        <text x="80" y="426" text-anchor="middle" fill="#64748b" font-size="7" font-style="italic">experimental</text>
+        <rect x="20" y="330" width="120" height="100" rx="10" fill="#111111" stroke="#555555" stroke-width="1.5"/>
+        <text x="80" y="365" text-anchor="middle" fill="#ffffff" font-size="13" font-weight="700">MCP Clients</text>
+        <text x="80" y="385" text-anchor="middle" fill="#999999" font-size="10">LLMs / Agents</text>
+        <rect x="32" y="395" width="96" height="20" rx="4" fill="#333333"/>
+        <text x="80" y="409" text-anchor="middle" fill="#999999" font-size="8">Claude, Cursor, IDEs</text>
+        <text x="80" y="426" text-anchor="middle" fill="#888888" font-size="7" font-style="italic">experimental</text>
 
         <!-- Arrow: MCP Clients -> CAPI -->
-        <line x1="140" y1="380" x2="196" y2="355" stroke="#00b4d8" stroke-width="2" marker-end="url(#arrow)"/>
+        <line x1="140" y1="380" x2="196" y2="355" stroke="#333333" stroke-width="2" marker-end="url(#arrow)"/>
 
         <!-- CAPI Gateway Box -->
-        <rect x="200" y="60" width="300" height="340" rx="12" fill="#fff" stroke="#00b4d8" stroke-width="2"/>
-        <rect x="200" y="60" width="300" height="38" rx="12" fill="#0f2b46"/>
-        <rect x="200" y="86" width="300" height="12" fill="#0f2b46"/>
+        <rect x="200" y="60" width="300" height="340" rx="12" fill="#fff" stroke="#111111" stroke-width="2"/>
+        <rect x="200" y="60" width="300" height="38" rx="12" fill="#111111"/>
+        <rect x="200" y="86" width="300" height="12" fill="#111111"/>
         <text x="350" y="85" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">CAPI Gateway</text>
 
         <!-- Internal layers -->
-        <rect x="220" y="110" width="260" height="36" rx="6" fill="#eef2f7" stroke="#e2e8f0"/>
-        <text x="350" y="133" text-anchor="middle" fill="#0f2b46" font-size="11" font-weight="600">OAuth2 / OIDC Validation</text>
+        <rect x="220" y="110" width="260" height="36" rx="6" fill="#e8e8e8" stroke="#d4d4d4"/>
+        <text x="350" y="133" text-anchor="middle" fill="#111111" font-size="11" font-weight="600">OAuth2 / OIDC Validation</text>
 
-        <rect x="220" y="154" width="260" height="36" rx="6" fill="#eef2f7" stroke="#e2e8f0"/>
-        <text x="350" y="177" text-anchor="middle" fill="#0f2b46" font-size="11" font-weight="600">OPA Policy Authorization</text>
+        <rect x="220" y="154" width="260" height="36" rx="6" fill="#e8e8e8" stroke="#d4d4d4"/>
+        <text x="350" y="177" text-anchor="middle" fill="#111111" font-size="11" font-weight="600">OPA Policy Authorization</text>
 
-        <rect x="220" y="198" width="260" height="36" rx="6" fill="#eef2f7" stroke="#e2e8f0"/>
-        <text x="350" y="221" text-anchor="middle" fill="#0f2b46" font-size="11" font-weight="600">Throttling (Hazelcast)</text>
+        <rect x="220" y="198" width="260" height="36" rx="6" fill="#e8e8e8" stroke="#d4d4d4"/>
+        <text x="350" y="221" text-anchor="middle" fill="#111111" font-size="11" font-weight="600">Throttling (Hazelcast)</text>
 
-        <rect x="220" y="242" width="126" height="36" rx="6" fill="#eef2f7" stroke="#e2e8f0"/>
-        <text x="283" y="265" text-anchor="middle" fill="#0f2b46" font-size="11" font-weight="600">Load Balancer</text>
+        <rect x="220" y="242" width="126" height="36" rx="6" fill="#e8e8e8" stroke="#d4d4d4"/>
+        <text x="283" y="265" text-anchor="middle" fill="#111111" font-size="11" font-weight="600">Load Balancer</text>
 
-        <rect x="354" y="242" width="126" height="36" rx="6" fill="#eef2f7" stroke="#e2e8f0"/>
-        <text x="417" y="265" text-anchor="middle" fill="#0f2b46" font-size="11" font-weight="600">Failover</text>
+        <rect x="354" y="242" width="126" height="36" rx="6" fill="#e8e8e8" stroke="#d4d4d4"/>
+        <text x="417" y="265" text-anchor="middle" fill="#111111" font-size="11" font-weight="600">Failover</text>
 
-        <rect x="220" y="286" width="260" height="36" rx="6" fill="#eef2f7" stroke="#e2e8f0"/>
-        <text x="350" y="309" text-anchor="middle" fill="#0f2b46" font-size="11" font-weight="600">OpenTelemetry Traces + Metrics</text>
+        <rect x="220" y="286" width="260" height="36" rx="6" fill="#e8e8e8" stroke="#d4d4d4"/>
+        <text x="350" y="309" text-anchor="middle" fill="#111111" font-size="11" font-weight="600">OpenTelemetry Traces + Metrics</text>
 
         <!-- MCP Gateway layer -->
-        <rect x="220" y="330" width="260" height="36" rx="6" fill="#e0f7fa" stroke="#00b4d8" stroke-width="1.2"/>
-        <text x="350" y="353" text-anchor="middle" fill="#0096b7" font-size="11" font-weight="600">MCP Gateway (JSON-RPC 2.0)</text>
-        <text x="478" y="345" text-anchor="end" fill="#0096b7" font-size="7" font-weight="600">:8383</text>
+        <rect x="220" y="330" width="260" height="36" rx="6" fill="#d4d4d4" stroke="#111111" stroke-width="1.2"/>
+        <text x="350" y="353" text-anchor="middle" fill="#111111" font-size="11" font-weight="600">MCP Gateway (JSON-RPC 2.0)</text>
+        <text x="478" y="345" text-anchor="end" fill="#333333" font-size="7" font-weight="600">:8383</text>
 
         <!-- Arrow: CAPI -> Services -->
-        <line x1="500" y1="210" x2="556" y2="170" stroke="#00b4d8" stroke-width="2" marker-end="url(#arrow)"/>
-        <line x1="500" y1="210" x2="556" y2="210" stroke="#00b4d8" stroke-width="2" marker-end="url(#arrow)"/>
-        <line x1="500" y1="210" x2="556" y2="250" stroke="#00b4d8" stroke-width="2" marker-end="url(#arrow)"/>
+        <line x1="500" y1="210" x2="556" y2="170" stroke="#333333" stroke-width="2" marker-end="url(#arrow)"/>
+        <line x1="500" y1="210" x2="556" y2="210" stroke="#333333" stroke-width="2" marker-end="url(#arrow)"/>
+        <line x1="500" y1="210" x2="556" y2="250" stroke="#333333" stroke-width="2" marker-end="url(#arrow)"/>
 
         <!-- Arrow: CAPI MCP -> Services (tool calls) -->
-        <line x1="500" y1="348" x2="556" y2="290" stroke="#00b4d8" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrow)"/>
-        <text x="548" y="330" text-anchor="end" fill="#0096b7" font-size="8" font-weight="600">tool calls</text>
+        <line x1="500" y1="348" x2="556" y2="290" stroke="#333333" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrow)"/>
+        <text x="548" y="330" text-anchor="end" fill="#333333" font-size="8" font-weight="600">tool calls</text>
 
         <!-- Services -->
-        <rect x="560" y="140" width="140" height="52" rx="8" fill="#fff" stroke="#e2e8f0" stroke-width="1.5"/>
-        <circle cx="580" cy="166" r="6" fill="#16a34a"/>
-        <text x="636" y="163" text-anchor="middle" fill="#0f2b46" font-size="11" font-weight="600">Service A</text>
-        <text x="636" y="178" text-anchor="middle" fill="#94a3b8" font-size="9">REST</text>
+        <rect x="560" y="140" width="140" height="52" rx="8" fill="#fff" stroke="#d4d4d4" stroke-width="1.5"/>
+        <circle cx="580" cy="166" r="6" fill="#333333"/>
+        <text x="636" y="163" text-anchor="middle" fill="#111111" font-size="11" font-weight="600">Service A</text>
+        <text x="636" y="178" text-anchor="middle" fill="#888888" font-size="9">REST</text>
 
-        <rect x="560" y="200" width="140" height="52" rx="8" fill="#fff" stroke="#e2e8f0" stroke-width="1.5"/>
-        <circle cx="580" cy="226" r="6" fill="#16a34a"/>
-        <text x="636" y="223" text-anchor="middle" fill="#0f2b46" font-size="11" font-weight="600">Service B</text>
-        <text x="636" y="238" text-anchor="middle" fill="#94a3b8" font-size="9">WebSocket</text>
+        <rect x="560" y="200" width="140" height="52" rx="8" fill="#fff" stroke="#d4d4d4" stroke-width="1.5"/>
+        <circle cx="580" cy="226" r="6" fill="#333333"/>
+        <text x="636" y="223" text-anchor="middle" fill="#111111" font-size="11" font-weight="600">Service B</text>
+        <text x="636" y="238" text-anchor="middle" fill="#888888" font-size="9">WebSocket</text>
 
-        <rect x="560" y="260" width="140" height="52" rx="8" fill="#fff" stroke="#e2e8f0" stroke-width="1.5"/>
-        <circle cx="580" cy="286" r="6" fill="#16a34a"/>
-        <text x="636" y="283" text-anchor="middle" fill="#0f2b46" font-size="11" font-weight="600">Service C</text>
-        <text x="636" y="298" text-anchor="middle" fill="#94a3b8" font-size="9">SSE</text>
+        <rect x="560" y="260" width="140" height="52" rx="8" fill="#fff" stroke="#d4d4d4" stroke-width="1.5"/>
+        <circle cx="580" cy="286" r="6" fill="#333333"/>
+        <text x="636" y="283" text-anchor="middle" fill="#111111" font-size="11" font-weight="600">Service C</text>
+        <text x="636" y="298" text-anchor="middle" fill="#888888" font-size="9">SSE</text>
 
         <!-- Consul -->
-        <rect x="710" y="120" width="150" height="76" rx="10" fill="#fff" stroke="#e2e8f0" stroke-width="1.5"/>
-        <text x="785" y="150" text-anchor="middle" fill="#0f2b46" font-size="12" font-weight="700">Consul</text>
-        <text x="785" y="168" text-anchor="middle" fill="#94a3b8" font-size="10">Service catalog</text>
-        <text x="785" y="182" text-anchor="middle" fill="#94a3b8" font-size="10">+ mcp-* metadata</text>
+        <rect x="710" y="120" width="150" height="76" rx="10" fill="#fff" stroke="#d4d4d4" stroke-width="1.5"/>
+        <text x="785" y="150" text-anchor="middle" fill="#111111" font-size="12" font-weight="700">Consul</text>
+        <text x="785" y="168" text-anchor="middle" fill="#888888" font-size="10">Service catalog</text>
+        <text x="785" y="182" text-anchor="middle" fill="#888888" font-size="10">+ mcp-* metadata</text>
 
         <!-- Arrow: Services -> Consul (register) -->
-        <line x1="700" y1="166" x2="710" y2="158" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow-gray)"/>
-        <text x="690" y="138" text-anchor="middle" fill="#64748b" font-size="8" font-style="italic">register</text>
+        <line x1="700" y1="166" x2="710" y2="158" stroke="#888888" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow-gray)"/>
+        <text x="690" y="138" text-anchor="middle" fill="#888888" font-size="8" font-style="italic">register</text>
 
         <!-- Arrow: Consul -> CAPI (discover) -->
-        <path d="M 710 180 Q 550 420 500 350" fill="none" stroke="#00b4d8" stroke-width="1.5" stroke-dasharray="6,3" marker-end="url(#arrow)"/>
-        <text x="640" y="350" text-anchor="middle" fill="#0096b7" font-size="9" font-weight="600">auto-discover</text>
+        <path d="M 710 180 Q 550 420 500 350" fill="none" stroke="#333333" stroke-width="1.5" stroke-dasharray="6,3" marker-end="url(#arrow)"/>
+        <text x="640" y="350" text-anchor="middle" fill="#333333" font-size="9" font-weight="600">auto-discover</text>
 
         <!-- OPA badge -->
-        <rect x="710" y="230" width="150" height="52" rx="10" fill="#fff" stroke="#e2e8f0" stroke-width="1.5"/>
-        <text x="785" y="253" text-anchor="middle" fill="#0f2b46" font-size="12" font-weight="700">OPA</text>
-        <text x="785" y="270" text-anchor="middle" fill="#94a3b8" font-size="10">Policy engine</text>
+        <rect x="710" y="230" width="150" height="52" rx="10" fill="#fff" stroke="#d4d4d4" stroke-width="1.5"/>
+        <text x="785" y="253" text-anchor="middle" fill="#111111" font-size="12" font-weight="700">OPA</text>
+        <text x="785" y="270" text-anchor="middle" fill="#888888" font-size="10">Policy engine</text>
 
         <!-- OTEL badge -->
-        <rect x="710" y="296" width="150" height="52" rx="10" fill="#fff" stroke="#e2e8f0" stroke-width="1.5"/>
-        <text x="785" y="319" text-anchor="middle" fill="#0f2b46" font-size="12" font-weight="700">OpenTelemetry</text>
-        <text x="785" y="336" text-anchor="middle" fill="#94a3b8" font-size="10">Traces + Logs</text>
+        <rect x="710" y="296" width="150" height="52" rx="10" fill="#fff" stroke="#d4d4d4" stroke-width="1.5"/>
+        <text x="785" y="319" text-anchor="middle" fill="#111111" font-size="12" font-weight="700">OpenTelemetry</text>
+        <text x="785" y="336" text-anchor="middle" fill="#888888" font-size="10">Traces + Logs</text>
 
         <!-- Keycloak badge -->
-        <rect x="710" y="24" width="150" height="52" rx="10" fill="#fff" stroke="#e2e8f0" stroke-width="1.5"/>
-        <text x="785" y="47" text-anchor="middle" fill="#0f2b46" font-size="12" font-weight="700">IdP / Keycloak</text>
-        <text x="785" y="64" text-anchor="middle" fill="#94a3b8" font-size="10">JWKS endpoint</text>
+        <rect x="710" y="24" width="150" height="52" rx="10" fill="#fff" stroke="#d4d4d4" stroke-width="1.5"/>
+        <text x="785" y="47" text-anchor="middle" fill="#111111" font-size="12" font-weight="700">IdP / Keycloak</text>
+        <text x="785" y="64" text-anchor="middle" fill="#888888" font-size="10">JWKS endpoint</text>
 
         <!-- Arrow markers -->
         <defs>
           <marker id="arrow" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="8" markerHeight="6" orient="auto-start-reverse">
-            <polygon points="0 0, 10 3.5, 0 7" fill="#00b4d8"/>
+            <polygon points="0 0, 10 3.5, 0 7" fill="#333333"/>
           </marker>
           <marker id="arrow-gray" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="8" markerHeight="6" orient="auto-start-reverse">
-            <polygon points="0 0, 10 3.5, 0 7" fill="#94a3b8"/>
+            <polygon points="0 0, 10 3.5, 0 7" fill="#888888"/>
           </marker>
         </defs>
       </svg>
@@ -469,7 +469,7 @@
         <div class="feature-icon">
           <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
         </div>
-        <h3>MCP Gateway <span style="font-size:0.7rem;background:var(--accent);color:var(--primary);padding:2px 8px;border-radius:4px;vertical-align:middle;font-weight:700;margin-left:6px;">EXPERIMENTAL</span></h3>
+        <h3>MCP Gateway <span style="font-size:0.7rem;background:#333333;color:#ffffff;padding:2px 8px;border-radius:4px;vertical-align:middle;font-weight:700;margin-left:6px;">EXPERIMENTAL</span></h3>
         <p>Turn any REST API into an MCP tool — no code changes on your backends. Also proxies real MCP Servers. Claude Desktop, Cursor, and custom agents discover and invoke everything via JSON-RPC 2.0 over Streamable HTTP.</p>
       </a>
     </div>

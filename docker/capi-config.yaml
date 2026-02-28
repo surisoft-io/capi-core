@@ -19,6 +19,9 @@ capi:
     port: 8382
     listeningAddress: 0.0.0.0
     contextPath: /api/*
+  grpc:
+    enabled: false
+    port: 8390
   ssl:
     enabled: false
     keyStoreType: PKCS12
@@ -64,10 +67,12 @@ capi:
     appName: capi
     appEnvironment: dev
     destination: otel-collector:5444
+    filePath:
   accessLogs:
     enabled: false
     tenant: capi
     service: capi
     destination: otel-collector:5444
+    filePath:
   throttle:
     enabled: false

@@ -27,6 +27,7 @@ public class CAPIConfiguration {
     private AccessLogs accessLogs;
     private Throttle throttle;
     private Mcp mcp;
+    private Grpc grpc;
 
     public String getVersion() {
         return version;
@@ -567,6 +568,31 @@ public class CAPIConfiguration {
     }
     public void setMcp(Mcp mcp) {
         this.mcp = mcp;
+    }
+
+    public Grpc getGrpc() {
+        return grpc;
+    }
+    public void setGrpc(Grpc grpc) {
+        this.grpc = grpc;
+    }
+
+    public static class Grpc {
+        private boolean enabled;
+        private int port = 8390;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+        public int getPort() {
+            return port;
+        }
+        public void setPort(int port) {
+            this.port = port;
+        }
     }
 
     public static class Mcp {
