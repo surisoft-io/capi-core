@@ -8,7 +8,7 @@ Unlike REST routing (which uses URL path prefixes), the gRPC Gateway uses **head
 
 ```
 Client                              CAPI gRPC Gateway                    Backend
-                                    (port 8390)
+                                    (port 8384)
   ──── HTTP/2 ────────────────►
   Header: x-capi-service: svc/grp
   Path:   /pkg.Service/Method       lookup svc/grp in Consul
@@ -26,7 +26,7 @@ Enable the gRPC Gateway in your CAPI config:
 capi:
   grpc:
     enabled: true
-    port: 8390
+    port: 8384
 ```
 
 ## Registering a gRPC service in Consul
@@ -69,7 +69,7 @@ grpcurl -plaintext \
   -H "x-capi-service: my-service/dev" \
   -import-path /path/to/protos -proto my_service.proto \
   -d '{"field": "value"}' \
-  localhost:8390 mypackage.MyService/MyMethod
+  localhost:8384 mypackage.MyService/MyMethod
 ```
 
 ### Error responses
@@ -85,7 +85,7 @@ grpcurl -plaintext \
 The gateway exposes a health endpoint:
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}" http://localhost:8390/health
+curl -s -o /dev/null -w "%{http_code}" http://localhost:8384/health
 # 200
 ```
 
