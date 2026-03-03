@@ -1,5 +1,4 @@
 FROM eclipse-temurin:23-jdk AS build
-LABEL io.modelcontextprotocol.server.name="io.github.surisoft-io/capi-core"
 WORKDIR /app
 COPY pom.xml .
 COPY src ./src
@@ -12,6 +11,7 @@ RUN mkdir -p /capi/config /capi/logs && \
     chown -R 1000:0 /capi /app
 COPY --from=build --chown=1000:0 /app/target/capi-core-*.jar app.jar
 COPY --chown=1000:0 config/config.yaml /capi/config/config.yaml
+LABEL io.modelcontextprotocol.server.name="io.github.surisoft-io/capi-core"
 ENV CAPI_CONFIG_FILE=/capi/config/config.yaml
 USER 1000
 ENTRYPOINT ["java", "-XX:+UseG1GC", "-XX:MaxGCPauseMillis=100", "-Xms512m", "-Xmx512m", "-XX:+HeapDumpOnOutOfMemoryError", "-XX:HeapDumpPath=/capi/logs/heap-dump.hprof", "-jar", "app.jar"]
