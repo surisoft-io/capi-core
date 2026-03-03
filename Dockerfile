@@ -1,4 +1,5 @@
 FROM eclipse-temurin:23-jdk AS build
+LABEL io.modelcontextprotocol.server.name="io.github.surisoft-io/capi-core"
 WORKDIR /app
 COPY pom.xml .
 COPY src ./src
