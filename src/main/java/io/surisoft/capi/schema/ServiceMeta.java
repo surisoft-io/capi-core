@@ -61,6 +61,9 @@ public class ServiceMeta {
     private long throttleDuration = -1;
     private boolean rateLimit;
 
+    @JsonProperty("api-key-enabled")
+    private boolean apiKeyEnabled;
+
     @JsonProperty("response-timeout")
     private int responseTimeout = -1;
 
@@ -240,6 +243,14 @@ public class ServiceMeta {
 
     public void setRateLimit(boolean rateLimit) {
         this.rateLimit = rateLimit;
+    }
+
+    public boolean isApiKeyEnabled() {
+        return apiKeyEnabled;
+    }
+
+    public void setApiKeyEnabled(boolean apiKeyEnabled) {
+        this.apiKeyEnabled = apiKeyEnabled;
     }
 
     public boolean isThrottleGlobal() {

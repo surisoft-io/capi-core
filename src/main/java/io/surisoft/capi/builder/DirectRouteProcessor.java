@@ -80,7 +80,7 @@ public class DirectRouteProcessor extends RouteBuilder {
                     .process(metricsProcessor)
                     .process(contentTypeValidator)
                     .process(exchange -> {
-                        AuthorizationProcessor authorizationProcessor = routeUtils.authorizationProcessor(service.getId(), routeDefinition, service.getServiceMeta().isSecured());
+                        AuthorizationProcessor authorizationProcessor = routeUtils.authorizationProcessor(service.getId(), routeDefinition, service.getServiceMeta().isSecured() || service.getServiceMeta().isApiKeyEnabled());
                         if (authorizationProcessor != null) {
                             authorizationProcessor.process(exchange);
                         }
@@ -132,7 +132,7 @@ public class DirectRouteProcessor extends RouteBuilder {
                     .process(metricsProcessor)
                     .process(contentTypeValidator)
                     .process(exchange -> {
-                        AuthorizationProcessor authorizationProcessor = routeUtils.authorizationProcessor(service.getId(), routeDefinition, service.getServiceMeta().isSecured());
+                        AuthorizationProcessor authorizationProcessor = routeUtils.authorizationProcessor(service.getId(), routeDefinition, service.getServiceMeta().isSecured() || service.getServiceMeta().isApiKeyEnabled());
                         if (authorizationProcessor != null) {
                             authorizationProcessor.process(exchange);
                         }

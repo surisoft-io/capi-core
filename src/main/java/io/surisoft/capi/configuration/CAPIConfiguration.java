@@ -28,6 +28,7 @@ public class CAPIConfiguration {
     private Throttle throttle;
     private Mcp mcp;
     private Grpc grpc;
+    private ApiKeyStore apiKeyStore;
 
     public String getVersion() {
         return version;
@@ -577,6 +578,13 @@ public class CAPIConfiguration {
         this.grpc = grpc;
     }
 
+    public ApiKeyStore getApiKeyStore() {
+        return apiKeyStore;
+    }
+    public void setApiKeyStore(ApiKeyStore apiKeyStore) {
+        this.apiKeyStore = apiKeyStore;
+    }
+
     public static class Grpc {
         private boolean enabled;
         private int port = 8384;
@@ -638,6 +646,31 @@ public class CAPIConfiguration {
         }
         public void setMcpServerDiscoveryTimeoutMs(int mcpServerDiscoveryTimeoutMs) {
             this.mcpServerDiscoveryTimeoutMs = mcpServerDiscoveryTimeoutMs;
+        }
+    }
+
+    public static class ApiKeyStore {
+        private boolean enabled;
+        private String endpoint;
+        private String token;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+        public String getEndpoint() {
+            return endpoint;
+        }
+        public void setEndpoint(String endpoint) {
+            this.endpoint = endpoint;
+        }
+        public String getToken() {
+            return token;
+        }
+        public void setToken(String token) {
+            this.token = token;
         }
     }
 
