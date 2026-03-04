@@ -60,10 +60,13 @@ public class Constants {
             "/analytics/**",
             "/swagger/**"
     };
+    public static final String API_KEY_SCHEME_PREFIX = "ApiKey ";
+    public static final String CONSUL_API_KEY_STORE_PREFIX = "capi-api-keys/";
     public static final List<String> CAPI_INTERNAL_ROUTES_PREFIX = List.of("consul-discovery-service",
                                                                            "route-consistency-checker-service",
                                                                            "error-route",
                                                                            "consul-store-service",
+                                                                           "api-key-store-service",
                                                                            "primary-route"
     );
     public static final String CAMEL_HTTP_SERVLET_REQUEST = "CamelHttpServletRequest";

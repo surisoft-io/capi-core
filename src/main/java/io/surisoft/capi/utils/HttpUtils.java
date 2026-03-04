@@ -24,8 +24,12 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.net.HttpCookie;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.text.ParseException;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -95,8 +99,29 @@ public class HttpUtils {
         return null;
     }
 
+    public String extractApiKey(Exchange exchange) {
+        String authorization = exchange.getIn().getHeader(Constants.AUTHORIZATION_HEADER, String.class);
+        if (authorization != null && authorization.startsWith(Constants.API_KEY_SCHEME_PREFIX)) {
+            return authorization.substring(Constants.API_KEY_SCHEME_PREFIX.length());
+        }
+        return null;
+    }
+
+    public static String hashApiKey(String rawKey) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(rawKey.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hash);
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-256 not available", e);
+        }
+    }
+
     public String processAuthorizationAccessToken(Exchange exchange) throws AuthorizationException {
         String authorization = exchange.getIn().getHeader(Constants.AUTHORIZATION_HEADER, String.class);
+        if (authorization != null && authorization.startsWith(Constants.API_KEY_SCHEME_PREFIX)) {
+            return null;
+        }
         if(authorization == null) {
             if(exchange.getIn().getHeader(Constants.AUTHORIZATION_REQUEST_PARAMETER, String.class) != null) {
                 return exchange.getIn().getHeader(Constants.AUTHORIZATION_REQUEST_PARAMETER, String.class);

@@ -9,6 +9,7 @@ import io.surisoft.capi.CAPIMain;
 import io.surisoft.capi.configuration.*;
 import io.surisoft.capi.oidc.Oauth2Provider;
 import io.surisoft.capi.processor.*;
+import io.surisoft.capi.schema.ApiKeyStoreEntry;
 import io.surisoft.capi.schema.ConsulKeyStoreEntry;
 import io.surisoft.capi.schema.GrpcClient;
 import io.surisoft.capi.schema.Service;
@@ -81,6 +82,10 @@ public class Startup {
     private Cache<String, ConsulKeyStoreEntry> consulStoreCache;
     @Nullable
     private ConsulStore consulStore;
+    @Nullable
+    private Cache<String, ApiKeyStoreEntry> apiKeyCache;
+    @Nullable
+    private ApiKeyStore apiKeyStore;
     private RouteConsistencyChecker routeConsistencyChecker;
     @Nullable
     private McpToolRegistry mcpToolRegistry;
@@ -121,6 +126,7 @@ public class Startup {
         if(configuration.getConsulStore().isEnabled()) {
             startConsulStore();
         }
+        startApiKeyStore();
         startRouteConsistencyChecker();
         startOpaService();
         startMcpService();
@@ -192,6 +198,13 @@ public class Startup {
         }
     }
 
+    private void startApiKeyStore() {
+        if(configuration.getApiKeyStore() != null && configuration.getApiKeyStore().isEnabled() && apiKeyCache != null) {
+            log.info("Configuring API Key Store");
+            apiKeyStore = new ApiKeyStore(apiKeyCache, configuration.getApiKeyStore().getEndpoint(), configuration.getApiKeyStore().getToken(), consulHttpClient);
+        }
+    }
+
     private void startRouteConsistencyChecker() {
         routeConsistencyChecker = new RouteConsistencyChecker(camelContext, routeUtils, serviceCache);
     }
@@ -236,6 +249,9 @@ public class Startup {
         serviceCache = LocalCacheConfiguration.serviceCache();
         if(configuration.getConsulStore().isEnabled()) {
             consulStoreCache = LocalCacheConfiguration.consulStoreCache();
+        }
+        if(configuration.getApiKeyStore() != null && configuration.getApiKeyStore().isEnabled()) {
+            apiKeyCache = LocalCacheConfiguration.apiKeyCache();
         }
     }
 
@@ -337,8 +353,9 @@ public class Startup {
             log.info("Throttling enabled, starting Hazelcast");
             throttleProcessor = new ThrottleProcessor(serviceCache, httpUtils, HazelcastCacheConfiguration.createThrottleCache(configuration.getThrottle()));
         }
-        if(configuration.getOauth2().isEnabled()) {
-            authorizationProcessor = new AuthorizationProcessor(httpUtils, serviceCache, opaService);
+        boolean apiKeyStoreEnabled = configuration.getApiKeyStore() != null && configuration.getApiKeyStore().isEnabled();
+        if(configuration.getOauth2().isEnabled() || apiKeyStoreEnabled) {
+            authorizationProcessor = new AuthorizationProcessor(httpUtils, serviceCache, opaService, apiKeyCache);
         }
     }
 
@@ -402,6 +419,10 @@ public class Startup {
 
     public @Nullable ConsulStore getConsulStore() {
         return consulStore;
+    }
+
+    public @Nullable ApiKeyStore getApiKeyStore() {
+        return apiKeyStore;
     }
 
     public @Nullable OpaService getOpaService() {

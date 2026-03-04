@@ -1,5 +1,6 @@
 package io.surisoft.capi.configuration;
 
+import io.surisoft.capi.schema.ApiKeyStoreEntry;
 import io.surisoft.capi.schema.ConsulKeyStoreEntry;
 import io.surisoft.capi.schema.McpSession;
 import io.surisoft.capi.schema.Service;
@@ -23,6 +24,15 @@ public class LocalCacheConfiguration {
     public static Cache<String, ConsulKeyStoreEntry> consulStoreCache() {
         return new Cache2kBuilder<String, ConsulKeyStoreEntry>(){}
                 .name("consulStoreCache-" + System.currentTimeMillis())
+                .eternal(true)
+                .entryCapacity(10000)
+                .storeByReference(true)
+                .build();
+    }
+
+    public static Cache<String, ApiKeyStoreEntry> apiKeyCache() {
+        return new Cache2kBuilder<String, ApiKeyStoreEntry>(){}
+                .name("apiKeyCache-" + System.currentTimeMillis())
                 .eternal(true)
                 .entryCapacity(10000)
                 .storeByReference(true)
