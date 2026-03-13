@@ -44,7 +44,7 @@ class AuthorizationProcessorTest {
                 .name("authProcessorTestCache-" + System.nanoTime())
                 .eternal(true)
                 .build();
-        processor = new AuthorizationProcessor(httpUtils, serviceCache, opaService);
+        processor = new AuthorizationProcessor(httpUtils, serviceCache, opaService, null);
         when(exchange.getIn()).thenReturn(message);
     }
 
@@ -145,7 +145,7 @@ class AuthorizationProcessorTest {
 
     @Test
     void process_withNullOpaService() throws Exception {
-        AuthorizationProcessor processorNoOpa = new AuthorizationProcessor(httpUtils, serviceCache, null);
+        AuthorizationProcessor processorNoOpa = new AuthorizationProcessor(httpUtils, serviceCache, null, null);
 
         ServiceMeta serviceMeta = new ServiceMeta();
         serviceMeta.setThrottle(false);
