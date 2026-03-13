@@ -651,26 +651,12 @@ public class CAPIConfiguration {
 
     public static class ApiKeyStore {
         private boolean enabled;
-        private String endpoint;
-        private String token;
 
         public boolean isEnabled() {
             return enabled;
         }
         public void setEnabled(boolean enabled) {
             this.enabled = enabled;
-        }
-        public String getEndpoint() {
-            return endpoint;
-        }
-        public void setEndpoint(String endpoint) {
-            this.endpoint = endpoint;
-        }
-        public String getToken() {
-            return token;
-        }
-        public void setToken(String token) {
-            this.token = token;
         }
     }
 
