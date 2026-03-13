@@ -129,6 +129,7 @@ public class WebsocketUtils {
         websocketClient.setMappingList(service.getMappingList());
         websocketClient.setPath(websocketContext);
         websocketClient.setRequiresSubscription(service.getServiceMeta().isSecured());
+        websocketClient.setSubscriptionRole(service.getServiceMeta().getSubscriptionGroup());
         websocketClient.setHttpHandler(createClientHttpHandler(websocketClient, service));
         return websocketClient;
     }

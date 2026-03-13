@@ -60,7 +60,7 @@ public class WebsocketAuthorization {
                 }
             }
 
-            if(isTokenInGroup(jwtClaimsSet, "capi")) {
+            if(isTokenInGroup(jwtClaimsSet, role)) {
                 return true;
             }
         } catch (ParseException e) {
