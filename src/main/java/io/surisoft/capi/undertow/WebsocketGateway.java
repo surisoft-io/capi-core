@@ -87,9 +87,8 @@ public class WebsocketGateway {
                             httpServerExchange.setStatusCode(HttpServletResponse.SC_OK);
                             httpServerExchange.endExchange();
                         } else {
-                            //capiUndertowTracer.ifPresent(undertowTracer -> undertowTracer.serverRequest(httpServerExchange, webClientId));
-                            WebsocketClient websocketClient = webSocketClients.get(webClientId);
-                            if(webSocketClients.containsKey(webClientId)) {
+                            if(webClientId != null && webSocketClients.containsKey(webClientId)) { //webSocketClients.containsKey(webClientId)
+                                WebsocketClient websocketClient = webSocketClients.get(webClientId);
                                 if(httpServerExchange.getRequestMethod().equals(HttpString.tryFromString(Constants.OPTIONS_METHODS_VALUE))) {
                                     List<String> localAccessControlAllowHeaders = new ArrayList<>(accessControlAllowHeaders);
                                     if(oauth2CookieName != null && !oauth2CookieName.isEmpty()) {
@@ -141,29 +140,20 @@ public class WebsocketGateway {
                         }
                     } finally {
                         long durationMs = (System.nanoTime() - startNanos) / 1_000_000;
-                        String originalIp = httpServerExchange.getSourceAddress().getAddress().getHostAddress();
+                        String originalIp = "unknown";
+                        java.net.InetAddress addr = httpServerExchange.getSourceAddress().getAddress();
+                        if(addr != null) {
+                            originalIp = addr.getHostAddress();
+                        }
                         if(httpServerExchange.getRequestHeaders().contains("X-Forwarded-For")) {
                             originalIp = httpServerExchange.getRequestHeaders().get("X-Forwarded-For").getFirst();
                         }
-                        /*ACCESS_LOG.info(
-                                "access",
-                                net.logstash.logback.argument.StructuredArguments.keyValue(
-                                        "method", httpServerExchange.getRequestMethod().toString()
-                                ),
-                                net.logstash.logback.argument.StructuredArguments.keyValue(
-                                        "path", httpServerExchange.getRequestPath()
-                                ),
-                                net.logstash.logback.argument.StructuredArguments.keyValue(
-                                        "status", httpServerExchange.getStatusCode()
-                                ),
-                                net.logstash.logback.argument.StructuredArguments.keyValue(
-                                        "duration_ms", durationMs
-                                ),
-                                net.logstash.logback.argument.StructuredArguments.keyValue(
-                                        "remote_ip",
-                                        originalIp
-                                )
-                        );*/
+                        ACCESS_LOG.info("{} {} {} {}ms {}",
+                                httpServerExchange.getRequestMethod(),
+                                httpServerExchange.getRequestPath(),
+                                httpServerExchange.getStatusCode(),
+                                durationMs,
+                                originalIp);
                     }
 
                 });

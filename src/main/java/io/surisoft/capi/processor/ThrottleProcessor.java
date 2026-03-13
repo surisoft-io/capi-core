@@ -41,7 +41,7 @@ public class ThrottleProcessor implements Processor {
                         exchange.setProperty(Constants.REASON_MESSAGE_HEADER, "Too Many requests");
 
                         exchange.getIn().setHeader(Constants.REASON_MESSAGE_HEADER, "Too Many requests");
-                        exchange.getIn().setHeader(Constants.REASON_CODE_HEADER, 407);
+                        exchange.getIn().setHeader(Constants.REASON_CODE_HEADER, 429);
                         exchange.setException(new AuthorizationException("Too Many requests"));
                     }
                 } else if(!service.getServiceMeta().isThrottleGlobal()) {
@@ -52,7 +52,7 @@ public class ThrottleProcessor implements Processor {
                             exchange.setProperty(Constants.REASON_MESSAGE_HEADER, "Too Many requests");
 
                             exchange.getIn().setHeader(Constants.REASON_MESSAGE_HEADER, "Too Many requests");
-                            exchange.getIn().setHeader(Constants.REASON_CODE_HEADER, 407);
+                            exchange.getIn().setHeader(Constants.REASON_CODE_HEADER, 429);
                             exchange.setException(new AuthorizationException("Too Many requests"));
                         }
                     }

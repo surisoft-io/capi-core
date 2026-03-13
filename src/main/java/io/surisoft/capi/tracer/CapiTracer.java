@@ -251,13 +251,6 @@ public class CapiTracer extends ServiceSupport implements CamelTracingService, R
         initContextPropagators();
         ServiceHelper.startService(eventNotifier);
 
-        if (Boolean.TRUE.equals(camelContext.isUseMDCLogging())) {
-            LOG.warn("Initialized tracing component to put trace_id and span_id into MDC. " +
-                    "This is a deprecated feature and may disappear in the future. " +
-                    "You should replace it with the specific MDC instrumentation provided by your tracing/telemetry SDK instead. "
-                    +
-                    "See the tracing component documentation to learn more about it.");
-        }
     }
 
     @Override
@@ -582,10 +575,8 @@ public class CapiTracer extends ServiceSupport implements CamelTracingService, R
             }
             span.setTag("capi-instance", capiInstanceName);
 
-        } catch (ParseException e) {
+        } catch (ParseException | AuthorizationException e) {
             LOG.trace("No Authorization header detected, or access token invalid");
-        } catch (AuthorizationException e) {
-            throw new RuntimeException(e);
         }
     }
 }

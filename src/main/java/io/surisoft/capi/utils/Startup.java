@@ -9,6 +9,7 @@ import io.surisoft.capi.CAPIMain;
 import io.surisoft.capi.configuration.*;
 import io.surisoft.capi.oidc.Oauth2Provider;
 import io.surisoft.capi.processor.*;
+import io.surisoft.capi.schema.ApiKeyStoreEntry;
 import io.surisoft.capi.schema.ConsulKeyStoreEntry;
 import io.surisoft.capi.schema.GrpcClient;
 import io.surisoft.capi.schema.Service;
@@ -81,6 +82,10 @@ public class Startup {
     private Cache<String, ConsulKeyStoreEntry> consulStoreCache;
     @Nullable
     private ConsulStore consulStore;
+    @Nullable
+    private Cache<String, ApiKeyStoreEntry> apiKeyCache;
+    @Nullable
+    private ApiKeyStore apiKeyStore;
     private RouteConsistencyChecker routeConsistencyChecker;
     @Nullable
     private McpToolRegistry mcpToolRegistry;
@@ -121,6 +126,7 @@ public class Startup {
         if(configuration.getConsulStore().isEnabled()) {
             startConsulStore();
         }
+        startApiKeyStore();
         startRouteConsistencyChecker();
         startOpaService();
         startMcpService();
@@ -172,7 +178,11 @@ public class Startup {
 
     private void startWebsocketUtils() {
         if(configuration.getWebsocket().isEnabled()) {
-            websocketUtils = new WebsocketUtils(configuration.getWebsocket(), oauth2Provider.getJwtProcessorList(), false, null, null, null);
+            if(oauth2Provider != null && oauth2Provider.getJwtProcessorList() != null) {
+                websocketUtils = new WebsocketUtils(configuration.getWebsocket(), oauth2Provider.getJwtProcessorList(), false, null, null, null);
+            } else {
+                websocketUtils = new WebsocketUtils(configuration.getWebsocket(), null, false, null, null, null);
+            }
         }
     }
 
@@ -189,6 +199,17 @@ public class Startup {
     private void startConsulStore() {
         if(configuration.getConsulStore().isEnabled() && configuration.getTrustStore().isEnabled()) {
             consulStore = new ConsulStore(consulStoreCache, routeUtils, configuration.getConsulStore().getEndpoint(), configuration.getConsulStore().getToken(), configuration.getTrustStore().getPassword(), capiSslContextHolder, camelContext, consulHttpClient);
+        }
+    }
+
+    private void startApiKeyStore() {
+        if(configuration.getApiKeyStore() != null && configuration.getApiKeyStore().isEnabled() && apiKeyCache != null) {
+            if(configuration.getConsulStore() == null || !configuration.getConsulStore().isEnabled()) {
+                log.warn("API Key Store requires consulStore to be enabled, skipping.");
+                return;
+            }
+            log.info("Configuring API Key Store");
+            apiKeyStore = new ApiKeyStore(apiKeyCache, configuration.getConsulStore().getEndpoint(), configuration.getConsulStore().getToken(), consulHttpClient);
         }
     }
 
@@ -236,6 +257,9 @@ public class Startup {
         serviceCache = LocalCacheConfiguration.serviceCache();
         if(configuration.getConsulStore().isEnabled()) {
             consulStoreCache = LocalCacheConfiguration.consulStoreCache();
+        }
+        if(configuration.getApiKeyStore() != null && configuration.getApiKeyStore().isEnabled()) {
+            apiKeyCache = LocalCacheConfiguration.apiKeyCache();
         }
     }
 
@@ -294,8 +318,6 @@ public class Startup {
 
     private void startTraceService() {
         if(configuration.getTraces().isEnabled()) {
-            camelContext.setUseMDCLogging(true);
-
             OpenTelemetry openTelemetry = TracingBootstrap.init(configuration.getTraces().getEndpoint(), configuration.getTraces().getServiceName());
             capiTracer = new CapiTracer(httpUtils, configuration.getInstanceName(), serviceCache, openTelemetry.getTracer(configuration.getTraces().getServiceName()));
             List<String> excludePatterns = new ArrayList<>();
@@ -327,18 +349,23 @@ public class Startup {
     }
 
     private void startServiceUtils() {
-        serviceUtils = new ServiceUtils(httpUtils, null, routeUtils, camelContext, null, configuration.getRunningMode());
+        serviceUtils = new ServiceUtils(httpUtils, Optional.empty(), routeUtils, camelContext, Optional.empty(), configuration.getRunningMode());
     }
 
     private void createRouteProcessors() {
         metricsProcessor = new MetricsProcessor(meterRegistry);
         contentTypeValidator = new ContentTypeValidator();
+        boolean apiKeyStoreEnabled = configuration.getApiKeyStore() != null && configuration.getApiKeyStore().isEnabled();
         if(configuration.getThrottle() != null && configuration.getThrottle().isEnabled()) {
             log.info("Throttling enabled, starting Hazelcast");
             throttleProcessor = new ThrottleProcessor(serviceCache, httpUtils, HazelcastCacheConfiguration.createThrottleCache(configuration.getThrottle()));
+        } else if(apiKeyStoreEnabled) {
+            log.info("API key store enabled, starting Hazelcast for per-key throttling");
+            CAPIConfiguration.Throttle throttleConfig = configuration.getThrottle() != null ? configuration.getThrottle() : new CAPIConfiguration.Throttle();
+            throttleProcessor = new ThrottleProcessor(serviceCache, httpUtils, HazelcastCacheConfiguration.createThrottleCache(throttleConfig));
         }
-        if(configuration.getOauth2().isEnabled()) {
-            authorizationProcessor = new AuthorizationProcessor(httpUtils, serviceCache, opaService);
+        if(configuration.getOauth2().isEnabled() || apiKeyStoreEnabled) {
+            authorizationProcessor = new AuthorizationProcessor(httpUtils, serviceCache, opaService, apiKeyCache);
         }
     }
 
@@ -402,6 +429,10 @@ public class Startup {
 
     public @Nullable ConsulStore getConsulStore() {
         return consulStore;
+    }
+
+    public @Nullable ApiKeyStore getApiKeyStore() {
+        return apiKeyStore;
     }
 
     public @Nullable OpaService getOpaService() {

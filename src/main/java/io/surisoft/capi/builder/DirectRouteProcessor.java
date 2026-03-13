@@ -80,7 +80,7 @@ public class DirectRouteProcessor extends RouteBuilder {
                     .process(metricsProcessor)
                     .process(contentTypeValidator)
                     .process(exchange -> {
-                        AuthorizationProcessor authorizationProcessor = routeUtils.authorizationProcessor(service.getId(), routeDefinition, service.getServiceMeta().isSecured());
+                        AuthorizationProcessor authorizationProcessor = routeUtils.authorizationProcessor(service.getId(), routeDefinition, service.getServiceMeta().isSecured() || service.getServiceMeta().isApiKeyEnabled());
                         if (authorizationProcessor != null) {
                             authorizationProcessor.process(exchange);
                         }
@@ -92,7 +92,7 @@ public class DirectRouteProcessor extends RouteBuilder {
                         }
                     })
                     .process(exchange -> {
-                        if(service.getServiceMeta().isThrottle() && throttleProcessor != null) {
+                        if(throttleProcessor != null && (service.getServiceMeta().isThrottle() || exchange.getIn().getHeader(Constants.CAPI_META_THROTTLE_CONSUMER_KEY) != null)) {
                             throttleProcessor.process(exchange);
                         }
                     })
@@ -132,7 +132,7 @@ public class DirectRouteProcessor extends RouteBuilder {
                     .process(metricsProcessor)
                     .process(contentTypeValidator)
                     .process(exchange -> {
-                        AuthorizationProcessor authorizationProcessor = routeUtils.authorizationProcessor(service.getId(), routeDefinition, service.getServiceMeta().isSecured());
+                        AuthorizationProcessor authorizationProcessor = routeUtils.authorizationProcessor(service.getId(), routeDefinition, service.getServiceMeta().isSecured() || service.getServiceMeta().isApiKeyEnabled());
                         if (authorizationProcessor != null) {
                             authorizationProcessor.process(exchange);
                         }
@@ -145,7 +145,7 @@ public class DirectRouteProcessor extends RouteBuilder {
                     })
                     .removeHeader("X-BlueCoat-Via")
                     .process(exchange -> {
-                        if(service.getServiceMeta().isThrottle() && throttleProcessor != null) {
+                        if(throttleProcessor != null && (service.getServiceMeta().isThrottle() || exchange.getIn().getHeader(Constants.CAPI_META_THROTTLE_CONSUMER_KEY) != null)) {
                             throttleProcessor.process(exchange);
                         }
                     })

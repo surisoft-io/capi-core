@@ -258,7 +258,7 @@ public class ServiceUtils {
             assert response.body() != null;
             SwaggerParseResult swaggerParseResult = new OpenAPIV3Parser().readContents(response.body());
             if (swaggerParseResult.getMessages() != null) {
-                swaggerParseResult.getMessages().forEach(log::warn);
+                swaggerParseResult.getMessages().forEach(log::trace);
             }
 
             OpenAPI openAPI = swaggerParseResult.getOpenAPI();
@@ -271,8 +271,8 @@ public class ServiceUtils {
             service.setOpenAPI(openAPI);
             return true;
         } catch(Exception e) {
-            log.warn(e.getMessage(), e);
-            log.warn("Open API specification is invalid for service {}", service.getId());
+            log.trace(e.getMessage(), e);
+            log.trace("Open API specification is invalid for service {}", service.getId());
             return false;
         }
     }
@@ -303,7 +303,7 @@ public class ServiceUtils {
             assert response.body() != null;
             SwaggerParseResult swaggerParseResult = new OpenAPIV3Parser().readContents(response.body());
             if (swaggerParseResult.getMessages() != null) {
-                swaggerParseResult.getMessages().forEach(log::warn);
+                swaggerParseResult.getMessages().forEach(log::trace);
             }
 
             OpenAPI openAPI = swaggerParseResult.getOpenAPI();
@@ -315,7 +315,7 @@ public class ServiceUtils {
             service.setOpenAPI(openAPI);
             return true;
         } catch (Exception e) {
-            log.warn(e.getMessage(), e);
+            log.trace(e.getMessage(), e);
             log.warn("Open API specification is invalid for service {}", service.getId());
             return false;
         }
