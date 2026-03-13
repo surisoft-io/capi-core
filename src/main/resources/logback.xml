@@ -49,9 +49,14 @@
 
 <property name="logstashDestination" value="${logstash-destination}"/>
 
+<!-- OpenTelemetry MDC instrumentation: auto-injects trace_id and span_id into MDC -->
+<appender name="OTEL" class="io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender">
+    <appender-ref ref="CONSOLE"/>
+</appender>
+
 <!-- Pattern with trace/span support -->
 <property name="LOG_PATTERN"
-              value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"/>
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - trace_id=%X{trace_id} span_id=%X{span_id} %msg%n"/>
 
 <!-- Console appender -->
 <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
@@ -164,7 +169,7 @@
 
 <!-- Root logger: app logs to console + logstash + file -->
 <root level="INFO">
-    <appender-ref ref="CONSOLE"/>
+    <appender-ref ref="OTEL"/>
     <appender-ref ref="LOGSTASH"/>
     <appender-ref ref="FILE"/>
 </root>

@@ -12,7 +12,32 @@
         <maven.compiler.source>23</maven.compiler.source>
         <maven.compiler.target>23</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <!-- Dependency versions -->
+        <camel.version>4.18.0</camel.version>
+        <micrometer.version>1.16.3</micrometer.version>
+        <opentelemetry.version>1.58.0</opentelemetry.version>
+        <opentelemetry.instrumentation.version>2.25.0-alpha</opentelemetry.instrumentation.version>
+        <opentelemetry.semconv.version>1.39.0</opentelemetry.semconv.version>
+        <hazelcast.version>5.5.0</hazelcast.version>
+        <hazelcast.kubernetes.version>2.2.3</hazelcast.kubernetes.version>
+        <logback.version>1.5.32</logback.version>
+        <logstash.logback.version>9.0</logstash.logback.version>
+        <jboss.threads.version>3.9.2</jboss.threads.version>
+        <snakeyaml.version>2.5</snakeyaml.version>
+        <cache2k.version>2.6.1.Final</cache2k.version>
+        <swagger.parser.version>2.1.39</swagger.parser.version>
+        <nimbus.jose.version>10.8</nimbus.jose.version>
+        <junit.version>5.14.2</junit.version>
+        <mockito.version>5.21.0</mockito.version>
+
+        <!-- Plugin versions -->
         <jacoco.version>0.8.13</jacoco.version>
+        <shade.plugin.version>3.6.1</shade.plugin.version>
+        <compiler.plugin.version>3.14.1</compiler.plugin.version>
+        <cyclonedx.plugin.version>2.9.1</cyclonedx.plugin.version>
+
+        <!-- Sonar -->
         <sonar.host.url>https://sonarcloud.io</sonar.host.url>
         <sonar.organization>surisoft-io</sonar.organization>
         <sonar.projectKey>surisoft-io_capi-core</sonar.projectKey>
@@ -23,145 +48,140 @@
         <dependency>
             <groupId>org.apache.camel</groupId>
             <artifactId>camel-core</artifactId>
-            <version>4.17.0</version>
+            <version>${camel.version}</version>
         </dependency>
         <dependency>
             <groupId>org.jboss.threads</groupId>
             <artifactId>jboss-threads</artifactId>
-            <version>3.9.2</version> <!-- newer is better -->
+            <version>${jboss.threads.version}</version>
         </dependency>
         <dependency>
             <groupId>ch.qos.logback</groupId>
             <artifactId>logback-classic</artifactId>
-            <version>1.5.27</version>
+            <version>${logback.version}</version>
         </dependency>
         <dependency>
             <groupId>net.logstash.logback</groupId>
             <artifactId>logstash-logback-encoder</artifactId>
-            <version>9.0</version>
+            <version>${logstash.logback.version}</version>
         </dependency>
-
         <dependency>
             <groupId>io.opentelemetry.instrumentation</groupId>
             <artifactId>opentelemetry-logback-appender-1.0</artifactId>
-            <version>2.25.0-alpha</version>
+            <version>${opentelemetry.instrumentation.version}</version>
         </dependency>
-
         <dependency>
             <groupId>org.apache.camel</groupId>
             <artifactId>camel-http</artifactId>
-            <version>4.17.0</version>
-            <!-- use the same version as your Camel core version -->
+            <version>${camel.version}</version>
         </dependency>
         <dependency>
             <groupId>org.apache.camel</groupId>
             <artifactId>camel-undertow</artifactId>
-            <version>4.17.0</version>
+            <version>${camel.version}</version>
         </dependency>
         <dependency>
             <groupId>org.apache.camel</groupId>
             <artifactId>camel-timer</artifactId>
-            <version>4.17.0</version>
+            <version>${camel.version}</version>
         </dependency>
         <dependency>
             <groupId>org.yaml</groupId>
             <artifactId>snakeyaml</artifactId>
-            <version>2.5</version>
+            <version>${snakeyaml.version}</version>
         </dependency>
         <dependency>
             <groupId>org.cache2k</groupId>
             <artifactId>cache2k-core</artifactId>
-            <version>2.6.1.Final</version>
+            <version>${cache2k.version}</version>
             <scope>compile</scope>
         </dependency>
         <dependency>
             <groupId>io.swagger.parser.v3</groupId>
             <artifactId>swagger-parser-v3</artifactId>
-            <version>2.1.37</version>
+            <version>${swagger.parser.version}</version>
         </dependency>
         <dependency>
             <groupId>com.nimbusds</groupId>
             <artifactId>nimbus-jose-jwt</artifactId>
-            <version>10.7</version>
+            <version>${nimbus.jose.version}</version>
         </dependency>
         <dependency>
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-core</artifactId>
-            <version>1.16.2</version>
+            <version>${micrometer.version}</version>
         </dependency>
         <dependency>
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-jmx</artifactId>
-            <version>1.16.2</version>
+            <version>${micrometer.version}</version>
         </dependency>
         <dependency>
             <groupId>org.apache.camel</groupId>
             <artifactId>camel-micrometer</artifactId>
-            <version>4.17.0</version>
+            <version>${camel.version}</version>
         </dependency>
         <dependency>
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-prometheus</artifactId>
-            <version>1.16.2</version>
+            <version>${micrometer.version}</version>
         </dependency>
-           <dependency>
+        <dependency>
             <groupId>org.apache.camel</groupId>
             <artifactId>camel-opentelemetry</artifactId>
-            <version>4.17.0</version>
+            <version>${camel.version}</version>
         </dependency>
 
         <!-- OpenTelemetry SDK + exporters -->
         <dependency>
             <groupId>io.opentelemetry</groupId>
             <artifactId>opentelemetry-sdk</artifactId>
-            <version>1.58.0</version>
+            <version>${opentelemetry.version}</version>
         </dependency>
-
         <dependency>
             <groupId>io.opentelemetry</groupId>
             <artifactId>opentelemetry-exporter-otlp</artifactId>
-            <version>1.58.0</version>
+            <version>${opentelemetry.version}</version>
         </dependency>
-
         <dependency>
             <groupId>io.opentelemetry</groupId>
             <artifactId>opentelemetry-extension-trace-propagators</artifactId>
-            <version>1.58.0</version>
+            <version>${opentelemetry.version}</version>
         </dependency>
-
         <dependency>
             <groupId>io.opentelemetry.semconv</groupId>
             <artifactId>opentelemetry-semconv</artifactId>
-            <version>1.39.0</version>
+            <version>${opentelemetry.semconv.version}</version>
             <scope>compile</scope>
         </dependency>
         <dependency>
             <groupId>com.hazelcast</groupId>
             <artifactId>hazelcast</artifactId>
-            <version>5.5.0</version>
+            <version>${hazelcast.version}</version>
         </dependency>
         <dependency>
             <groupId>com.hazelcast</groupId>
             <artifactId>hazelcast-kubernetes</artifactId>
-            <version>2.2.3</version>
+            <version>${hazelcast.kubernetes.version}</version>
         </dependency>
+
         <!-- Test dependencies -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
-            <version>5.11.4</version>
+            <version>${junit.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-core</artifactId>
-            <version>5.15.2</version>
+            <version>${mockito.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-junit-jupiter</artifactId>
-            <version>5.15.2</version>
+            <version>${mockito.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -170,7 +190,7 @@
         <plugin>
             <groupId>org.apache.maven.plugins</groupId>
             <artifactId>maven-shade-plugin</artifactId>
-            <version>3.5.0</version>
+            <version>${shade.plugin.version}</version>
             <executions>
                 <execution>
                     <phase>package</phase>
@@ -193,7 +213,7 @@
         <plugin>
             <groupId>org.apache.maven.plugins</groupId>
             <artifactId>maven-compiler-plugin</artifactId>
-            <version>3.11.0</version>
+            <version>${compiler.plugin.version}</version>
         </plugin>
         <plugin>
             <groupId>org.jacoco</groupId>
@@ -218,7 +238,7 @@
         <plugin>
             <groupId>org.cyclonedx</groupId>
             <artifactId>cyclonedx-maven-plugin</artifactId>
-            <version>2.9.1</version>
+            <version>${cyclonedx.plugin.version}</version>
             <executions>
                 <execution>
                     <phase>package</phase>

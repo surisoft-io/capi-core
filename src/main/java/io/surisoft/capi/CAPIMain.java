@@ -65,7 +65,8 @@ public class CAPIMain {
             addPrimaryRoute(startup, camelContext, managedHeaders, primaryEndpoint);
 
             boolean mcpServerEnabled = startup.getMcpServerClient() != null;
-            camelContext.addStartupListener(new CamelStartupListener(capiConfiguration.getConsulCatalogDiscoverInterval(), capiConfiguration.getConsulStore().isEnabled(), capiConfiguration.getTrustStore().isEnabled(), mcpServerEnabled));
+            boolean apiKeyStoreEnabled = startup.getApiKeyStore() != null;
+            camelContext.addStartupListener(new CamelStartupListener(capiConfiguration.getConsulCatalogDiscoverInterval(), capiConfiguration.getConsulStore().isEnabled(), capiConfiguration.getTrustStore().isEnabled(), mcpServerEnabled, apiKeyStoreEnabled));
             camelContext.start();
 
             registerShutdownHook(websocketGateway, grpcGateway, mcpGateway, camelContext, adminGateway);
@@ -137,6 +138,9 @@ public class CAPIMain {
             camelContext.getRegistry().bind("consulStore", startup.getConsulStore());
         }
         camelContext.getRegistry().bind("routeConsistencyChecker", startup.getRouteConsistencyChecker());
+        if(startup.getApiKeyStore() != null) {
+            camelContext.getRegistry().bind("apiKeyStore", startup.getApiKeyStore());
+        }
         if(startup.getMcpServerClient() != null) {
             camelContext.getRegistry().bind("mcpServerClient", startup.getMcpServerClient());
         }

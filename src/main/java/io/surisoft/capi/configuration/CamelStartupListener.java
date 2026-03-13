@@ -15,19 +15,25 @@ public class CamelStartupListener implements ExtendedStartupListener {
     private final boolean consulStoreEnabled;
     private final boolean trustStoreEnabled;
     private final boolean mcpServerEnabled;
+    private final boolean apiKeyStoreEnabled;
 
     @BeanInject("consulNodeDiscovery")
     private ConsulNodeDiscovery consulNodeDiscovery;
 
     public CamelStartupListener(long consulTimerInterval, boolean consulStoreEnabled, boolean trustStoreEnabled) {
-        this(consulTimerInterval, consulStoreEnabled, trustStoreEnabled, false);
+        this(consulTimerInterval, consulStoreEnabled, trustStoreEnabled, false, false);
     }
 
     public CamelStartupListener(long consulTimerInterval, boolean consulStoreEnabled, boolean trustStoreEnabled, boolean mcpServerEnabled) {
+        this(consulTimerInterval, consulStoreEnabled, trustStoreEnabled, mcpServerEnabled, false);
+    }
+
+    public CamelStartupListener(long consulTimerInterval, boolean consulStoreEnabled, boolean trustStoreEnabled, boolean mcpServerEnabled, boolean apiKeyStoreEnabled) {
         this.consulTimerInterval = consulTimerInterval;
         this.consulStoreEnabled = consulStoreEnabled;
         this.trustStoreEnabled = trustStoreEnabled;
         this.mcpServerEnabled = mcpServerEnabled;
+        this.apiKeyStoreEnabled = apiKeyStoreEnabled;
     }
 
     @Override
@@ -39,6 +45,9 @@ public class CamelStartupListener implements ExtendedStartupListener {
         context.addRoutes(consulDiscoveryRouteBuilder());
         if(consulStoreEnabled && trustStoreEnabled) {
             context.addRoutes(consulStoreRouteBuilder());
+        }
+        if(apiKeyStoreEnabled) {
+            context.addRoutes(apiKeyStoreRouteBuilder());
         }
         context.addRoutes(consistencyCheckRouteBuilder());
     }
@@ -70,6 +79,18 @@ public class CamelStartupListener implements ExtendedStartupListener {
                 from("timer:consul-inspect?period=" + consulTimerInterval)
                         .to("bean:consulStore?method=process")
                         .routeId("consul-store-service");
+            }
+        };
+    }
+
+    public RouteBuilder apiKeyStoreRouteBuilder() {
+        log.debug("Creating Capi API Key Store");
+        return new RouteBuilder() {
+            @Override
+            public void configure() {
+                from("timer:api-key-store-inspect?period=" + consulTimerInterval)
+                        .to("bean:apiKeyStore?method=process")
+                        .routeId("api-key-store-service");
             }
         };
     }
