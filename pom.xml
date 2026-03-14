@@ -6,7 +6,7 @@
 
     <groupId>io.surisoft</groupId>
     <artifactId>capi-core</artifactId>
-    <version>1.417.5</version>
+    <version>1.418.0</version>
 
     <properties>
         <maven.compiler.source>23</maven.compiler.source>
@@ -203,7 +203,10 @@
                             <!-- This is CRITICAL for Camel -->
                             <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                             <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                <mainClass>io.surisoft.capi.CAPIMain</mainClass>
+                                <mainClass>io.surisoft.capi.Bootstrap</mainClass>
+                                <manifestEntries>
+                                    <Multi-Release>true</Multi-Release>
+                                </manifestEntries>
                             </transformer>
                         </transformers>
                     </configuration>
