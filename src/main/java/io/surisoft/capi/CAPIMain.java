@@ -35,13 +35,6 @@ public class CAPIMain {
     private static Logger log;
     private final CAPIConfiguration capiConfiguration;
 
-    public static void main(String[] args) {
-        // Must be set before any Camel class is loaded — ThreadType reads this
-        // in its static initializer and the decision is irreversible.
-        System.setProperty("camel.threads.virtual.enabled", "true");
-        new CAPIMain();
-    }
-
     public CAPIMain() {
         capiConfiguration = loadConfiguration();
 

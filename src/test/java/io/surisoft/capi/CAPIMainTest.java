@@ -551,7 +551,7 @@ class CAPIMainTest {
             return;
         }
         // The main method creates a new CAPIMain which throws
-        assertThrows(RuntimeException.class, () -> CAPIMain.main(new String[]{}));
+        assertThrows(RuntimeException.class, CAPIMain::new);
     }
 
     @Test
