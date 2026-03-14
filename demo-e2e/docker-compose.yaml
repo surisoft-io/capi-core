@@ -85,6 +85,32 @@ services:
       opensearch:
         condition: service_healthy
 
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: demo-e2e-prometheus
+    volumes:
+      - ./prometheus.yaml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      capi:
+        condition: service_started
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: demo-e2e-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/grafana/"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+    volumes:
+      - ./grafana/provisioning/datasources/prometheus.yaml:/etc/grafana/provisioning/datasources/prometheus.yaml:ro
+      - ./grafana/provisioning/dashboards/dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml:ro
+      - ./grafana/dashboards/capi-gateway.json:/var/lib/grafana/dashboards/capi-gateway.json:ro
+    depends_on:
+      - prometheus
+
   # --- One-shot Setup ---
 
   keycloak-setup:

@@ -30,6 +30,8 @@ Wait ~60 seconds for Keycloak to initialize and all one-shot containers to compl
 | opensearch | opensearch:2.19.1 | Trace storage (security enabled) | 9200 |
 | opensearch-dashboards | opensearch-dashboards:2.19.1 | Trace visualization | /dashboards |
 | otel-collector | otel-collector-contrib | OpenTelemetry traces | 4317, 4318 |
+| prometheus | prom/prometheus | Metrics scraping | 9090 |
+| grafana | grafana/grafana | Metrics dashboards | /grafana |
 | capi | surisoft/capi-core:latest | API Gateway | 8380, 8381, 8382, 8383, 8384 |
 | generic-service | python:3-alpine | Single backend for 35 REST services | 8080 |
 | websocket-service | python:3-alpine | WebSocket backend | 9090 |
@@ -124,6 +126,7 @@ All passwords and secrets are externalized to a `.env` file (gitignored). Copy `
 | `BFF_CLIENT_SECRET` | Keycloak BFF client, BFF |
 | `PREMIUM_CLIENT_SECRET`, `BASIC_CLIENT_SECRET` | Keycloak subscription clients |
 | `OPENSEARCH_PASSWORD` | OpenSearch, Dashboards, OTel Collector |
+| `GRAFANA_PASSWORD` | Grafana admin login |
 | `API_KEY_UNLIMITED/STANDARD/LIMITED` | API key setup, BFF config endpoint, UI |
 | `BFF_SESSION_SECRET` | Flask session encryption |
 | `EXTERNAL_URL` | Keycloak redirects, BFF callbacks |
@@ -140,9 +143,15 @@ All passwords and secrets are externalized to a `.env` file (gitignored). Copy `
 
 ## Observability
 
-- **OpenSearch** with security plugin enabled (login required on Dashboards)
+### Tracing (OpenTelemetry + OpenSearch)
 - **OTel Collector** receives traces via OTLP (ports 4317/4318), exports to OpenSearch over HTTPS with basic auth
-- **Dashboards** accessible at `/dashboards` (credentials from `.env`)
+- **OpenSearch** with security plugin enabled (login required)
+- **OpenSearch Dashboards** accessible at `/dashboards` (credentials from `.env`)
+
+### Metrics (Prometheus + Grafana)
+- **Prometheus** scrapes CAPI metrics from `:8381/info/metrics` every 15s
+- **Grafana** accessible at `/grafana` with a pre-provisioned **CAPI Gateway** dashboard (credentials from `.env`)
+- Dashboard panels: gateway request rate, total requests, JVM heap/non-heap memory, thread counts and states, CPU/system load, GC metrics, buffer pools
 
 ## UI Features
 
@@ -169,6 +178,7 @@ All passwords and secrets are externalized to a `.env` file (gitignored). Copy `
 8. Open gRPC tab → Call SayHello → response from greeter backend through CAPI
 9. Run load test with 50+ requests → see real-time status code distribution
 10. Open `/dashboards` → traces visible in OpenSearch
+11. Open `/grafana` → CAPI Gateway dashboard with live metrics
 
 ## CLI Testing
 
@@ -193,6 +203,9 @@ grpcurl -plaintext \
 
 # Admin API
 curl http://localhost:8381/info/mcp/tools
+
+# Prometheus metrics
+curl http://localhost:8381/info/metrics
 ```
 
 ## Remote Deployment (your-domain.eu)
