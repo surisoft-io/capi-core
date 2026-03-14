@@ -40,6 +40,7 @@ import java.security.KeyStore;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.Executors;
 
 public class Startup {
 
@@ -457,6 +458,7 @@ public class Startup {
             mcpLoadBalancer = new McpBackendLoadBalancer(configuration.getMcp().getCircuitBreakerCooldownMs());
             HttpClient mcpHttpClient = HttpClient.newBuilder()
                     .connectTimeout(java.time.Duration.ofSeconds(10))
+                    .executor(Executors.newVirtualThreadPerTaskExecutor())
                     .build();
             mcpServerClient = new McpServerClient(serviceCache, mcpLoadBalancer, mcpHttpClient, configuration);
         }
@@ -484,6 +486,7 @@ public class Startup {
             httpClientBuilder.sslContext(capiSslContextHolder.getSslContext());
         }
         httpClientBuilder.connectTimeout(Duration.ofSeconds(10));
+        httpClientBuilder.executor(Executors.newVirtualThreadPerTaskExecutor());
         consulHttpClient = httpClientBuilder.build();
     }
 }
