@@ -36,6 +36,9 @@ public class CAPIMain {
     private final CAPIConfiguration capiConfiguration;
 
     public static void main(String[] args) {
+        // Must be set before any Camel class is loaded — ThreadType reads this
+        // in its static initializer and the decision is irreversible.
+        System.setProperty("camel.threads.virtual.enabled", "true");
         new CAPIMain();
     }
 
@@ -43,7 +46,6 @@ public class CAPIMain {
         capiConfiguration = loadConfiguration();
 
         log.info("Starting CAPI Camel Context");
-        System.setProperty("camel.threads.virtual.enabled", "true");
         CamelContext camelContext = new DefaultCamelContext();
         camelContext.setStreamCaching(true);
 
