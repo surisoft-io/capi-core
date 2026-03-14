@@ -1,7 +1,6 @@
 package io.surisoft.capi.configuration;
 
 import io.micrometer.core.instrument.Clock;
-import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.binder.jvm.ClassLoaderMetrics;
 import io.micrometer.core.instrument.binder.jvm.JvmGcMetrics;
@@ -60,20 +59,10 @@ public class MetricsConfiguration {
         new JvmThreadMetrics().bindTo(prometheus);
         new ProcessorMetrics().bindTo(prometheus);
 
-        // Platform vs virtual thread breakdown (Java 21+)
-        Gauge.builder("jvm_threads_platform", () ->
-                Thread.getAllStackTraces().keySet().stream()
-                        .filter(t -> !t.isVirtual())
-                        .count()
-        ).description("The current number of platform (non-virtual) threads")
-         .register(prometheus);
-
-        Gauge.builder("jvm_threads_virtual", () ->
-                Thread.getAllStackTraces().keySet().stream()
-                        .filter(Thread::isVirtual)
-                        .count()
-        ).description("The current number of virtual threads")
-         .register(prometheus);
+        // Note: jvm_threads_live_threads (from JvmThreadMetrics above) only counts
+        // platform threads — Java's ThreadMXBean and getAllStackTraces() exclude
+        // virtual threads by design. There is no standard JVM API to count active
+        // virtual threads.
 
         compositeMeterRegistry.add(prometheus);
         return compositeMeterRegistry;

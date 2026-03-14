@@ -45,7 +45,8 @@ public class CAPIMain {
     public CAPIMain() {
         capiConfiguration = loadConfiguration();
 
-        log.info("Starting CAPI Camel Context");
+        log.info("Starting CAPI Camel Context (virtual threads: {})",
+                System.getProperty("camel.threads.virtual.enabled", "false"));
         CamelContext camelContext = new DefaultCamelContext();
         camelContext.setStreamCaching(true);
 
