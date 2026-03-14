@@ -221,6 +221,55 @@ curl http://localhost:8381/info/metrics
 
 CAPI uses Java virtual threads (Project Loom) for Camel thread pools and HTTP client executors. Virtual threads are invisible to JVM monitoring APIs, so the Grafana thread panel shows platform threads only.
 
+## Load Testing (k6)
+
+A [k6](https://k6.io/) test script is included at `k6/load-test.js`. It covers all protocol types with weighted random selection: open (30%), OPA (25%), subscription (20%), API key (10%), MCP (10%), gRPC (5%).
+
+```bash
+# Install k6 (macOS)
+brew install k6
+
+# Run against local demo
+k6 run --env BASE_URL=http://localhost k6/load-test.js
+
+# Run against remote with auth
+k6 run \
+  --env BASE_URL=https://your-domain.eu \
+  --env ALICE_PASSWORD=<password> \
+  --env BFF_SECRET=<secret> \
+  --env API_KEY=<unlimited-key> \
+  --env MAX_VUS=500 \
+  k6/load-test.js
+
+# Run a single scenario
+k6 run --env BASE_URL=http://localhost --env SCENARIO=mcp k6/load-test.js
+```
+
+Available scenarios: `open`, `opa`, `subscription`, `apikey`, `mcp`, `grpc`, or `all` (default, weighted).
+
+### k6 Results (100 VUs, 9 minutes, single CAPI node)
+
+| Metric | Value |
+|--------|-------|
+| Total requests | 115,691 |
+| Throughput | 214 req/s |
+| Success rate | 99.99% (4 failures / network blips) |
+| p95 latency | 17.58ms |
+| p50 latency | 5.49ms |
+
+**Latency by protocol type (p95):**
+
+| Protocol | p95 | Median |
+|----------|-----|--------|
+| Open (no auth) | 52.56ms | 5.13ms |
+| OPA (role-based) | 49.81ms | 5.60ms |
+| Subscription (JWT claim) | 45.91ms | 5.72ms |
+| API Key + Throttle | 50.30ms | 5.13ms |
+| MCP (JSON-RPC) | 9.52ms | 5.55ms |
+| gRPC (via BFF bridge) | 17.26ms | 8.84ms |
+
+All thresholds passed (p95 < 2s, error rate < 0.1%). Test ran from macOS client to remote server over the internet.
+
 ## Remote Deployment (your-domain.eu)
 
 Set in `.env`:
