@@ -425,9 +425,11 @@ public class McpGateway implements AutoCloseable {
             HttpResponse<java.util.stream.Stream<String>> backendResponse =
                     httpClient.send(backendRequest, HttpResponse.BodyHandlers.ofLines());
 
-            backendResponse.body().forEach(line ->
-                exchange.getResponseSender().send("data: " + line + "\n\n")
-            );
+            try (java.util.stream.Stream<String> body = backendResponse.body()) {
+                body.forEach(line ->
+                    exchange.getResponseSender().send("data: " + line + "\n\n")
+                );
+            }
             exchange.endExchange();
             loadBalancer.reportSuccess(backendUrl);
 
