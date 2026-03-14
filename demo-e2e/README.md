@@ -208,6 +208,19 @@ curl http://localhost:8381/info/mcp/tools
 curl http://localhost:8381/info/metrics
 ```
 
+## Performance (single CAPI node, 500K requests in 15 minutes)
+
+![Requests and Memory](docs/grafana-requests.png)
+
+![Threads](docs/grafana-threads.png)
+
+- **Peak ~270 platform threads** — stable ceiling, no upward drift even under sustained 500K requests over 15 minutes
+- **No sawtooth climbing pattern** — the thread count plateaus and stays flat, confirming virtual threads are handling the Camel thread pool work
+- **Heap memory** — healthy GC pattern with G1 Eden cycling normally, Old Gen stable around 50-70 MiB
+- **Buffer pools** — direct memory stable at ~4 MiB, no leak
+
+CAPI uses Java virtual threads (Project Loom) for Camel thread pools and HTTP client executors. Virtual threads are invisible to JVM monitoring APIs, so the Grafana thread panel shows platform threads only.
+
 ## Remote Deployment (your-domain.eu)
 
 Set in `.env`:
