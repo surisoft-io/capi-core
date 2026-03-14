@@ -1,0 +1,1286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CAPI Gateway - E2E Integration Test</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #232633;
+    --border: #2e3144;
+    --text: #e1e4ed;
+    --dim: #7a7f96;
+    --accent: #6c8cff;
+    --green: #3dd68c;
+    --red: #f87171;
+    --yellow: #facc15;
+    --orange: #fb923c;
+    --cyan: #22d3ee;
+    --purple: #c084fc;
+    --pink: #f472b6;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--text); min-height: 100vh;
+  }
+  header {
+    border-bottom: 1px solid var(--border); padding: 1.2rem 2rem;
+    display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+  }
+  header h1 { font-size: 1.4rem; font-weight: 700; letter-spacing: -0.02em; }
+  header h1 span { color: var(--accent); }
+  .badge {
+    font-size: 0.65rem; font-weight: 600; padding: 0.2rem 0.5rem;
+    border-radius: 4px; text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .badge-oidc { background: #3a351e; color: var(--yellow); }
+  .badge-opa { background: #3a1e1e; color: var(--red); }
+  .badge-sub { background: #1e3a2f; color: var(--green); }
+  .badge-apikey { background: #2e1e3a; color: var(--purple); }
+  .badge-throttle { background: #3a2d1e; color: var(--orange); }
+  .badge-mcp { background: #1e2e3a; color: var(--cyan); }
+  .badge-count { background: var(--surface2); color: var(--accent); }
+
+  .container { max-width: 1400px; margin: 0 auto; padding: 1.5rem; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 1.5rem; }
+  .tab {
+    padding: 0.7rem 1.2rem; cursor: pointer; font-size: 0.82rem; font-weight: 600;
+    color: var(--dim); border-bottom: 2px solid transparent; transition: all 0.2s;
+    background: none; border-top: none; border-left: none; border-right: none; font-family: inherit;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* Auth panel */
+  .auth-bar {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 1rem 1.5rem; margin-bottom: 1.5rem;
+    display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+  }
+  .auth-bar label { font-size: 0.82rem; color: var(--dim); font-weight: 600; }
+  .auth-btn {
+    padding: 0.45rem 1rem; border-radius: 6px; font-size: 0.8rem; font-weight: 600;
+    cursor: pointer; font-family: inherit; border: 1px solid var(--border);
+    background: var(--surface2); color: var(--text); transition: all 0.2s;
+    text-decoration: none; display: inline-block;
+  }
+  .auth-btn:hover { border-color: var(--accent); }
+  .auth-btn.active { border-color: var(--green); color: var(--green); }
+  .auth-info {
+    font-size: 0.78rem; color: var(--dim); margin-left: auto;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .auth-info .role { color: var(--yellow); font-weight: 600; }
+  .auth-info .sub { color: var(--green); }
+  .logout-btn {
+    background: none; border: 1px solid var(--border); color: var(--red);
+    padding: 0.35rem 0.8rem; border-radius: 5px; font-size: 0.72rem;
+    cursor: pointer; font-family: inherit; text-decoration: none;
+  }
+
+  /* Cards */
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden;
+  }
+  .card-header {
+    padding: 0.75rem 1.25rem; border-bottom: 1px solid var(--border);
+    font-size: 0.82rem; font-weight: 600; color: var(--dim);
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .card-body { padding: 1.25rem; }
+
+  /* Service catalog */
+  .svc-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 1rem;
+  }
+  .svc-group-title {
+    font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.08em; margin: 1.25rem 0 0.6rem; padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+  }
+  .svc-group-title:first-child { border-top: none; margin-top: 0; }
+  .svc-item {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 0.7rem 1rem; display: flex; align-items: center; gap: 0.7rem;
+    cursor: pointer; transition: border-color 0.2s;
+  }
+  .svc-item:hover { border-color: var(--accent); }
+  .svc-item.selected { border-color: var(--accent); background: #1a2040; }
+  .svc-dot {
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+  }
+  .dot-open { background: var(--cyan); }
+  .dot-opa { background: var(--red); }
+  .dot-sub { background: var(--green); }
+  .dot-apikey { background: var(--purple); }
+  .dot-throttle { background: var(--orange); }
+  .dot-mcp { background: var(--pink); }
+  .svc-name { font-size: 0.82rem; font-weight: 600; }
+  .svc-meta { font-size: 0.68rem; color: var(--dim); }
+
+  /* Access matrix */
+  .matrix-table {
+    width: 100%; border-collapse: collapse; font-size: 0.78rem;
+  }
+  .matrix-table th, .matrix-table td {
+    padding: 0.5rem 0.7rem; border: 1px solid var(--border); text-align: center;
+  }
+  .matrix-table th {
+    background: var(--surface2); color: var(--dim); font-weight: 600;
+    text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em;
+    position: sticky; top: 0;
+  }
+  .matrix-table td:first-child { text-align: left; font-weight: 600; }
+  .cell-allow { color: var(--green); }
+  .cell-deny { color: var(--red); }
+  .cell-key { color: var(--purple); }
+  .cell-throttle { color: var(--orange); }
+  .matrix-scroll { max-height: 600px; overflow-y: auto; }
+
+  /* Load test */
+  .lt-controls {
+    display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap; margin-bottom: 1.25rem;
+  }
+  .lt-field { display: flex; flex-direction: column; gap: 0.3rem; }
+  .lt-field label { font-size: 0.72rem; color: var(--dim); font-weight: 600; }
+  .lt-field select, .lt-field input {
+    background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+    padding: 0.45rem 0.7rem; border-radius: 6px; font-size: 0.8rem; font-family: inherit;
+  }
+  .lt-field select { min-width: 200px; }
+  .lt-field input { width: 90px; }
+  .lt-field select:focus, .lt-field input:focus { outline: none; border-color: var(--accent); }
+  .lt-go {
+    background: var(--accent); color: #fff; border: none; padding: 0.5rem 1.5rem;
+    border-radius: 6px; font-size: 0.85rem; font-weight: 700; cursor: pointer;
+    font-family: inherit; transition: opacity 0.2s;
+  }
+  .lt-go:hover { opacity: 0.85; }
+  .lt-go:disabled { opacity: 0.4; cursor: not-allowed; }
+  .lt-stop {
+    background: var(--red); color: #fff; border: none; padding: 0.5rem 1.2rem;
+    border-radius: 6px; font-size: 0.82rem; font-weight: 600; cursor: pointer;
+    font-family: inherit; display: none;
+  }
+
+  .lt-stats {
+    display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1rem;
+  }
+  .lt-stat {
+    background: var(--surface2); border-radius: 8px; padding: 0.8rem 1.2rem;
+    text-align: center; min-width: 100px;
+  }
+  .lt-stat .num {
+    font-size: 1.8rem; font-weight: 700;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .lt-stat .lbl { font-size: 0.7rem; color: var(--dim); margin-top: 0.2rem; }
+  .num-200 { color: var(--green); }
+  .num-401 { color: var(--yellow); }
+  .num-403 { color: var(--red); }
+  .num-429 { color: var(--orange); }
+  .num-err { color: var(--dim); }
+  .num-time { color: var(--cyan); }
+  .lt-progress {
+    background: var(--surface2); border-radius: 4px; height: 6px;
+    overflow: hidden; margin-bottom: 1rem;
+  }
+  .lt-progress-bar {
+    height: 100%; background: var(--accent); border-radius: 4px;
+    transition: width 0.15s;
+  }
+
+  /* Log */
+  .log-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .log-header {
+    padding: 0.75rem 1.25rem; border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+  }
+  .log-header h2 { font-size: 0.82rem; color: var(--dim); text-transform: uppercase; letter-spacing: 0.06em; }
+  .log-filters { display: flex; gap: 0.5rem; align-items: center; }
+  .log-filter {
+    background: var(--surface2); border: 1px solid var(--border); color: var(--dim);
+    padding: 0.25rem 0.6rem; border-radius: 5px; font-size: 0.7rem;
+    cursor: pointer; font-family: inherit;
+  }
+  .log-filter:hover { border-color: var(--dim); color: var(--text); }
+  .log-filter.active { border-color: var(--accent); color: var(--accent); }
+  .log-clear {
+    background: none; border: 1px solid var(--border); color: var(--dim);
+    padding: 0.25rem 0.6rem; border-radius: 5px; font-size: 0.7rem;
+    cursor: pointer; font-family: inherit;
+  }
+  .log-body {
+    padding: 0.75rem 1.25rem; max-height: 500px; overflow-y: auto;
+    font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.75rem; line-height: 1.5;
+  }
+  .log-entry {
+    margin-bottom: 0.5rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border);
+  }
+  .log-entry:last-child { border-bottom: none; }
+  .log-meta { color: var(--dim); display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+  .log-method { color: var(--accent); font-weight: 600; }
+  .log-status { font-weight: 600; }
+  .log-status.s2xx { color: var(--green); }
+  .log-status.s4xx { color: var(--red); }
+  .log-status.s429 { color: var(--orange); }
+  .log-tag {
+    font-size: 0.62rem; padding: 0.1rem 0.35rem; border-radius: 3px; font-weight: 600;
+  }
+  .tag-open { background: #1e2d3a; color: var(--cyan); }
+  .tag-opa { background: #3a1e1e; color: var(--red); }
+  .tag-sub { background: #1e3a2f; color: var(--green); }
+  .tag-apikey { background: #2e1e3a; color: var(--purple); }
+  .tag-throttle { background: #3a2d1e; color: var(--orange); }
+  .tag-mcp { background: #2a1e3a; color: var(--pink); }
+  .log-json {
+    background: var(--bg); border-radius: 6px; padding: 0.5rem; margin-top: 0.3rem;
+    overflow-x: auto; white-space: pre-wrap; word-break: break-all;
+    color: var(--dim); max-height: 120px; overflow-y: auto; font-size: 0.72rem;
+  }
+  .log-json .key { color: var(--accent); }
+  .log-json .str { color: var(--green); }
+  .log-json .num { color: var(--orange); }
+  .log-json .bool { color: var(--purple); }
+  .empty-log { color: var(--dim); font-style: italic; text-align: center; padding: 2rem; }
+
+  /* Quick call buttons in catalog */
+  .svc-call {
+    background: var(--accent); color: #fff; border: none; padding: 0.25rem 0.6rem;
+    border-radius: 4px; font-size: 0.68rem; font-weight: 600; cursor: pointer;
+    font-family: inherit; margin-left: auto; flex-shrink: 0;
+  }
+  .svc-call:hover { opacity: 0.85; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1><span>CAPI</span> E2E Integration Test</h1>
+  <span class="badge badge-oidc">OIDC/BFF</span>
+  <span class="badge badge-opa">OPA</span>
+  <span class="badge badge-sub">Subscriptions</span>
+  <span class="badge badge-apikey">API Keys</span>
+  <span class="badge badge-throttle">Throttle</span>
+  <span class="badge badge-mcp">MCP</span>
+  <span class="badge" style="background:#1e3a1e;color:#4ade80">gRPC</span>
+  <span class="badge badge-count">42 Services</span>
+  <span class="badge badge-sub" style="cursor:pointer;margin-left:auto" onclick="showGatewayConfig()">Gateway Config</span>
+</header>
+
+<!-- Gateway Config Modal -->
+<div id="config-modal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.7);display:none;align-items:center;justify-content:center">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;max-width:800px;width:90%;max-height:80vh;display:flex;flex-direction:column">
+    <div style="padding:1rem 1.5rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+      <h2 style="font-size:1.1rem;font-weight:600">CAPI Gateway Configuration</h2>
+      <button onclick="closeGatewayConfig()" style="background:none;border:none;color:var(--dim);font-size:1.5rem;cursor:pointer">&times;</button>
+    </div>
+    <pre id="config-content" style="padding:1.5rem;overflow:auto;flex:1;font-size:0.8rem;line-height:1.6;color:var(--text);margin:0">Loading...</pre>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- Auth bar -->
+  <div class="auth-bar">
+    <label>Login as:</label>
+    <a class="auth-btn" href="/bff/login?hint=alice">Alice (admin)</a>
+    <a class="auth-btn" href="/bff/login?hint=bob">Bob (manager)</a>
+    <a class="auth-btn" href="/bff/login?hint=charlie">Charlie (viewer)</a>
+    <div class="auth-info" id="authInfo">Not authenticated</div>
+    <a class="logout-btn" id="logoutBtn" href="/bff/logout" style="display:none">Logout</a>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('catalog')">Service Catalog</button>
+    <button class="tab" onclick="switchTab('matrix')">Access Matrix</button>
+    <button class="tab" onclick="switchTab('websocket')">WebSocket</button>
+    <button class="tab" onclick="switchTab('sse')">SSE</button>
+    <button class="tab" onclick="switchTab('mcp')">MCP</button>
+    <button class="tab" onclick="switchTab('grpc')">gRPC</button>
+    <button class="tab" onclick="switchTab('loadtest')">Load Test</button>
+    <button class="tab" onclick="switchTab('log')">Request Log</button>
+  </div>
+
+  <!-- Tab: Service Catalog -->
+  <div class="tab-content active" id="tab-catalog">
+    <div class="svc-group-title" style="color:var(--cyan)">Open (no auth required)</div>
+    <div class="svc-grid" id="grid-open"></div>
+
+    <div class="svc-group-title" style="color:var(--red)">OPA-Protected (role-based)</div>
+    <div class="svc-grid" id="grid-opa"></div>
+
+    <div class="svc-group-title" style="color:var(--green)">Subscription Groups (JWT claim)</div>
+    <div class="svc-grid" id="grid-sub"></div>
+
+    <div class="svc-group-title" style="color:var(--purple)">API Key + Per-Key Throttle</div>
+    <div class="svc-grid" id="grid-apikey"></div>
+
+    <div class="svc-group-title" style="color:var(--orange)">Global Throttle</div>
+    <div class="svc-grid" id="grid-throttle"></div>
+
+    <div class="svc-group-title" style="color:var(--pink)">MCP Tools (JSON-RPC 2.0)</div>
+    <div class="svc-grid" id="grid-mcp"></div>
+  </div>
+
+  <!-- Tab: Access Matrix -->
+  <div class="tab-content" id="tab-matrix">
+    <div class="card">
+      <div class="card-header">Service Access Matrix</div>
+      <div class="card-body">
+        <div class="matrix-scroll" id="matrixScroll"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab: WebSocket -->
+  <div class="tab-content" id="tab-websocket">
+    <div class="card">
+      <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+        <span>WebSocket Live Feed</span>
+        <div style="display:flex; gap:0.5rem; align-items:center;">
+          <span class="ws-status" id="wsStatus" style="font-size:0.72rem; color:var(--dim);">Disconnected</span>
+          <button class="auth-btn" id="wsConnectBtn" onclick="wsConnect()" style="font-size:0.72rem; padding:0.3rem 0.8rem;">Connect</button>
+          <button class="logout-btn" id="wsDisconnectBtn" onclick="wsDisconnect()" style="display:none; font-size:0.72rem; padding:0.3rem 0.8rem;">Disconnect</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div id="wsFeed" style="max-height:500px; overflow-y:auto; font-family:'SF Mono','Fira Code',monospace; font-size:0.78rem; line-height:1.8;">
+          <div class="empty-log">Login and click Connect to start receiving WebSocket pings.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab: SSE -->
+  <div class="tab-content" id="tab-sse">
+    <div class="card">
+      <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+        <span>SSE Live Event Stream</span>
+        <div style="display:flex; gap:0.5rem; align-items:center;">
+          <span id="sseStatus" style="font-size:0.72rem; color:var(--dim);">Disconnected</span>
+          <button class="auth-btn" id="sseConnectBtn" onclick="sseConnect()" style="font-size:0.72rem; padding:0.3rem 0.8rem;">Connect</button>
+          <button class="logout-btn" id="sseDisconnectBtn" onclick="sseDisconnect()" style="display:none; font-size:0.72rem; padding:0.3rem 0.8rem;">Disconnect</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div style="display:flex; gap:0.5rem; margin-bottom:1rem; flex-wrap:wrap;" id="sseFilters">
+          <button class="log-filter active" onclick="setSseFilter('all')">All</button>
+          <button class="log-filter" onclick="setSseFilter('cpu')">CPU</button>
+          <button class="log-filter" onclick="setSseFilter('memory')">Memory</button>
+          <button class="log-filter" onclick="setSseFilter('network')">Network</button>
+          <button class="log-filter" onclick="setSseFilter('request')">Requests</button>
+          <button class="log-filter" onclick="setSseFilter('alert')">Alerts</button>
+          <button class="log-filter" onclick="setSseFilter('deployment')">Deploys</button>
+        </div>
+        <div id="sseFeed" style="max-height:500px; overflow-y:auto; font-family:'SF Mono','Fira Code',monospace; font-size:0.78rem; line-height:1.8;">
+          <div class="empty-log">Login and click Connect to start receiving SSE events.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab: MCP -->
+  <div class="tab-content" id="tab-mcp">
+    <div class="card">
+      <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+        <span>MCP Gateway (JSON-RPC 2.0)</span>
+        <div style="display:flex;gap:0.5rem;align-items:center;">
+          <span id="mcpSessionInfo" style="font-size:0.72rem;color:var(--dim);">No session</span>
+          <button class="auth-btn" onclick="mcpInitialize()" style="font-size:0.72rem;padding:0.3rem 0.8rem;">Initialize</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:1rem;">
+          <button class="svc-call" onclick="mcpListTools()" style="font-size:0.75rem;">List Tools</button>
+          <button class="svc-call" onclick="mcpPing()" style="font-size:0.75rem;">Ping</button>
+        </div>
+        <div style="margin-bottom:1rem;display:flex;gap:0.5rem;align-items:end;flex-wrap:wrap;">
+          <div style="flex:1;min-width:200px;">
+            <label style="font-size:0.7rem;color:var(--dim);display:block;margin-bottom:0.3rem;">Tool Name</label>
+            <select id="mcpToolSelect" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:0.4rem;font-size:0.8rem;">
+              <option value="">-- initialize first --</option>
+            </select>
+          </div>
+          <div style="flex:2;min-width:250px;">
+            <label style="font-size:0.7rem;color:var(--dim);display:block;margin-bottom:0.3rem;">Arguments (JSON)</label>
+            <input id="mcpToolArgs" type="text" placeholder='{"city":"Lisbon"}' style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:0.4rem;font-size:0.8rem;font-family:monospace;">
+          </div>
+          <button class="svc-call" onclick="mcpCallTool()" style="font-size:0.75rem;padding:0.4rem 1rem;">Call Tool</button>
+        </div>
+        <div id="mcpLog" style="max-height:500px;overflow-y:auto;font-family:'SF Mono','Fira Code',monospace;font-size:0.78rem;line-height:1.6;">
+          <div class="empty-log">Click Initialize to start an MCP session.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab: gRPC -->
+  <div class="tab-content" id="tab-grpc">
+    <div class="card">
+      <div class="card-header">gRPC Gateway (HTTP/2 via CAPI)</div>
+      <div class="card-body">
+        <p style="font-size:0.78rem;color:var(--dim);margin-bottom:1rem;">
+          CAPI proxies gRPC traffic on port 8384 using the <code style="color:var(--accent)">x-capi-service</code> header for routing.
+          The BFF bridges browser requests to gRPC via Python's grpcio library.
+        </p>
+        <div style="display:flex;gap:0.5rem;align-items:end;flex-wrap:wrap;margin-bottom:1rem;">
+          <div>
+            <label style="font-size:0.7rem;color:var(--dim);display:block;margin-bottom:0.3rem;">Service/Group</label>
+            <input id="grpcService" type="text" value="greeter/dev" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:0.4rem;font-size:0.8rem;font-family:monospace;width:150px;">
+          </div>
+          <div>
+            <label style="font-size:0.7rem;color:var(--dim);display:block;margin-bottom:0.3rem;">Name (HelloRequest.name)</label>
+            <input id="grpcName" type="text" value="CAPI" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:0.4rem;font-size:0.8rem;width:200px;">
+          </div>
+          <button class="svc-call" onclick="grpcCall()" style="font-size:0.75rem;padding:0.4rem 1rem;">Call SayHello</button>
+        </div>
+        <div style="margin-bottom:1rem;">
+          <div style="font-size:0.72rem;color:var(--dim);margin-bottom:0.5rem;">Proto definition:</div>
+          <pre style="background:var(--bg);border-radius:6px;padding:0.8rem;font-size:0.75rem;color:var(--dim);line-height:1.5;margin:0;">service Greeter {
+  rpc SayHello (HelloRequest) returns (HelloReply);
+}
+message HelloRequest { string name = 1; }
+message HelloReply   { string message = 1; }</pre>
+        </div>
+        <div style="font-size:0.72rem;color:var(--dim);margin-bottom:0.5rem;">Direct CLI test:</div>
+        <pre style="background:var(--bg);border-radius:6px;padding:0.8rem;font-size:0.75rem;color:var(--dim);line-height:1.5;margin:0;margin-bottom:1rem;">grpcurl -plaintext \
+  -H "x-capi-service: greeter/dev" \
+  -import-path demo-e2e/services -proto greeter.proto \
+  -d '{"name": "CAPI"}' \
+  localhost:8384 greeter.Greeter/SayHello</pre>
+        <div id="grpcLog" style="max-height:400px;overflow-y:auto;font-family:'SF Mono','Fira Code',monospace;font-size:0.78rem;line-height:1.6;">
+          <div class="empty-log">Click Call SayHello to test the gRPC gateway.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab: Load Test -->
+  <div class="tab-content" id="tab-loadtest">
+    <div class="card" style="margin-bottom:1.5rem">
+      <div class="card-header">Load Test Configuration</div>
+      <div class="card-body">
+        <div class="lt-controls">
+          <div class="lt-field">
+            <label>Target Services</label>
+            <select id="ltServices" multiple size="5"></select>
+          </div>
+          <div class="lt-field">
+            <label>Auth Mode</label>
+            <select id="ltAuth">
+              <option value="auto">Auto (detect per service)</option>
+              <option value="none">None</option>
+              <option value="session">Session (BFF token)</option>
+              <option value="apikey-unlimited">API Key (unlimited)</option>
+              <option value="apikey-standard">API Key (10/30s)</option>
+              <option value="apikey-limited">API Key (3/30s)</option>
+            </select>
+          </div>
+          <div class="lt-field">
+            <label>Total Requests</label>
+            <input id="ltTotal" type="number" value="50" min="1" max="500">
+          </div>
+          <div class="lt-field">
+            <label>Concurrency</label>
+            <input id="ltConcurrency" type="number" value="5" min="1" max="20">
+          </div>
+          <button class="lt-go" id="ltGo" onclick="startLoadTest()">Run Load Test</button>
+          <button class="lt-stop" id="ltStop" onclick="stopLoadTest()">Stop</button>
+        </div>
+        <div class="lt-progress"><div class="lt-progress-bar" id="ltBar" style="width:0%"></div></div>
+        <div class="lt-stats">
+          <div class="lt-stat"><div class="num num-200" id="lt200">0</div><div class="lbl">200 OK</div></div>
+          <div class="lt-stat"><div class="num num-401" id="lt401">0</div><div class="lbl">401 Unauth</div></div>
+          <div class="lt-stat"><div class="num num-403" id="lt403">0</div><div class="lbl">403 Forbidden</div></div>
+          <div class="lt-stat"><div class="num num-429" id="lt429">0</div><div class="lbl">429 Throttled</div></div>
+          <div class="lt-stat"><div class="num num-err" id="ltErr">0</div><div class="lbl">Errors</div></div>
+          <div class="lt-stat"><div class="num num-time" id="ltAvg">0</div><div class="lbl">Avg ms</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab: Request Log -->
+  <div class="tab-content" id="tab-log">
+    <div class="log-panel">
+      <div class="log-header">
+        <h2>Request Log</h2>
+        <div class="log-filters">
+          <button class="log-filter active" onclick="setLogFilter('all')">All</button>
+          <button class="log-filter" onclick="setLogFilter('2xx')">2xx</button>
+          <button class="log-filter" onclick="setLogFilter('4xx')">4xx</button>
+          <button class="log-filter" onclick="setLogFilter('429')">429</button>
+          <button class="log-clear" onclick="clearLog()">Clear</button>
+        </div>
+      </div>
+      <div class="log-body" id="logBody">
+        <div class="empty-log">Call services from the catalog or run a load test to see requests here.</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── Gateway Config Modal ──
+function showGatewayConfig() {
+  const modal = document.getElementById('config-modal');
+  const content = document.getElementById('config-content');
+  modal.style.display = 'flex';
+  content.textContent = 'Loading...';
+  fetch('/bff/gateway-config')
+    .then(r => r.ok ? r.text() : Promise.reject(r.status))
+    .then(t => { content.textContent = t; })
+    .catch(e => { content.textContent = 'Failed to load config: ' + e; });
+}
+function closeGatewayConfig() {
+  document.getElementById('config-modal').style.display = 'none';
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeGatewayConfig(); });
+
+// ── Service definitions ──
+const SERVICES = {
+  open: [
+    { name: 'health-service', label: 'Health', desc: 'System health check' },
+    { name: 'config-service', label: 'Config', desc: 'Configuration' },
+    { name: 'search-service', label: 'Search', desc: 'Full-text search' },
+    { name: 'events-service', label: 'Events', desc: 'Event stream' },
+    { name: 'webhook-service', label: 'Webhook', desc: 'Webhook delivery' },
+  ],
+  opa: [
+    { name: 'user-service', label: 'User', desc: 'allow_all', policy: 'allow_all', access: ['admin','manager','viewer'] },
+    { name: 'profile-service', label: 'Profile', desc: 'allow_all', policy: 'allow_all', access: ['admin','manager','viewer'] },
+    { name: 'catalog-service', label: 'Catalog', desc: 'allow_all', policy: 'allow_all', access: ['admin','manager','viewer'] },
+    { name: 'pricing-service', label: 'Pricing', desc: 'manager_or_admin', policy: 'manager_or_admin', access: ['admin','manager'] },
+    { name: 'order-service', label: 'Order', desc: 'manager_or_admin', policy: 'manager_or_admin', access: ['admin','manager'] },
+    { name: 'payment-service', label: 'Payment', desc: 'admin_only', policy: 'admin_only', access: ['admin'] },
+    { name: 'invoice-service', label: 'Invoice', desc: 'admin_only', policy: 'admin_only', access: ['admin'] },
+    { name: 'audit-service', label: 'Audit', desc: 'admin_only', policy: 'admin_only', access: ['admin'] },
+    { name: 'logging-service', label: 'Logging', desc: 'owner_only', policy: 'owner_only', access: ['admin'] },
+    { name: 'storage-service', label: 'Storage', desc: 'owner_only', policy: 'owner_only', access: ['admin'] },
+  ],
+  sub: [
+    { name: 'notification-service', label: 'Notification', desc: 'notifications', group: 'notifications' },
+    { name: 'preferences-service', label: 'Preferences', desc: 'notifications', group: 'notifications' },
+    { name: 'recommendation-service', label: 'Recommendation', desc: 'recommendations', group: 'recommendations' },
+    { name: 'email-service', label: 'Email', desc: 'messaging', group: 'messaging' },
+    { name: 'sms-service', label: 'SMS', desc: 'messaging', group: 'messaging' },
+    { name: 'push-service', label: 'Push', desc: 'messaging', group: 'messaging' },
+    { name: 'chat-service', label: 'Chat', desc: 'messaging', group: 'messaging' },
+    { name: 'partner-api', label: 'Partner API', desc: 'partner', group: 'partner' },
+    { name: 'marketplace-service', label: 'Marketplace', desc: 'partner', group: 'partner' },
+    { name: 'integration-service', label: 'Integration', desc: 'partner', group: 'partner' },
+  ],
+  apikey: [
+    { name: 'inventory-service', label: 'Inventory', desc: '3 keys' },
+    { name: 'shipping-service', label: 'Shipping', desc: '3 keys' },
+    { name: 'returns-service', label: 'Returns', desc: '3 keys' },
+    { name: 'export-service', label: 'Export', desc: '3 keys' },
+    { name: 'sync-service', label: 'Sync', desc: '3 keys' },
+  ],
+  throttle: [
+    { name: 'metrics-service', label: 'Metrics', desc: '20/30s', limit: 20 },
+    { name: 'reporting-service', label: 'Reporting', desc: '15/30s', limit: 15 },
+    { name: 'dashboard-service', label: 'Dashboard', desc: '10/30s', limit: 10 },
+    { name: 'alerts-service', label: 'Alerts', desc: '10/30s', limit: 10 },
+    { name: 'cache-service', label: 'Cache', desc: '30/30s', limit: 30 },
+  ],
+  mcp: [
+    { name: 'weather_forecast', label: 'Weather Forecast', desc: 'REST backend', tool: 'weather_forecast', defaultArgs: '{"city":"Lisbon"}' },
+    { name: 'inventory_lookup', label: 'Inventory Lookup', desc: 'REST backend', tool: 'inventory_lookup', defaultArgs: '{"product":"laptop"}' },
+    { name: 'translate_text', label: 'Translate Text', desc: 'REST backend', tool: 'translate_text', defaultArgs: '{"text":"hello","target_language":"portuguese"}' },
+    { name: 'math_calculate', label: 'Math Calculate', desc: 'MCP Server', tool: 'math_calculate', defaultArgs: '{"expression":"sqrt(144) + 2**3"}' },
+    { name: 'math_convert', label: 'Math Convert', desc: 'MCP Server', tool: 'math_convert', defaultArgs: '{"value":100,"from_unit":"km","to_unit":"miles"}' },
+    { name: 'math_statistics', label: 'Math Statistics', desc: 'MCP Server', tool: 'math_statistics', defaultArgs: '{"numbers":[10,20,30,40,50]}' },
+  ],
+};
+
+let API_KEYS = { unlimited: '', standard: '', limited: '' };
+fetch('/bff/config').then(r => r.json()).then(c => { API_KEYS = c.apiKeys; }).catch(() => {});
+
+const USERS = {
+  alice: { role: 'admin', color: 'var(--green)' },
+  bob: { role: 'manager', color: 'var(--yellow)' },
+  charlie: { role: 'viewer', color: 'var(--cyan)' },
+};
+
+let currentUser = null;
+let currentToken = null;
+let logEntries = [];
+let logFilter = 'all';
+let ltAbort = false;
+
+// ── Auth ──
+async function checkSession() {
+  try {
+    const meRes = await fetch('/bff/me');
+    if (!meRes.ok) return;
+    const me = await meRes.json();
+    if (!me.authenticated) return;
+
+    const username = me.username;
+    currentUser = { username, ...me };
+
+    const tokRes = await fetch('/bff/token');
+    const tokData = await tokRes.json();
+    currentToken = tokData.access_token;
+
+    // Highlight the matching login button
+    document.querySelectorAll('.auth-btn').forEach(b => {
+      if (b.href && b.href.includes(`hint=${username}`)) b.classList.add('active');
+    });
+    const color = USERS[username] ? USERS[username].color : 'var(--text)';
+    document.getElementById('authInfo').innerHTML =
+      `<span style="color:${color}">${username}</span> ` +
+      `role: <span class="role">${me.roles.filter(r=>!r.startsWith('default')).join(', ')}</span> ` +
+      `subs: <span class="sub">${(me.subscriptions||[]).join(', ') || 'none'}</span>`;
+    document.getElementById('logoutBtn').style.display = '';
+    addLog('auth', `SESSION ${username}`, me.roles.filter(r=>!r.startsWith('default')).join(', '), 200, me);
+  } catch (e) {
+    // Not logged in, that's fine
+  }
+}
+
+// ── Catalog rendering ──
+function renderCatalog() {
+  const typeMap = { open: 'dot-open', opa: 'dot-opa', sub: 'dot-sub', apikey: 'dot-apikey', throttle: 'dot-throttle', mcp: 'dot-mcp' };
+  const tagMap = { open: 'tag-open', opa: 'tag-opa', sub: 'tag-sub', apikey: 'tag-apikey', throttle: 'tag-throttle', mcp: 'tag-mcp' };
+
+  for (const [type, svcs] of Object.entries(SERVICES)) {
+    const grid = document.getElementById(`grid-${type}`);
+    grid.innerHTML = '';
+    for (const svc of svcs) {
+      const div = document.createElement('div');
+      div.className = 'svc-item';
+      const callAction = type === 'mcp'
+        ? `mcpQuickCall('${svc.tool}', ${JSON.stringify(svc.defaultArgs || '{}')})`
+        : `callService('${type}','${svc.name}')`;
+      div.innerHTML = `
+        <div class="svc-dot ${typeMap[type]}"></div>
+        <div>
+          <div class="svc-name">${svc.label}</div>
+          <div class="svc-meta">${svc.name} &middot; ${svc.desc}</div>
+        </div>
+        <button class="svc-call" onclick="${callAction}">Call</button>
+      `;
+      grid.appendChild(div);
+    }
+  }
+
+  // Populate load test select
+  const sel = document.getElementById('ltServices');
+  sel.innerHTML = '';
+  for (const [type, svcs] of Object.entries(SERVICES)) {
+    for (const svc of svcs) {
+      const opt = document.createElement('option');
+      opt.value = `${type}:${svc.name}`;
+      opt.textContent = `[${type}] ${svc.name}`;
+      sel.appendChild(opt);
+    }
+  }
+}
+
+// ── Call a service ──
+async function callService(type, name) {
+  const url = `/api/${name}/v1`;
+  const headers = { 'Content-Type': 'application/json' };
+  let tagCls = { open: 'tag-open', opa: 'tag-opa', sub: 'tag-sub', apikey: 'tag-apikey', throttle: 'tag-throttle', mcp: 'tag-mcp' }[type];
+
+  if (type === 'opa' || type === 'sub') {
+    if (!currentToken) {
+      addLog(type, `GET ${name}/v1`, 'No token - login first', 401, null, tagCls);
+      return;
+    }
+    headers['Authorization'] = `Bearer ${currentToken}`;
+  } else if (type === 'apikey') {
+    headers['Authorization'] = `ApiKey ${API_KEYS.unlimited}`;
+  }
+
+  const start = performance.now();
+  try {
+    const res = await fetch(url, { headers });
+    const ms = Math.round(performance.now() - start);
+    let data;
+    try { data = await res.json(); } catch { data = await res.text(); }
+    addLog(type, `GET ${name}/v1`, `${ms}ms`, res.status, data, tagCls);
+    return res.status;
+  } catch (e) {
+    addLog(type, `GET ${name}/v1`, '', 'error', { error: e.message }, tagCls);
+    return 0;
+  }
+}
+
+// ── Access Matrix ──
+function renderMatrix() {
+  const users = ['alice (admin)', 'bob (manager)', 'charlie (viewer)', 'API Key', 'Anonymous'];
+  let html = '<table class="matrix-table"><thead><tr><th>Service</th>';
+  for (const u of users) html += `<th>${u}</th>`;
+  html += '</tr></thead><tbody>';
+
+  // Open
+  for (const svc of SERVICES.open) {
+    html += `<tr><td><span style="color:var(--cyan)">${svc.name}</span></td>`;
+    for (let i = 0; i < 5; i++) html += '<td class="cell-allow">ALLOW</td>';
+    html += '</tr>';
+  }
+
+  // OPA
+  for (const svc of SERVICES.opa) {
+    html += `<tr><td><span style="color:var(--red)">${svc.name}</span><br><small style="color:var(--dim)">${svc.policy}</small></td>`;
+    for (const role of ['admin', 'manager', 'viewer']) {
+      html += svc.access.includes(role) ? '<td class="cell-allow">ALLOW</td>' : '<td class="cell-deny">DENY</td>';
+    }
+    html += '<td class="cell-deny">N/A</td><td class="cell-deny">DENY</td></tr>';
+  }
+
+  // Subscription
+  for (const svc of SERVICES.sub) {
+    html += `<tr><td><span style="color:var(--green)">${svc.name}</span><br><small style="color:var(--dim)">${svc.group}</small></td>`;
+    // All BFF users have all subscriptions
+    for (let i = 0; i < 3; i++) html += '<td class="cell-allow">ALLOW</td>';
+    html += '<td class="cell-deny">N/A</td><td class="cell-deny">DENY</td></tr>';
+  }
+
+  // API Key
+  for (const svc of SERVICES.apikey) {
+    html += `<tr><td><span style="color:var(--purple)">${svc.name}</span></td>`;
+    for (let i = 0; i < 3; i++) html += '<td class="cell-deny">N/A</td>';
+    html += '<td class="cell-key">API KEY</td><td class="cell-deny">DENY</td></tr>';
+  }
+
+  // Throttle
+  for (const svc of SERVICES.throttle) {
+    html += `<tr><td><span style="color:var(--orange)">${svc.name}</span><br><small style="color:var(--dim)">${svc.desc}</small></td>`;
+    for (let i = 0; i < 5; i++) html += `<td class="cell-throttle">${svc.desc}</td>`;
+    html += '</tr>';
+  }
+
+  html += '</tbody></table>';
+  document.getElementById('matrixScroll').innerHTML = html;
+}
+
+// ── Load Test ──
+let ltStats = { s200: 0, s401: 0, s403: 0, s429: 0, err: 0, totalMs: 0, count: 0 };
+
+function resetLtStats() {
+  ltStats = { s200: 0, s401: 0, s403: 0, s429: 0, err: 0, totalMs: 0, count: 0 };
+  document.getElementById('lt200').textContent = '0';
+  document.getElementById('lt401').textContent = '0';
+  document.getElementById('lt403').textContent = '0';
+  document.getElementById('lt429').textContent = '0';
+  document.getElementById('ltErr').textContent = '0';
+  document.getElementById('ltAvg').textContent = '0';
+  document.getElementById('ltBar').style.width = '0%';
+}
+
+function updateLtStats(status, ms) {
+  if (status >= 200 && status < 300) ltStats.s200++;
+  else if (status === 401) ltStats.s401++;
+  else if (status === 403) ltStats.s403++;
+  else if (status === 429) ltStats.s429++;
+  else ltStats.err++;
+  ltStats.totalMs += ms;
+  ltStats.count++;
+
+  document.getElementById('lt200').textContent = ltStats.s200;
+  document.getElementById('lt401').textContent = ltStats.s401;
+  document.getElementById('lt403').textContent = ltStats.s403;
+  document.getElementById('lt429').textContent = ltStats.s429;
+  document.getElementById('ltErr').textContent = ltStats.err;
+  document.getElementById('ltAvg').textContent = ltStats.count ? Math.round(ltStats.totalMs / ltStats.count) : 0;
+}
+
+async function startLoadTest() {
+  const sel = document.getElementById('ltServices');
+  const selected = Array.from(sel.selectedOptions).map(o => o.value);
+  if (!selected.length) { alert('Select at least one service'); return; }
+
+  const total = parseInt(document.getElementById('ltTotal').value) || 50;
+  const concurrency = parseInt(document.getElementById('ltConcurrency').value) || 5;
+  const authMode = document.getElementById('ltAuth').value;
+
+  resetLtStats();
+  ltAbort = false;
+  document.getElementById('ltGo').disabled = true;
+  document.getElementById('ltStop').style.display = '';
+
+  let completed = 0;
+
+  async function doRequest() {
+    while (completed < total && !ltAbort) {
+      const idx = completed++;
+      const pct = Math.round((idx / total) * 100);
+      document.getElementById('ltBar').style.width = pct + '%';
+
+      const target = selected[idx % selected.length];
+      const [type, name] = target.split(':');
+      const url = `/api/${name}/v1`;
+      const headers = { 'Content-Type': 'application/json' };
+
+      if (authMode === 'auto') {
+        if ((type === 'opa' || type === 'sub') && currentToken) {
+          headers['Authorization'] = `Bearer ${currentToken}`;
+        } else if (type === 'apikey') {
+          headers['Authorization'] = `ApiKey ${API_KEYS.unlimited}`;
+        }
+      } else if (authMode === 'session' && currentToken) {
+        headers['Authorization'] = `Bearer ${currentToken}`;
+      } else if (authMode === 'apikey-unlimited') {
+        headers['Authorization'] = `ApiKey ${API_KEYS.unlimited}`;
+      } else if (authMode === 'apikey-standard') {
+        headers['Authorization'] = `ApiKey ${API_KEYS.standard}`;
+      } else if (authMode === 'apikey-limited') {
+        headers['Authorization'] = `ApiKey ${API_KEYS.limited}`;
+      }
+
+      const start = performance.now();
+      try {
+        const res = await fetch(url, { headers });
+        const ms = Math.round(performance.now() - start);
+        let data;
+        try { data = await res.json(); } catch { data = null; }
+        updateLtStats(res.status, ms);
+        const tagCls = { open:'tag-open', opa:'tag-opa', sub:'tag-sub', apikey:'tag-apikey', throttle:'tag-throttle', mcp:'tag-mcp' }[type];
+        addLog(type, `GET ${name}/v1`, `${ms}ms`, res.status, data, tagCls);
+      } catch (e) {
+        updateLtStats(0, Math.round(performance.now() - start));
+        addLog(type, `GET ${name}/v1`, '', 'error', { error: e.message });
+      }
+    }
+  }
+
+  const workers = [];
+  for (let i = 0; i < concurrency; i++) workers.push(doRequest());
+  await Promise.all(workers);
+
+  document.getElementById('ltBar').style.width = '100%';
+  document.getElementById('ltGo').disabled = false;
+  document.getElementById('ltStop').style.display = 'none';
+}
+
+function stopLoadTest() {
+  ltAbort = true;
+  document.getElementById('ltGo').disabled = false;
+  document.getElementById('ltStop').style.display = 'none';
+}
+
+// ── Logging ──
+function syntaxHighlight(json) {
+  if (json === null || json === undefined) return '';
+  const str = typeof json === 'string' ? json : JSON.stringify(json, null, 2);
+  return str.replace(/("(\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, (match) => {
+    let cls = 'num';
+    if (/^"/.test(match)) cls = /:$/.test(match) ? 'key' : 'str';
+    else if (/true|false/.test(match)) cls = 'bool';
+    return `<span class="${cls}">${match}</span>`;
+  });
+}
+
+function addLog(type, method, params, status, body, tagCls) {
+  const time = new Date().toLocaleTimeString();
+  const isOk = typeof status === 'number' && status >= 200 && status < 300;
+  const is429 = status === 429;
+  const statusCls = isOk ? 's2xx' : is429 ? 's429' : 's4xx';
+  tagCls = tagCls || '';
+
+  const entry = { type, time, method, params, status, statusCls, body, tagCls };
+  logEntries.unshift(entry);
+  if (logEntries.length > 500) logEntries.pop();
+  renderLog();
+}
+
+function renderLog() {
+  const logBody = document.getElementById('logBody');
+  const filtered = logEntries.filter(e => {
+    if (logFilter === 'all') return true;
+    if (logFilter === '2xx') return typeof e.status === 'number' && e.status >= 200 && e.status < 300;
+    if (logFilter === '4xx') return typeof e.status === 'number' && e.status >= 400 && e.status < 500;
+    if (logFilter === '429') return e.status === 429;
+    return true;
+  });
+
+  if (!filtered.length) {
+    logBody.innerHTML = '<div class="empty-log">No matching entries.</div>';
+    return;
+  }
+
+  logBody.innerHTML = filtered.slice(0, 100).map(e => `
+    <div class="log-entry">
+      <div class="log-meta">
+        <span>${e.time}</span>
+        ${e.tagCls ? `<span class="log-tag ${e.tagCls}">${e.type}</span>` : `<span style="color:var(--dim)">${e.type}</span>`}
+        <span class="log-method">${e.method}</span>
+        <span>${e.params}</span>
+        <span class="log-status ${e.statusCls}">${e.status}</span>
+      </div>
+      ${e.body ? `<div class="log-json">${syntaxHighlight(e.body)}</div>` : ''}
+    </div>
+  `).join('');
+}
+
+function setLogFilter(f) {
+  logFilter = f;
+  document.querySelectorAll('.log-filter').forEach(b => b.classList.toggle('active', b.textContent.toLowerCase() === f || (f === 'all' && b.textContent === 'All')));
+  renderLog();
+}
+
+function clearLog() {
+  logEntries = [];
+  renderLog();
+  document.getElementById('logBody').innerHTML = '<div class="empty-log">Log cleared.</div>';
+}
+
+// ── Tab switching ──
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.getElementById(`tab-${name}`).classList.add('active');
+  event.target.classList.add('active');
+}
+
+// ── WebSocket ──
+let ws = null;
+let wsMsgCount = 0;
+
+function wsConnect() {
+  if (!currentToken) {
+    alert('Please login first');
+    return;
+  }
+  if (ws && ws.readyState <= 1) return;
+
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const url = `${proto}//${location.host}/ws/websocket-service/v1?access_token=${encodeURIComponent(currentToken)}`;
+
+  ws = new WebSocket(url);
+  wsMsgCount = 0;
+
+  document.getElementById('wsStatus').textContent = 'Connecting...';
+  document.getElementById('wsStatus').style.color = 'var(--yellow)';
+
+  ws.onopen = () => {
+    document.getElementById('wsStatus').textContent = 'Connected';
+    document.getElementById('wsStatus').style.color = 'var(--green)';
+    document.getElementById('wsConnectBtn').style.display = 'none';
+    document.getElementById('wsDisconnectBtn').style.display = '';
+    document.getElementById('wsFeed').innerHTML = '';
+  };
+
+  ws.onmessage = (event) => {
+    wsMsgCount++;
+    const data = JSON.parse(event.data);
+    const feed = document.getElementById('wsFeed');
+    const entry = document.createElement('div');
+    entry.style.cssText = 'padding:0.4rem 0.6rem; margin-bottom:0.3rem; background:var(--surface2); border-radius:6px; border-left:3px solid ' +
+      (data.type === 'connected' ? 'var(--green)' : 'var(--cyan)');
+
+    if (data.type === 'connected') {
+      entry.innerHTML = `<span style="color:var(--green); font-weight:600;">CONNECTED</span> ` +
+        `<span style="color:var(--dim);">client: ${data.client_id}</span> ` +
+        `<span style="color:var(--dim);">${data.timestamp}</span>`;
+    } else {
+      entry.innerHTML = `<span style="color:var(--cyan); font-weight:600;">PING #${wsMsgCount}</span> ` +
+        `<span style="color:var(--dim);">seq: ${data.seq}</span> ` +
+        `<span>CPU: <span style="color:${data.cpu_pct > 70 ? 'var(--red)' : 'var(--green)'}">${data.cpu_pct}%</span></span> ` +
+        `<span>MEM: <span style="color:${data.memory_pct > 80 ? 'var(--red)' : 'var(--yellow)'}">${data.memory_pct}%</span></span> ` +
+        `<span style="color:var(--dim);">conns: ${data.active_connections}</span> ` +
+        `<span style="color:var(--dim);">${data.timestamp}</span>`;
+    }
+
+    feed.insertBefore(entry, feed.firstChild);
+    // Keep max 100 entries
+    while (feed.children.length > 100) feed.removeChild(feed.lastChild);
+  };
+
+  ws.onclose = () => {
+    document.getElementById('wsStatus').textContent = 'Disconnected';
+    document.getElementById('wsStatus').style.color = 'var(--dim)';
+    document.getElementById('wsConnectBtn').style.display = '';
+    document.getElementById('wsDisconnectBtn').style.display = 'none';
+  };
+
+  ws.onerror = () => {
+    document.getElementById('wsStatus').textContent = 'Error';
+    document.getElementById('wsStatus').style.color = 'var(--red)';
+  };
+}
+
+function wsDisconnect() {
+  if (ws) ws.close();
+}
+
+// ── SSE ──
+let sseSource = null;
+let sseMsgCount = 0;
+let sseFilter = 'all';
+
+const SSE_COLORS = {
+  cpu: 'var(--orange)', memory: 'var(--yellow)', disk_io: 'var(--purple)',
+  network: 'var(--cyan)', request: 'var(--accent)', alert: 'var(--red)', deployment: 'var(--green)',
+};
+
+function sseConnect() {
+  if (!currentToken) { alert('Please login first'); return; }
+  if (sseSource) sseSource.close();
+
+  sseMsgCount = 0;
+  document.getElementById('sseStatus').textContent = 'Connecting...';
+  document.getElementById('sseStatus').style.color = 'var(--yellow)';
+
+  const url = `/sse/sse-service/v1/stream?access_token=${encodeURIComponent(currentToken)}`;
+  sseSource = new EventSource(url);
+
+  sseSource.onopen = () => {
+    document.getElementById('sseStatus').textContent = 'Connected';
+    document.getElementById('sseStatus').style.color = 'var(--green)';
+    document.getElementById('sseConnectBtn').style.display = 'none';
+    document.getElementById('sseDisconnectBtn').style.display = '';
+    document.getElementById('sseFeed').innerHTML = '';
+  };
+
+  const eventTypes = ['cpu', 'memory', 'disk_io', 'network', 'request', 'alert', 'deployment'];
+  eventTypes.forEach(evtType => {
+    sseSource.addEventListener(evtType, (e) => {
+      sseMsgCount++;
+      const data = JSON.parse(e.data);
+      addSseEntry(data);
+    });
+  });
+
+  sseSource.onerror = () => {
+    if (sseSource.readyState === EventSource.CLOSED) {
+      document.getElementById('sseStatus').textContent = 'Disconnected';
+      document.getElementById('sseStatus').style.color = 'var(--dim)';
+      document.getElementById('sseConnectBtn').style.display = '';
+      document.getElementById('sseDisconnectBtn').style.display = 'none';
+    } else {
+      document.getElementById('sseStatus').textContent = 'Reconnecting...';
+      document.getElementById('sseStatus').style.color = 'var(--orange)';
+    }
+  };
+}
+
+function sseDisconnect() {
+  if (sseSource) { sseSource.close(); sseSource = null; }
+  document.getElementById('sseStatus').textContent = 'Disconnected';
+  document.getElementById('sseStatus').style.color = 'var(--dim)';
+  document.getElementById('sseConnectBtn').style.display = '';
+  document.getElementById('sseDisconnectBtn').style.display = 'none';
+}
+
+function addSseEntry(data) {
+  const feed = document.getElementById('sseFeed');
+  const entry = document.createElement('div');
+  entry.dataset.sseType = data.event_type;
+  const color = SSE_COLORS[data.event_type] || 'var(--dim)';
+
+  if (sseFilter !== 'all' && data.event_type !== sseFilter) {
+    entry.style.display = 'none';
+  }
+
+  let detail = '';
+  switch (data.event_type) {
+    case 'cpu': detail = `usage: <span style="color:${data.usage_pct > 70 ? 'var(--red)' : 'var(--green)'}">${data.usage_pct}%</span> cores: ${data.cores_active}`; break;
+    case 'memory': detail = `used: <span style="color:${data.used_gb/data.total_gb > 0.8 ? 'var(--red)' : 'var(--green)'}">${data.used_gb}/${data.total_gb}GB</span> swap: ${data.swap_mb}MB`; break;
+    case 'disk_io': detail = `read: ${data.read_mbps}MB/s write: ${data.write_mbps}MB/s`; break;
+    case 'network': detail = `in: ${data.in_mbps}MB/s out: ${data.out_mbps}MB/s conns: ${data.connections}`; break;
+    case 'request': detail = `<span style="color:var(--accent)">${data.method}</span> ${data.path} <span style="color:${data.status < 400 ? 'var(--green)' : 'var(--red)'}">${data.status}</span> ${data.latency_ms}ms`; break;
+    case 'alert':
+      const sevColor = data.severity === 'critical' ? 'var(--red)' : data.severity === 'warning' ? 'var(--orange)' : 'var(--cyan)';
+      detail = `<span style="color:${sevColor};font-weight:600">[${data.severity.toUpperCase()}]</span> ${data.message}`; break;
+    case 'deployment': detail = `${data.service} <span style="color:var(--accent)">${data.version}</span> ${data.status === 'completed' ? '<span style="color:var(--green)">completed</span>' : data.status === 'rollback' ? '<span style="color:var(--red)">rollback</span>' : '<span style="color:var(--yellow)">rolling</span>'}`; break;
+  }
+
+  entry.style.cssText = 'padding:0.4rem 0.6rem; margin-bottom:0.3rem; background:var(--surface2); border-radius:6px; border-left:3px solid ' + color;
+  entry.innerHTML = `<span style="color:${color}; font-weight:600; display:inline-block; width:50px;">${data.event_type.toUpperCase()}</span> ` +
+    `<span style="color:var(--dim); margin-right:0.5rem;">#${data.seq}</span> ${detail} ` +
+    `<span style="color:var(--dim); float:right;">${data.timestamp}</span>`;
+
+  feed.insertBefore(entry, feed.firstChild);
+  while (feed.children.length > 150) feed.removeChild(feed.lastChild);
+}
+
+function setSseFilter(f) {
+  sseFilter = f;
+  document.querySelectorAll('#sseFilters .log-filter').forEach(b => b.classList.toggle('active', b.textContent.toLowerCase() === f || (f === 'all' && b.textContent === 'All')));
+  document.querySelectorAll('#sseFeed > div').forEach(el => {
+    if (f === 'all') { el.style.display = ''; }
+    else { el.style.display = el.dataset.sseType === f ? '' : 'none'; }
+  });
+}
+
+// ── MCP ──
+let mcpSessionId = null;
+let mcpReqId = 0;
+
+async function mcpRpc(method, params) {
+  mcpReqId++;
+  const body = { jsonrpc: '2.0', method, id: mcpReqId };
+  if (params) body.params = params;
+  const headers = { 'Content-Type': 'application/json' };
+  if (currentToken) headers['Authorization'] = `Bearer ${currentToken}`;
+  if (mcpSessionId) headers['Mcp-Session-Id'] = mcpSessionId;
+
+  const start = performance.now();
+  const res = await fetch('/mcp', { method: 'POST', headers, body: JSON.stringify(body) });
+  const ms = Math.round(performance.now() - start);
+
+  // Capture session ID from initialize
+  const sid = res.headers.get('Mcp-Session-Id');
+  if (sid) mcpSessionId = sid;
+
+  const data = await res.json();
+  return { data, status: res.status, ms };
+}
+
+function mcpLogEntry(label, result) {
+  const log = document.getElementById('mcpLog');
+  if (log.querySelector('.empty-log')) log.innerHTML = '';
+  const entry = document.createElement('div');
+  const statusColor = result.status === 200 ? 'var(--green)' : 'var(--red)';
+  entry.innerHTML = `
+    <span style="color:var(--dim)">${new Date().toLocaleTimeString()}</span>
+    <span class="tag tag-mcp">${label}</span>
+    <span style="color:${statusColor}">${result.status}</span>
+    <span style="color:var(--dim)">${result.ms}ms</span>
+    <div class="log-json">${JSON.stringify(result.data, null, 2)}</div>
+  `;
+  log.prepend(entry);
+}
+
+async function mcpInitialize() {
+  try {
+    const result = await mcpRpc('initialize');
+    document.getElementById('mcpSessionInfo').textContent = 'Session: ' + (mcpSessionId || 'none').substring(0, 12) + '...';
+    document.getElementById('mcpSessionInfo').style.color = 'var(--green)';
+    mcpLogEntry('initialize', result);
+    // Auto-list tools
+    await mcpListTools();
+  } catch (e) {
+    mcpLogEntry('initialize', { data: { error: e.message }, status: 'error', ms: 0 });
+  }
+}
+
+async function mcpPing() {
+  if (!mcpSessionId) { alert('Initialize a session first'); return; }
+  try {
+    const result = await mcpRpc('ping');
+    mcpLogEntry('ping', result);
+  } catch (e) {
+    mcpLogEntry('ping', { data: { error: e.message }, status: 'error', ms: 0 });
+  }
+}
+
+async function mcpListTools() {
+  if (!mcpSessionId) { alert('Initialize a session first'); return; }
+  try {
+    const result = await mcpRpc('tools/list');
+    mcpLogEntry('tools/list', result);
+    // Populate tool selector
+    const sel = document.getElementById('mcpToolSelect');
+    sel.innerHTML = '';
+    const tools = result.data?.result?.tools || [];
+    for (const t of tools) {
+      const opt = document.createElement('option');
+      opt.value = t.name;
+      opt.textContent = `${t.name} — ${t.description ? t.description.substring(0, 60) : ''}`;
+      sel.appendChild(opt);
+    }
+    // Set default args hint when tool changes
+    sel.onchange = () => {
+      const mcpSvc = SERVICES.mcp.find(s => s.tool === sel.value);
+      if (mcpSvc) document.getElementById('mcpToolArgs').value = mcpSvc.defaultArgs || '';
+    };
+    if (sel.options.length > 0) sel.dispatchEvent(new Event('change'));
+  } catch (e) {
+    mcpLogEntry('tools/list', { data: { error: e.message }, status: 'error', ms: 0 });
+  }
+}
+
+async function mcpCallTool() {
+  if (!mcpSessionId) { alert('Initialize a session first'); return; }
+  const toolName = document.getElementById('mcpToolSelect').value;
+  const argsStr = document.getElementById('mcpToolArgs').value;
+  if (!toolName) { alert('Select a tool'); return; }
+  let args;
+  try { args = JSON.parse(argsStr || '{}'); } catch { alert('Invalid JSON arguments'); return; }
+  try {
+    const result = await mcpRpc('tools/call', { name: toolName, arguments: args });
+    mcpLogEntry(`tools/call ${toolName}`, result);
+    addLog('mcp', `MCP ${toolName}`, `${result.ms}ms`, result.status, result.data, 'tag-mcp');
+  } catch (e) {
+    mcpLogEntry(`tools/call ${toolName}`, { data: { error: e.message }, status: 'error', ms: 0 });
+  }
+}
+
+async function mcpQuickCall(toolName, defaultArgs) {
+  // Auto-initialize if needed
+  if (!mcpSessionId) {
+    try { await mcpRpc('initialize'); } catch { alert('Failed to initialize MCP session'); return; }
+    document.getElementById('mcpSessionInfo').textContent = 'Session: ' + (mcpSessionId || 'none').substring(0, 12) + '...';
+    document.getElementById('mcpSessionInfo').style.color = 'var(--green)';
+  }
+  let args;
+  try { args = typeof defaultArgs === 'string' ? JSON.parse(defaultArgs) : defaultArgs; } catch { args = {}; }
+  try {
+    const result = await mcpRpc('tools/call', { name: toolName, arguments: args });
+    mcpLogEntry(`tools/call ${toolName}`, result);
+    addLog('mcp', `MCP ${toolName}`, `${result.ms}ms`, result.status, result.data, 'tag-mcp');
+  } catch (e) {
+    addLog('mcp', `MCP ${toolName}`, '', 'error', { error: e.message }, 'tag-mcp');
+  }
+}
+
+// ── gRPC ──
+async function grpcCall() {
+  const service = document.getElementById('grpcService').value;
+  const name = document.getElementById('grpcName').value;
+  const log = document.getElementById('grpcLog');
+  if (log.querySelector('.empty-log')) log.innerHTML = '';
+
+  const start = performance.now();
+  try {
+    const res = await fetch('/bff/grpc', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ service, name }),
+    });
+    const ms = Math.round(performance.now() - start);
+    const data = await res.json();
+    const statusColor = res.ok ? 'var(--green)' : 'var(--red)';
+    const entry = document.createElement('div');
+    entry.innerHTML = `
+      <span style="color:var(--dim)">${new Date().toLocaleTimeString()}</span>
+      <span class="tag" style="background:#1e3a1e;color:#4ade80">gRPC</span>
+      <span style="color:${statusColor}">${res.status}</span>
+      <span style="color:var(--dim)">${ms}ms</span>
+      <span style="color:var(--dim)">x-capi-service: ${service}</span>
+      <div class="log-json">${JSON.stringify(data, null, 2)}</div>
+    `;
+    log.prepend(entry);
+    addLog('open', `gRPC SayHello(${name})`, `${ms}ms`, res.status, data, 'tag-open');
+  } catch (e) {
+    const entry = document.createElement('div');
+    entry.innerHTML = `<span style="color:var(--red)">Error: ${e.message}</span>`;
+    log.prepend(entry);
+  }
+}
+
+// ── Init ──
+renderCatalog();
+renderMatrix();
+checkSession();
+</script>
+</body>
+</html>

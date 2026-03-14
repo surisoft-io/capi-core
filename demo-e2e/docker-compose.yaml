@@ -1,0 +1,301 @@
+services:
+
+  # --- Infrastructure ---
+
+  consul:
+    image: hashicorp/consul:1.22
+    container_name: demo-e2e-consul
+    ports:
+      - "8500:8500"
+    command: agent -dev -client=0.0.0.0
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.1
+    container_name: demo-e2e-keycloak
+    ports:
+      - "8080:8080"
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_ADMIN_USER}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD}
+      KC_HEALTH_ENABLED: "true"
+      KC_HTTP_RELATIVE_PATH: /keycloak
+      KC_PROXY_HEADERS: xforwarded
+      KC_HOSTNAME_STRICT: "false"
+    command: start-dev
+
+  opa:
+    image: openpolicyagent/opa:1.4.2
+    container_name: demo-e2e-opa
+    platform: linux/amd64
+    ports:
+      - "8181:8181"
+    volumes:
+      - ./opa-policy:/policies:ro
+    command: run --server /policies
+
+  # --- Observability ---
+
+  opensearch:
+    image: opensearchproject/opensearch:2.19.1
+    container_name: demo-e2e-opensearch
+    ports:
+      - "9200:9200"
+    environment:
+      discovery.type: single-node
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: ${OPENSEARCH_PASSWORD}
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf -u admin:$$OPENSEARCH_INITIAL_ADMIN_PASSWORD https://localhost:9200/_cluster/health -k || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.19.1
+    container_name: demo-e2e-dashboards
+    environment:
+      OPENSEARCH_HOSTS: '["https://opensearch:9200"]'
+      OPENSEARCH_USERNAME: admin
+      OPENSEARCH_PASSWORD: ${OPENSEARCH_PASSWORD}
+      opensearch.ssl.verificationMode: none
+      SERVER_BASEPATH: /dashboards
+      SERVER_REWRITEBASEPATH: "true"
+    depends_on:
+      opensearch:
+        condition: service_healthy
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: demo-e2e-otel
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-config.yaml:/etc/otelcol/config.yaml
+    environment:
+      OPENSEARCH_PASSWORD: ${OPENSEARCH_PASSWORD}
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    depends_on:
+      opensearch:
+        condition: service_healthy
+
+  # --- One-shot Setup ---
+
+  keycloak-setup:
+    image: alpine/curl:latest
+    container_name: demo-e2e-keycloak-setup
+    volumes:
+      - ./setup-keycloak.sh:/setup.sh:ro
+    entrypoint: ["sh", "/setup.sh"]
+    environment:
+      EXTERNAL_URL: ${EXTERNAL_URL:-http://localhost}
+      KC_ADMIN_USER: ${KC_ADMIN_USER}
+      KC_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD}
+      ALICE_PASSWORD: ${ALICE_PASSWORD}
+      BOB_PASSWORD: ${BOB_PASSWORD}
+      CHARLIE_PASSWORD: ${CHARLIE_PASSWORD}
+      BFF_CLIENT_SECRET: ${BFF_CLIENT_SECRET}
+      PREMIUM_CLIENT_SECRET: ${PREMIUM_CLIENT_SECRET}
+      BASIC_CLIENT_SECRET: ${BASIC_CLIENT_SECRET}
+    restart: "no"
+    depends_on:
+      keycloak:
+        condition: service_started
+
+  # --- CAPI Gateway ---
+
+  capi:
+    image: surisoft/capi-core:latest
+    container_name: demo-e2e-capi
+    volumes:
+      - ./capi-config.yaml:/capi/config/config.yaml
+    environment:
+      CAPI_CONFIG_FILE: /capi/config/config.yaml
+    ports:
+      - "8380:8380"
+      - "8382:8382"
+      - "8381:8381"
+      - "8383:8383"
+      - "8384:8384"
+    depends_on:
+      consul:
+        condition: service_healthy
+      keycloak-setup:
+        condition: service_completed_successfully
+      otel-collector:
+        condition: service_started
+
+  # --- Single Generic Backend ---
+
+  generic-service:
+    image: python:3-alpine
+    container_name: demo-e2e-generic
+    working_dir: /app
+    volumes:
+      - ./services:/app:ro
+    command: python generic_service.py
+
+  websocket-service:
+    image: python:3-alpine
+    container_name: demo-e2e-websocket
+    working_dir: /app
+    volumes:
+      - ./services:/app:ro
+    command: sh -c "pip install --quiet websockets && python websocket_service.py"
+
+  sse-service:
+    image: python:3-alpine
+    container_name: demo-e2e-sse
+    working_dir: /app
+    volumes:
+      - ./services:/app:ro
+    command: sh -c "pip install --quiet flask && python sse_service.py"
+
+  # --- MCP Backend Services ---
+
+  weather-service:
+    image: python:3-alpine
+    container_name: demo-e2e-weather
+    working_dir: /app
+    volumes:
+      - ./services:/app:ro
+    command: python weather.py
+
+  inventory-mcp-service:
+    image: python:3-alpine
+    container_name: demo-e2e-inventory-mcp
+    working_dir: /app
+    volumes:
+      - ./services:/app:ro
+    command: python inventory.py
+
+  translate-service:
+    image: python:3-alpine
+    container_name: demo-e2e-translate
+    working_dir: /app
+    volumes:
+      - ./services:/app:ro
+    command: python translate.py
+
+  math-mcp-server:
+    image: python:3-alpine
+    container_name: demo-e2e-math-mcp
+    working_dir: /app
+    volumes:
+      - ./services:/app:ro
+    command: python math_mcp_server.py
+
+  # --- gRPC Backend ---
+
+  greeter-grpc:
+    image: python:3-alpine
+    container_name: demo-e2e-greeter-grpc
+    working_dir: /work
+    volumes:
+      - ./services:/src:ro
+    command: >
+      sh -c "cp /src/greeter.proto /src/greeter_grpc.py . &&
+             pip install --quiet grpcio grpcio-tools grpcio-reflection protobuf &&
+             python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. greeter.proto &&
+             python greeter_grpc.py"
+
+  # --- BFF ---
+
+  bff:
+    image: python:3-alpine
+    container_name: demo-e2e-bff
+    working_dir: /app
+    volumes:
+      - ./bff:/app:ro
+      - ./capi-config.yaml:/capi/config/config.yaml:ro
+      - ./services/greeter.proto:/proto/greeter.proto:ro
+    command: >
+      sh -c "pip install --quiet flask grpcio grpcio-tools &&
+             python -m grpc_tools.protoc -I/proto --python_out=/tmp --grpc_python_out=/tmp /proto/greeter.proto &&
+             PYTHONPATH=/tmp python bff.py"
+    environment:
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_EXTERNAL_URL: ${EXTERNAL_URL:-http://localhost}/keycloak
+      REALM: e2e-demo
+      CLIENT_ID: demo-bff
+      CLIENT_SECRET: ${BFF_CLIENT_SECRET}
+      SECRET_KEY: ${BFF_SESSION_SECRET}
+      ALICE_PASSWORD: ${ALICE_PASSWORD}
+      BOB_PASSWORD: ${BOB_PASSWORD}
+      CHARLIE_PASSWORD: ${CHARLIE_PASSWORD}
+      API_KEY_UNLIMITED: ${API_KEY_UNLIMITED}
+      API_KEY_STANDARD: ${API_KEY_STANDARD}
+      API_KEY_LIMITED: ${API_KEY_LIMITED}
+      CAPI_URL: http://capi:8380
+      CAPI_GRPC_URL: capi:8384
+      CALLBACK_URL: ${EXTERNAL_URL:-http://localhost}/bff/callback
+    depends_on:
+      keycloak-setup:
+        condition: service_completed_successfully
+
+  # --- Nginx (UI + reverse proxy) ---
+
+  nginx:
+    image: nginx:alpine
+    container_name: demo-e2e-nginx
+    environment:
+      SSL_DOMAIN: ${SSL_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/templates/default.conf.template:ro
+      - ./ui/index.html:/usr/share/nginx/html/index.html:ro
+      - ./${SSL_DOMAIN}:/etc/nginx/certs:ro
+      - ${CERTBOT_DIR:-./certbot}:/var/www/certbot:ro
+    depends_on:
+      - capi
+      - bff
+
+  # --- Service Registration (one-shot) ---
+
+  registrar:
+    image: alpine/curl:latest
+    container_name: demo-e2e-registrar
+    volumes:
+      - ./register-services.sh:/register.sh:ro
+    entrypoint: ["sh", "/register.sh"]
+    restart: "no"
+    depends_on:
+      consul:
+        condition: service_healthy
+      generic-service:
+        condition: service_started
+      weather-service:
+        condition: service_started
+      inventory-mcp-service:
+        condition: service_started
+      translate-service:
+        condition: service_started
+      math-mcp-server:
+        condition: service_started
+      greeter-grpc:
+        condition: service_started
+
+  # --- API Key Setup (one-shot) ---
+
+  apikey-setup:
+    image: alpine/curl:latest
+    container_name: demo-e2e-apikey-setup
+    volumes:
+      - ./setup-api-keys.sh:/setup.sh:ro
+    entrypoint: ["sh", "/setup.sh"]
+    environment:
+      API_KEY_UNLIMITED: ${API_KEY_UNLIMITED}
+      API_KEY_STANDARD: ${API_KEY_STANDARD}
+      API_KEY_LIMITED: ${API_KEY_LIMITED}
+    restart: "no"
+    depends_on:
+      consul:
+        condition: service_healthy

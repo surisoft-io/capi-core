@@ -45,6 +45,9 @@ build/
 ### Claude Code ###
 .claude/
 
+### Environment secrets ###
+.env
+
 ### Certificates and keystores ###
 *.p12
 *.pfx
