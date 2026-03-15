@@ -208,15 +208,17 @@ curl http://localhost:8381/info/mcp/tools
 curl http://localhost:8381/info/metrics
 ```
 
-## Performance (single CAPI node, 500K requests in 15 minutes)
+## Performance (single CAPI node, 1,195 req/s, 645K requests in 9 minutes)
 
 ![Requests and Memory](docs/grafana-requests.png)
 
+![System and Buffers](docs/grafana-system.png)
+
 ![Threads](docs/grafana-threads.png)
 
-- **Peak ~270 platform threads** — stable ceiling, no upward drift even under sustained 500K requests over 15 minutes
-- **No sawtooth climbing pattern** — the thread count plateaus and stays flat, confirming virtual threads are handling the Camel thread pool work
-- **Heap memory** — healthy GC pattern with G1 Eden cycling normally, Old Gen stable around 50-70 MiB
+- **~330 platform threads** — flat ceiling, no growth even at 1,195 req/s sustained
+- **CPU usage at ~4%** — massive headroom remaining on a single node
+- **Heap memory** — healthy G1 GC pattern, Eden cycling up to ~350 MiB, Old Gen stable
 - **Buffer pools** — direct memory stable at ~4 MiB, no leak
 
 CAPI uses Java virtual threads (Project Loom) for Camel thread pools and HTTP client executors. Virtual threads are invisible to JVM monitoring APIs, so the Grafana thread panel shows platform threads only.
@@ -247,9 +249,9 @@ k6 run --env BASE_URL=http://localhost --env SCENARIO=mcp k6/load-test.js
 
 Available scenarios: `open`, `opa`, `subscription`, `apikey`, `mcp`, `grpc`, or `all` (default, weighted).
 
-### k6 Results (100 VUs, 9 minutes, single CAPI node)
+### k6 Results (single CAPI node, OVH datacenter France → remote server)
 
-Test ran from an OVH datacenter (France) to the remote CAPI server over the internet.
+**100 VUs (9 minutes):**
 
 | Metric | Value |
 |--------|-------|
@@ -259,18 +261,28 @@ Test ran from an OVH datacenter (France) to the remote CAPI server over the inte
 | p95 latency | 13.75ms |
 | p50 latency | 10.24ms |
 
-**Latency by protocol type:**
+**500 VUs (9 minutes):**
+
+| Metric | Value |
+|--------|-------|
+| Total requests | 645,592 |
+| Throughput | 1,195 req/s |
+| Success rate | 99.98% (159 failures / TCP timeouts during ramp) |
+| p95 latency | 12.75ms |
+| p50 latency | 9.87ms |
+
+**Latency by protocol type (500 VUs, p95):**
 
 | Protocol | p95 | Median | Max |
 |----------|-----|--------|-----|
-| Open (no auth) | 12.85ms | 10.20ms | 19.97ms |
-| OPA (role-based) | 13.18ms | 10.27ms | 18.90ms |
-| Subscription (JWT claim) | 13.62ms | 10.43ms | 24.13ms |
-| API Key + Throttle | 12.86ms | 10.20ms | 19.58ms |
-| MCP (JSON-RPC) | 12.55ms | 10.04ms | 17.95ms |
-| gRPC (via BFF bridge) | 20.73ms | 13.92ms | 67.06ms |
+| Open (no auth) | 10.83ms | 9.76ms | 5.80s |
+| OPA (role-based) | 10.91ms | 10.01ms | 7.25s |
+| Subscription (JWT claim) | 11.02ms | 10.28ms | 7.24s |
+| API Key + Throttle | 10.83ms | 9.78ms | 5.11s |
+| MCP (JSON-RPC) | 10.84ms | 9.75ms | 35.85ms |
+| gRPC (via BFF bridge) | 14.54ms | 13.20ms | 59.81ms |
 
-All thresholds passed (p95 < 2s, error rate < 0.1%).
+All thresholds passed (p95 < 2s, error rate < 0.1%). MCP and gRPC had zero failures across both tests.
 
 ## Remote Deployment (your-domain.eu)
 
