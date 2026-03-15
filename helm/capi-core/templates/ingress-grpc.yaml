@@ -1,0 +1,42 @@
+{{- if and .Values.grpcIngress.enabled .Values.capi.grpc.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "capi-core.fullname" . }}-grpc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "capi-core.labels" . | nindent 4 }}
+  {{- with .Values.grpcIngress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.grpcIngress.className }}
+  ingressClassName: {{ .Values.grpcIngress.className }}
+  {{- end }}
+  {{- if .Values.grpcIngress.tls }}
+  tls:
+    {{- range .Values.grpcIngress.tls }}
+    - hosts:
+        {{- range .hosts }}
+        - {{ . | quote }}
+        {{- end }}
+      secretName: {{ .secretName }}
+    {{- end }}
+  {{- end }}
+  rules:
+    {{- range .Values.grpcIngress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ include "capi-core.fullname" $ }}
+                port:
+                  name: grpc
+          {{- end }}
+    {{- end }}
+{{- end }}
