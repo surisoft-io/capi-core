@@ -210,6 +210,8 @@ curl http://localhost:8381/info/metrics
 
 ## Performance (single CAPI node, 1,195 req/s, 645K requests in 9 minutes)
 
+**Test server**: Intel Core i7-11800H (8 cores / 16 threads, 2.3–4.6 GHz), 32 GB RAM, 24 MiB L3 cache. CAPI JVM: `-Xms512m -Xmx512m`, G1GC, Java 23, virtual threads enabled.
+
 ![Requests and Memory](docs/grafana-requests.png)
 
 ![System and Buffers](docs/grafana-system.png)
