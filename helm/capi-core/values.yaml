@@ -33,6 +33,18 @@ capi:
     listeningAddress: 0.0.0.0
     contextPath: /api/*
 
+  grpc:
+    enabled: false
+    port: 8384
+
+  mcp:
+    enabled: false
+    port: 8383
+    sessionTtl: 1800000
+    toolCallTimeout: 30000
+    circuitBreakerCooldownMs: 30000
+    mcpServerDiscoveryTimeoutMs: 10000
+
   ssl:
     enabled: false
     keyStoreType: PKCS12
@@ -101,6 +113,9 @@ capi:
     kubernetesNamespace: ""
     kubernetesServiceName: ""
 
+  apiKeyStore:
+    enabled: false
+
   jvmOpts: "-XX:+UseG1GC -Xms512m -Xmx512m -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/capi/logs/"
 
 service:
@@ -108,6 +123,8 @@ service:
   restPort: 8380
   adminPort: 8381
   websocketPort: 8382
+  mcpPort: 8383
+  grpcPort: 8384
 
 ingress:
   enabled: false
@@ -141,6 +158,35 @@ websocketIngress:
   #    hosts:
   #      - capi-ws.local
 
+mcpIngress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: capi-mcp.local
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls: []
+  #  - secretName: capi-mcp-tls
+  #    hosts:
+  #      - capi-mcp.local
+
+grpcIngress:
+  enabled: false
+  className: ""
+  annotations: {}
+  #  nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+  hosts:
+    - host: capi-grpc.local
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls: []
+  #  - secretName: capi-grpc-tls
+  #    hosts:
+  #      - capi-grpc.local
+
 resources:
   requests:
     cpu: 250m
@@ -162,6 +208,10 @@ serviceAccount:
   name: ""
 
 podAnnotations: {}
+  # Prometheus scraping — enable if running Prometheus in the cluster
+  # prometheus.io/scrape: "true"
+  # prometheus.io/port: "8381"
+  # prometheus.io/path: "/info/metrics"
 podLabels: {}
 nodeSelector: {}
 tolerations: []

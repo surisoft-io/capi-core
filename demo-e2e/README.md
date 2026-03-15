@@ -249,26 +249,28 @@ Available scenarios: `open`, `opa`, `subscription`, `apikey`, `mcp`, `grpc`, or 
 
 ### k6 Results (100 VUs, 9 minutes, single CAPI node)
 
+Test ran from an OVH datacenter (France) to the remote CAPI server over the internet.
+
 | Metric | Value |
 |--------|-------|
-| Total requests | 115,691 |
-| Throughput | 214 req/s |
-| Success rate | 99.99% (4 failures / network blips) |
-| p95 latency | 17.58ms |
-| p50 latency | 5.49ms |
+| Total requests | 130,352 |
+| Throughput | 241 req/s |
+| Success rate | 100% (0 failures) |
+| p95 latency | 13.75ms |
+| p50 latency | 10.24ms |
 
-**Latency by protocol type (p95):**
+**Latency by protocol type:**
 
-| Protocol | p95 | Median |
-|----------|-----|--------|
-| Open (no auth) | 52.56ms | 5.13ms |
-| OPA (role-based) | 49.81ms | 5.60ms |
-| Subscription (JWT claim) | 45.91ms | 5.72ms |
-| API Key + Throttle | 50.30ms | 5.13ms |
-| MCP (JSON-RPC) | 9.52ms | 5.55ms |
-| gRPC (via BFF bridge) | 17.26ms | 8.84ms |
+| Protocol | p95 | Median | Max |
+|----------|-----|--------|-----|
+| Open (no auth) | 12.85ms | 10.20ms | 19.97ms |
+| OPA (role-based) | 13.18ms | 10.27ms | 18.90ms |
+| Subscription (JWT claim) | 13.62ms | 10.43ms | 24.13ms |
+| API Key + Throttle | 12.86ms | 10.20ms | 19.58ms |
+| MCP (JSON-RPC) | 12.55ms | 10.04ms | 17.95ms |
+| gRPC (via BFF bridge) | 20.73ms | 13.92ms | 67.06ms |
 
-All thresholds passed (p95 < 2s, error rate < 0.1%). Test ran from macOS client to remote server over the internet.
+All thresholds passed (p95 < 2s, error rate < 0.1%).
 
 ## Remote Deployment (your-domain.eu)
 

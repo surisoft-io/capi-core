@@ -22,5 +22,17 @@ spec:
       protocol: TCP
       name: websocket
     {{- end }}
+    {{- if .Values.capi.mcp.enabled }}
+    - port: {{ .Values.service.mcpPort }}
+      targetPort: mcp
+      protocol: TCP
+      name: mcp
+    {{- end }}
+    {{- if .Values.capi.grpc.enabled }}
+    - port: {{ .Values.service.grpcPort }}
+      targetPort: grpc
+      protocol: TCP
+      name: grpc
+    {{- end }}
   selector:
     {{- include "capi-core.selectorLabels" . | nindent 4 }}
