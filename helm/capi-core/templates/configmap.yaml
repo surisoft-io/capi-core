@@ -28,6 +28,9 @@ data:
         port: {{ .Values.capi.websocket.port }}
         listeningAddress: {{ .Values.capi.websocket.listeningAddress }}
         contextPath: {{ .Values.capi.websocket.contextPath }}
+      grpc:
+        enabled: {{ .Values.capi.grpc.enabled }}
+        port: {{ .Values.capi.grpc.port }}
       ssl:
         enabled: {{ .Values.capi.ssl.enabled }}
         keyStoreType: {{ .Values.capi.ssl.keyStoreType }}
@@ -59,6 +62,8 @@ data:
         enabled: {{ .Values.capi.consulStore.enabled }}
         endpoint: {{ .Values.capi.consulStore.endpoint }}
         token: {{ .Values.capi.consulStore.token | quote }}
+      apiKeyStore:
+        enabled: {{ .Values.capi.apiKeyStore.enabled }}
       oauth2:
         enabled: {{ .Values.capi.oauth2.enabled }}
         cookieName: {{ .Values.capi.oauth2.cookieName | quote }}
@@ -96,3 +101,10 @@ data:
         enabled: {{ .Values.capi.throttle.enabled }}
         kubernetesNamespace: {{ .Values.capi.throttle.kubernetesNamespace | quote }}
         kubernetesServiceName: {{ .Values.capi.throttle.kubernetesServiceName | quote }}
+      mcp:
+        enabled: {{ .Values.capi.mcp.enabled }}
+        port: {{ .Values.capi.mcp.port }}
+        sessionTtl: {{ .Values.capi.mcp.sessionTtl | int }}
+        toolCallTimeout: {{ .Values.capi.mcp.toolCallTimeout }}
+        circuitBreakerCooldownMs: {{ .Values.capi.mcp.circuitBreakerCooldownMs }}
+        mcpServerDiscoveryTimeoutMs: {{ .Values.capi.mcp.mcpServerDiscoveryTimeoutMs }}

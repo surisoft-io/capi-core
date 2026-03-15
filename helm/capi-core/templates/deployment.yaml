@@ -57,6 +57,16 @@ spec:
               containerPort: {{ .Values.capi.websocket.port }}
               protocol: TCP
             {{- end }}
+            {{- if .Values.capi.mcp.enabled }}
+            - name: mcp
+              containerPort: {{ .Values.capi.mcp.port }}
+              protocol: TCP
+            {{- end }}
+            {{- if .Values.capi.grpc.enabled }}
+            - name: grpc
+              containerPort: {{ .Values.capi.grpc.port }}
+              protocol: TCP
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /info/health
