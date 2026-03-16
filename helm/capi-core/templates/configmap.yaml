@@ -23,10 +23,6 @@ data:
         connectionRequestTimeout: {{ .Values.capi.rest.connectionRequestTimeout }}
         requestTimeout: {{ .Values.capi.rest.requestTimeout }}
         responseTimeout: {{ .Values.capi.rest.responseTimeout }}
-        maxTotalConnections: {{ .Values.capi.rest.maxTotalConnections }}
-        maxConnectionsPerRoute: {{ .Values.capi.rest.maxConnectionsPerRoute }}
-        undertowWorkerThreads: {{ .Values.capi.rest.undertowWorkerThreads }}
-        undertowIoThreads: {{ .Values.capi.rest.undertowIoThreads }}
       websocket:
         enabled: {{ .Values.capi.websocket.enabled }}
         port: {{ .Values.capi.websocket.port }}

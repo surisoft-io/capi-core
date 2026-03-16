@@ -137,13 +137,10 @@ services:
   # --- CAPI Gateway ---
 
   capi:
-    image: eclipse-temurin:23-jre
+    image: surisoft/capi-core:latest
     container_name: demo-e2e-capi
-    working_dir: /app
     volumes:
-      - ../target:/app/target:ro
       - ./capi-config.yaml:/capi/config/config.yaml
-    command: ["sh", "-c", "java -jar /app/target/capi-core-*.jar"]
     environment:
       CAPI_CONFIG_FILE: /capi/config/config.yaml
     ports:

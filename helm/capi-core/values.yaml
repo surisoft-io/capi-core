@@ -26,10 +26,6 @@ capi:
     connectionRequestTimeout: 5000
     requestTimeout: 5000
     responseTimeout: 120000
-    maxTotalConnections: 500
-    maxConnectionsPerRoute: 50
-    undertowWorkerThreads: 0   # 0 = Undertow default (CPU_COUNT * 8). Increase for slow backend resilience.
-    undertowIoThreads: 0       # 0 = Undertow default (CPU_COUNT)
 
   websocket:
     enabled: false
