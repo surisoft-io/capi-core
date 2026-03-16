@@ -7,6 +7,7 @@ import json
 import random
 import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
 
 SERVICE_DATA = {
     # --- Open ---
@@ -59,8 +60,16 @@ class Handler(BaseHTTPRequestHandler):
         self._handle()
 
     def _handle(self):
+        parsed = urlparse(self.path)
+        qs = parse_qs(parsed.query)
+
+        # Simulate latency: ?delay=500 → sleep 500ms
+        delay = int(qs.get("delay", ["0"])[0])
+        if 0 < delay <= 30000:
+            time.sleep(delay / 1000.0)
+
         # Extract service name from path: /anything -> first segment
-        parts = self.path.strip("/").split("/")
+        parts = parsed.path.strip("/").split("/")
         service_name = parts[0] if parts else "health"
 
         # Match against known services (strip "-service" suffix if present)

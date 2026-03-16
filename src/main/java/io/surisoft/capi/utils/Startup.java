@@ -131,6 +131,7 @@ public class Startup {
         startRouteConsistencyChecker();
         startOpaService();
         startMcpService();
+        configureHttpConnectionPool();
     }
 
     private void configureUndertowSsl() {
@@ -478,6 +479,20 @@ public class Startup {
 
     public @Nullable McpBackendLoadBalancer getMcpLoadBalancer() {
         return mcpLoadBalancer;
+    }
+
+    private void configureHttpConnectionPool() {
+        int maxTotal = configuration.getRest().getMaxTotalConnections();
+        int maxPerRoute = configuration.getRest().getMaxConnectionsPerRoute();
+        log.info("Configuring HTTP connection pool: maxTotal={}, maxPerRoute={}", maxTotal, maxPerRoute);
+
+        for (String scheme : List.of("http", "https")) {
+            HttpComponent component = (HttpComponent) camelContext.getComponent(scheme);
+            if (component != null) {
+                component.setMaxTotalConnections(maxTotal);
+                component.setConnectionsPerRoute(maxPerRoute);
+            }
+        }
     }
 
     private void startConsulHttpClient() {

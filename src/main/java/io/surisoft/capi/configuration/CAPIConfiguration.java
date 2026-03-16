@@ -233,6 +233,8 @@ public class CAPIConfiguration {
         private int responseTimeout;
         private int proxyPoolSize = 200;
         private int proxyMaxPoolSize = 500;
+        private int maxTotalConnections = 500;
+        private int maxConnectionsPerRoute = 50;
 
         public boolean isEnabled() {
             return enabled;
@@ -288,6 +290,18 @@ public class CAPIConfiguration {
         }
         public void setProxyMaxPoolSize(int proxyMaxPoolSize) {
             this.proxyMaxPoolSize = proxyMaxPoolSize;
+        }
+        public int getMaxTotalConnections() {
+            return maxTotalConnections;
+        }
+        public void setMaxTotalConnections(int maxTotalConnections) {
+            this.maxTotalConnections = maxTotalConnections;
+        }
+        public int getMaxConnectionsPerRoute() {
+            return maxConnectionsPerRoute;
+        }
+        public void setMaxConnectionsPerRoute(int maxConnectionsPerRoute) {
+            this.maxConnectionsPerRoute = maxConnectionsPerRoute;
         }
 
     }

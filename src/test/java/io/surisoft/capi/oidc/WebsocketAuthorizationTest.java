@@ -103,16 +103,16 @@ class WebsocketAuthorizationTest {
     }
 
     @Test
-    void isAuthorized_withAuthHeader_validToken_noMatchingRole_butInCapiGroup_returnsTrue() throws Exception {
+    void isAuthorized_withAuthHeader_validToken_noMatchingRole_butInSubscriptionGroup_returnsTrue() throws Exception {
         when(websocketClient.requiresSubscription()).thenReturn(true);
-        when(websocketClient.getSubscriptionRole()).thenReturn("nonexistent-role");
+        when(websocketClient.getSubscriptionRole()).thenReturn("notifications");
 
         HeaderMap headerMap = new HeaderMap();
         headerMap.put(new HttpString("Authorization"), "Bearer test-token");
         when(httpServerExchange.getRequestHeaders()).thenReturn(headerMap);
 
         JWTClaimsSet claimsSet = new JWTClaimsSet.Builder()
-                .claim("subscriptions", List.of("capi"))
+                .claim("subscriptions", List.of("notifications"))
                 .build();
 
         when(jwtProcessor.process(eq("test-token"), isNull())).thenReturn(claimsSet);
@@ -236,16 +236,16 @@ class WebsocketAuthorizationTest {
     // ---------------------------------------------------------------
 
     @Test
-    void isAuthorized_subscriptionGroupMatches_returnsTrue() throws Exception {
+    void isAuthorized_subscriptionGroupMatches_withSlashes_returnsTrue() throws Exception {
         when(websocketClient.requiresSubscription()).thenReturn(true);
-        when(websocketClient.getSubscriptionRole()).thenReturn("unmatched-role");
+        when(websocketClient.getSubscriptionRole()).thenReturn("notifications");
 
         HeaderMap headerMap = new HeaderMap();
         headerMap.put(new HttpString("Authorization"), "Bearer test-token");
         when(httpServerExchange.getRequestHeaders()).thenReturn(headerMap);
 
         JWTClaimsSet claimsSet = new JWTClaimsSet.Builder()
-                .claim("subscriptions", List.of("/capi/"))
+                .claim("subscriptions", List.of("/notifications/"))
                 .build();
 
         when(jwtProcessor.process(eq("test-token"), isNull())).thenReturn(claimsSet);
