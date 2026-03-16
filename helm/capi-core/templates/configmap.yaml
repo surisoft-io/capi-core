@@ -23,6 +23,8 @@ data:
         connectionRequestTimeout: {{ .Values.capi.rest.connectionRequestTimeout }}
         requestTimeout: {{ .Values.capi.rest.requestTimeout }}
         responseTimeout: {{ .Values.capi.rest.responseTimeout }}
+        maxTotalConnections: {{ .Values.capi.rest.maxTotalConnections }}
+        maxConnectionsPerRoute: {{ .Values.capi.rest.maxConnectionsPerRoute }}
       websocket:
         enabled: {{ .Values.capi.websocket.enabled }}
         port: {{ .Values.capi.websocket.port }}

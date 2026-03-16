@@ -35,9 +35,9 @@ class HttpErrorProcessorTest {
     @BeforeEach
     void setUp() {
         processor = new HttpErrorProcessor();
-        when(exchange.getIn()).thenReturn(message);
-        when(message.getHeader(Exchange.HTTP_URI)).thenReturn("http://example.com/api");
-        when(message.getHeader(Exchange.HTTP_URL)).thenReturn("http://example.com/api?param=1");
+        lenient().when(exchange.getIn()).thenReturn(message);
+        lenient().when(message.getHeader(Exchange.HTTP_URI)).thenReturn("http://example.com/api");
+        lenient().when(message.getHeader(Exchange.HTTP_URL)).thenReturn("http://example.com/api?param=1");
     }
 
     @Test

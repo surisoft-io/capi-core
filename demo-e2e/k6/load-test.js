@@ -116,7 +116,16 @@ const SUB_SERVICES     = ['notification-service', 'recommendation-service', 'ema
 const APIKEY_SERVICES  = ['inventory-service', 'shipping-service', 'returns-service'];
 const THROTTLE_SERVICES = ['metrics-service', 'reporting-service', 'dashboard-service'];
 
+// Slow backend simulation — these services get ?delay=<ms> appended
+// Set SLOW_DELAY=0 to disable. Simulates real-world slow backends.
+const SLOW_DELAY    = parseInt(__ENV.SLOW_DELAY || '0');
+const SLOW_SERVICES = new Set((__ENV.SLOW_SERVICES || 'order-service,payment-service').split(','));
+
 function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+function svcUrl(svc) {
+  const delay = SLOW_SERVICES.has(svc) && SLOW_DELAY > 0 ? `?delay=${SLOW_DELAY}` : '';
+  return `${BASE}/api/${svc}/v1${delay}`;
+}
 
 // ---------------------------------------------------------------------------
 // Test scenarios
@@ -124,7 +133,7 @@ function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
 function testOpen() {
   const svc = pick(OPEN_SERVICES);
-  const res = http.get(`${BASE}/api/${svc}/v1`);
+  const res = http.get(svcUrl(svc));
   latencyOpen.add(res.timings.duration);
   errorRate.add(res.status !== 200);
   check(res, { 'open: 200': (r) => r.status === 200 });
@@ -132,7 +141,7 @@ function testOpen() {
 
 function testOpa() {
   const svc = pick(OPA_SERVICES);
-  const res = http.get(`${BASE}/api/${svc}/v1`, { headers: authHeaders() });
+  const res = http.get(svcUrl(svc), { headers: authHeaders() });
   latencyOpa.add(res.timings.duration);
   errorRate.add(res.status !== 200);
   check(res, { 'opa: 200': (r) => r.status === 200 });
@@ -140,7 +149,7 @@ function testOpa() {
 
 function testSubscription() {
   const svc = pick(SUB_SERVICES);
-  const res = http.get(`${BASE}/api/${svc}/v1`, { headers: authHeaders() });
+  const res = http.get(svcUrl(svc), { headers: authHeaders() });
   latencySub.add(res.timings.duration);
   errorRate.add(res.status !== 200);
   check(res, { 'sub: 200': (r) => r.status === 200 });
@@ -149,7 +158,7 @@ function testSubscription() {
 function testApiKey() {
   if (!API_KEY) return;
   const svc = pick(APIKEY_SERVICES);
-  const res = http.get(`${BASE}/api/${svc}/v1`, {
+  const res = http.get(svcUrl(svc), {
     headers: { Authorization: `ApiKey ${API_KEY}` },
   });
   latencyApiKey.add(res.timings.duration);
