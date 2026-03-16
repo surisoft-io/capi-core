@@ -97,6 +97,7 @@ public class DirectRouteProcessor extends RouteBuilder {
                         }
                     })
                     .process(DirectRouteProcessor::restoreRequestBody)
+                    .removeHeader(Exchange.HTTP_URI)
                     .loadBalance()
                     .failover(1, false, service.isRoundRobinEnabled(), false)
                     .to(routeUtils.buildEndpoints(service))
@@ -150,6 +151,7 @@ public class DirectRouteProcessor extends RouteBuilder {
                         }
                     })
                     .process(DirectRouteProcessor::restoreRequestBody)
+                    .removeHeader(Exchange.HTTP_URI)
                 .to(routeUtils.buildEndpoints(service))
                     .endDoTry()
                     .doCatch(SSLHandshakeException.class, SocketException.class, UnknownHostException.class, AuthorizationException.class, NoHttpResponseException.class, ConnectTimeoutException.class)
