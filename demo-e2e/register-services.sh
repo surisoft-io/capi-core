@@ -14,8 +14,7 @@ register() {
   ID="$1"
   NAME="$2"
   META="$3"
-  SVC_TYPE="${4:-rest}"
-  echo "  Registering $NAME (type: $SVC_TYPE)..."
+  echo "  Registering $NAME..."
   curl -sf -X PUT "$CONSUL/v1/agent/service/register" \
     -H "Content-Type: application/json" \
     -d "{
@@ -27,7 +26,7 @@ register() {
         \"group\": \"v1\",
         \"root-context\": \"/${NAME}\",
         \"scheme\": \"http\",
-        \"type\": \"${SVC_TYPE}\",
+        \"type\": \"rest\",
         \"capi-instance\": \"default\"${META}
       }
     }"
@@ -39,11 +38,11 @@ register() {
 echo ""
 echo "=== Open Services (5) ==="
 
-register "health-1"   "health-service"   "" "websocket"
-register "config-1"   "config-service"   "" "websocket"
-register "search-1"   "search-service"   "" "websocket"
-register "events-1"   "events-service"   "" "websocket"
-register "webhook-1"  "webhook-service"  "" "websocket"
+register "health-1"   "health-service"   ""
+register "config-1"   "config-service"   ""
+register "search-1"   "search-service"   ""
+register "events-1"   "events-service"   ""
+register "webhook-1"  "webhook-service"  ""
 
 # ============================================================
 # OPA-PROTECTED SERVICES (10) — secured + opa-rego
@@ -58,10 +57,10 @@ register "catalog-1"  "catalog-service"  ', "opa-rego": "capi/allow_all"'
 
 # manager_or_admin: admin, manager
 register "pricing-1"  "pricing-service"  ', "opa-rego": "capi/manager_or_admin"'
-register "order-1"    "order-service"    ', "opa-rego": "capi/manager_or_admin"' "websocket"
+register "order-1"    "order-service"    ', "opa-rego": "capi/manager_or_admin"'
 
 # admin_only: admin
-register "payment-1"  "payment-service"  ', "opa-rego": "capi/admin_only"' "websocket"
+register "payment-1"  "payment-service"  ', "opa-rego": "capi/admin_only"'
 register "invoice-1"  "invoice-service"  ', "opa-rego": "capi/admin_only"'
 register "audit-1"    "audit-service"    ', "opa-rego": "capi/admin_only"'
 

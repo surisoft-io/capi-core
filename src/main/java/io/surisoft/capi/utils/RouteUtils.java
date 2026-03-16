@@ -102,10 +102,13 @@ public class RouteUtils {
             }
 
             String endpoint;
+            int effectiveResponseTimeout = service.getServiceMeta().getResponseTimeout() > 0
+                    ? service.getServiceMeta().getResponseTimeout()
+                    : responseTimeout;
             if(mapping.getPort() > -1) {
-                endpoint = httpProtocol.getProtocol() + "://" + mapping.getHostname() + ":" + mapping.getPort() + mapping.getRootContext() + "?bridgeEndpoint=true&throwExceptionOnFailure=false" + buildTimeouts(service);
+                endpoint = "undertow:" + httpProtocol.getProtocol() + "://" + mapping.getHostname() + ":" + mapping.getPort() + mapping.getRootContext() + "?throwExceptionOnFailure=false&sendTimeout=" + effectiveResponseTimeout;
             } else {
-                endpoint = httpProtocol.getProtocol() + "://" + mapping.getHostname() + mapping.getRootContext() + "?bridgeEndpoint=true&throwExceptionOnFailure=false" + buildTimeouts(service);
+                endpoint = "undertow:" + httpProtocol.getProtocol() + "://" + mapping.getHostname() + mapping.getRootContext() + "?throwExceptionOnFailure=false&sendTimeout=" + effectiveResponseTimeout;
             }
             if(mapping.isIngress()) {
                 endpoint = httpUtils.setIngressEndpoint(endpoint, mapping.getHostname());
