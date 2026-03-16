@@ -22,6 +22,7 @@ import jakarta.annotation.Nullable;
 import org.apache.camel.CamelContext;
 import org.apache.camel.component.http.HttpComponent;
 import org.apache.camel.component.undertow.UndertowComponent;
+import org.apache.camel.component.undertow.UndertowHostOptions;
 import org.apache.camel.support.jsse.KeyManagersParameters;
 import org.apache.camel.support.jsse.KeyStoreParameters;
 import org.apache.camel.support.jsse.SSLContextParameters;
@@ -132,6 +133,7 @@ public class Startup {
         startOpaService();
         startMcpService();
         configureHttpConnectionPool();
+        configureUndertowWorkerThreads();
     }
 
     private void configureUndertowSsl() {
@@ -479,6 +481,25 @@ public class Startup {
 
     public @Nullable McpBackendLoadBalancer getMcpLoadBalancer() {
         return mcpLoadBalancer;
+    }
+
+    private void configureUndertowWorkerThreads() {
+        int workerThreads = configuration.getRest().getUndertowWorkerThreads();
+        int ioThreads = configuration.getRest().getUndertowIoThreads();
+        if (workerThreads > 0 || ioThreads > 0) {
+            UndertowComponent undertowComponent = (UndertowComponent) camelContext.getComponent("undertow");
+            UndertowHostOptions hostOptions = new UndertowHostOptions();
+            if (workerThreads > 0) {
+                hostOptions.setWorkerThreads(workerThreads);
+            }
+            if (ioThreads > 0) {
+                hostOptions.setIoThreads(ioThreads);
+            }
+            undertowComponent.setHostOptions(hostOptions);
+            log.info("Undertow worker threads: {}, IO threads: {}",
+                    workerThreads > 0 ? workerThreads : "default",
+                    ioThreads > 0 ? ioThreads : "default");
+        }
     }
 
     private void configureHttpConnectionPool() {

@@ -235,6 +235,8 @@ public class CAPIConfiguration {
         private int proxyMaxPoolSize = 500;
         private int maxTotalConnections = 500;
         private int maxConnectionsPerRoute = 50;
+        private int undertowWorkerThreads = 0;  // 0 = use Undertow default (CPU_COUNT * 8)
+        private int undertowIoThreads = 0;      // 0 = use Undertow default (CPU_COUNT)
 
         public boolean isEnabled() {
             return enabled;
@@ -302,6 +304,18 @@ public class CAPIConfiguration {
         }
         public void setMaxConnectionsPerRoute(int maxConnectionsPerRoute) {
             this.maxConnectionsPerRoute = maxConnectionsPerRoute;
+        }
+        public int getUndertowWorkerThreads() {
+            return undertowWorkerThreads;
+        }
+        public void setUndertowWorkerThreads(int undertowWorkerThreads) {
+            this.undertowWorkerThreads = undertowWorkerThreads;
+        }
+        public int getUndertowIoThreads() {
+            return undertowIoThreads;
+        }
+        public void setUndertowIoThreads(int undertowIoThreads) {
+            this.undertowIoThreads = undertowIoThreads;
         }
 
     }

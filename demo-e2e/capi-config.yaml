@@ -16,6 +16,8 @@ capi:
     responseTimeout: 120000
     maxTotalConnections: 500
     maxConnectionsPerRoute: 50
+    undertowWorkerThreads: 500
+    undertowIoThreads: 0
   websocket:
     enabled: true
     port: 8382
