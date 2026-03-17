@@ -7,7 +7,7 @@ capi:
   adminPort: 8381
   reverseProxyHost:
   rest:
-    enabled: true
+    enabled: false
     port: 8380
     listeningAddress: 0.0.0.0
     contextPath: /api
@@ -15,7 +15,7 @@ capi:
     requestTimeout: 5000
     responseTimeout: 120000
   websocket:
-    enabled: true
+    enabled: false
     port: 8382
     listeningAddress: 0.0.0.0
     contextPath: /capi/*
@@ -46,7 +46,7 @@ capi:
     enabled: false
     cookieName:
     keys:
-      - http://localhost:8080/keycloak/realms/capi/protocol/openid-connect/certs
+      - http://localost/jwks.json
   opa:
     enabled: false
     endpoint: http://localhost:8181

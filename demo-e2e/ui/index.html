@@ -309,6 +309,7 @@
     <button class="tab" onclick="switchTab('sse')">SSE</button>
     <button class="tab" onclick="switchTab('mcp')">MCP</button>
     <button class="tab" onclick="switchTab('grpc')">gRPC</button>
+    <button class="tab" onclick="switchTab('upload')">File Upload</button>
     <button class="tab" onclick="switchTab('loadtest')">Load Test</button>
     <button class="tab" onclick="switchTab('log')">Request Log</button>
   </div>
@@ -508,6 +509,40 @@ message HelloReply   { string message = 1; }</pre>
           <div class="lt-stat"><div class="num num-err" id="ltErr">0</div><div class="lbl">Errors</div></div>
           <div class="lt-stat"><div class="num num-time" id="ltAvg">0</div><div class="lbl">Avg ms</div></div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab: File Upload -->
+  <div class="tab-content" id="tab-upload">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;">
+      <!-- Upload panel -->
+      <div class="card" style="padding:1.2rem;">
+        <h3 style="margin-bottom:1rem;font-size:1rem;">Upload File</h3>
+        <form id="uploadForm" style="display:flex;flex-direction:column;gap:1rem;">
+          <div style="border:2px dashed var(--border);border-radius:8px;padding:2rem;text-align:center;cursor:pointer;transition:border-color 0.2s;" id="dropZone"
+               ondragover="event.preventDefault();this.style.borderColor='var(--accent)'"
+               ondragleave="this.style.borderColor='var(--border)'"
+               ondrop="event.preventDefault();this.style.borderColor='var(--border)';document.getElementById('fileInput').files=event.dataTransfer.files;updateFileLabel()">
+            <input type="file" id="fileInput" name="file" style="display:none" onchange="updateFileLabel()">
+            <div id="fileLabel" style="color:var(--dim);font-size:0.9rem;">
+              Drop a file here or <span style="color:var(--accent);text-decoration:underline;cursor:pointer" onclick="document.getElementById('fileInput').click()">browse</span>
+            </div>
+          </div>
+          <div style="display:flex;gap:0.8rem;">
+            <button type="button" class="btn" style="flex:1" onclick="uploadFile()">Upload</button>
+            <button type="button" class="btn" style="flex:1;background:var(--surface2)" onclick="document.getElementById('fileInput').value='';updateFileLabel()">Clear</button>
+          </div>
+        </form>
+        <div id="uploadResult" style="margin-top:1rem;font-size:0.85rem;color:var(--dim);"></div>
+      </div>
+      <!-- File list panel -->
+      <div class="card" style="padding:1.2rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+          <h3 style="font-size:1rem;">Uploaded Files</h3>
+          <button class="btn" style="font-size:0.75rem;padding:0.3rem 0.8rem;" onclick="listFiles()">Refresh</button>
+        </div>
+        <div id="fileList" style="font-size:0.85rem;color:var(--dim);">Click Refresh to load files.</div>
       </div>
     </div>
   </div>
@@ -1276,6 +1311,79 @@ async function grpcCall() {
     entry.innerHTML = `<span style="color:var(--red)">Error: ${e.message}</span>`;
     log.prepend(entry);
   }
+}
+
+// ── File Upload ──
+function updateFileLabel() {
+  const input = document.getElementById('fileInput');
+  const label = document.getElementById('fileLabel');
+  if (input.files.length > 0) {
+    const f = input.files[0];
+    const size = f.size < 1024 ? f.size + ' B' : (f.size / 1024).toFixed(1) + ' KB';
+    label.innerHTML = `<span style="color:var(--text)">${f.name}</span> <span style="color:var(--dim)">(${size})</span>`;
+  } else {
+    label.innerHTML = 'Drop a file here or <span style="color:var(--accent);text-decoration:underline;cursor:pointer" onclick="document.getElementById(\'fileInput\').click()">browse</span>';
+  }
+}
+
+async function uploadFile() {
+  const input = document.getElementById('fileInput');
+  const result = document.getElementById('uploadResult');
+  if (!input.files.length) { result.innerHTML = '<span style="color:var(--red)">No file selected</span>'; return; }
+  const formData = new FormData();
+  formData.append('file', input.files[0]);
+  result.innerHTML = '<span style="color:var(--accent)">Uploading...</span>';
+  try {
+    const t0 = performance.now();
+    const resp = await fetch('/api/upload-service/v1', { method: 'POST', body: formData });
+    const ms = (performance.now() - t0).toFixed(0);
+    const data = await resp.json();
+    if (resp.ok) {
+      const f = data.uploaded[0];
+      result.innerHTML = `<span style="color:var(--green)">Uploaded</span> ${f.original_name} (${f.size} bytes) in ${ms}ms`;
+      input.value = ''; updateFileLabel(); listFiles();
+    } else {
+      result.innerHTML = `<span style="color:var(--red)">Error ${resp.status}:</span> ${data.error || JSON.stringify(data)}`;
+    }
+    addLog('POST', '/api/upload-service/v1', resp.status, ms, data, 'open');
+  } catch (e) {
+    result.innerHTML = `<span style="color:var(--red)">Failed:</span> ${e.message}`;
+  }
+}
+
+async function listFiles() {
+  const el = document.getElementById('fileList');
+  el.innerHTML = '<span style="color:var(--accent)">Loading...</span>';
+  try {
+    const resp = await fetch('/api/upload-service/v1');
+    const data = await resp.json();
+    if (!data.files || data.files.length === 0) {
+      el.innerHTML = 'No files uploaded yet.';
+      return;
+    }
+    el.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:0.82rem;">' +
+      '<tr style="border-bottom:1px solid var(--border);color:var(--dim);text-align:left;">' +
+      '<th style="padding:0.4rem 0.6rem;">Name</th><th style="padding:0.4rem 0.6rem;">Size</th><th style="padding:0.4rem 0.6rem;">Uploaded</th><th></th></tr>' +
+      data.files.map(f => {
+        const size = f.size < 1024 ? f.size + ' B' : (f.size / 1024).toFixed(1) + ' KB';
+        return `<tr style="border-bottom:1px solid var(--border);">` +
+          `<td style="padding:0.4rem 0.6rem;color:var(--text);">${f.name}</td>` +
+          `<td style="padding:0.4rem 0.6rem;">${size}</td>` +
+          `<td style="padding:0.4rem 0.6rem;">${f.uploaded_at}</td>` +
+          `<td style="padding:0.4rem 0.6rem;"><button class="btn" style="font-size:0.7rem;padding:0.15rem 0.5rem;background:var(--red);color:white;" onclick="deleteFile('${f.name}')">Delete</button></td></tr>`;
+      }).join('') + '</table>';
+  } catch (e) {
+    el.innerHTML = `<span style="color:var(--red)">Error: ${e.message}</span>`;
+  }
+}
+
+async function deleteFile(name) {
+  try {
+    const resp = await fetch('/api/upload-service/v1/' + encodeURIComponent(name), { method: 'DELETE' });
+    const data = await resp.json();
+    addLog('DELETE', '/api/upload-service/v1/' + name, resp.status, 0, data, 'open');
+    listFiles();
+  } catch (e) { console.error(e); }
 }
 
 // ── Init ──

@@ -7,7 +7,12 @@ import json
 import random
 import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
 from urllib.parse import urlparse, parse_qs
+
+
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
 
 SERVICE_DATA = {
     # --- Open ---
@@ -92,6 +97,6 @@ class Handler(BaseHTTPRequestHandler):
         pass  # Suppress request logs
 
 if __name__ == "__main__":
-    server = HTTPServer(("0.0.0.0", 8080), Handler)
-    print("Generic service listening on :8080", flush=True)
+    server = ThreadingHTTPServer(("0.0.0.0", 8080), Handler)
+    print("Generic service listening on :8080 (threaded)", flush=True)
     server.serve_forever()

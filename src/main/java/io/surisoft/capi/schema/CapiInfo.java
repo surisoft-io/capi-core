@@ -9,19 +9,13 @@ import java.util.List;
 public class CapiInfo {
     private String javaVersion;
     private String capiVersion;
-    private String camelVersion;
     private Date startTimestamp;
     private Integer totalRoutes;
-    private Integer exchangesTotal;
-    private Integer exchangesCompleted;
-    private Integer startedRoutes;
     private String uptime;
-    private Integer stoppedRouteCount;
-    private Integer removedRouteCount;
-    private Integer failedExchangeCount;
     private String capiNameSpace;
     private boolean oauth2Enabled;
     private String oauth2Endpoint;
+    private String oauth2CookieName;
     private boolean opaEnabled;
     private String opaEndpoint;
     private boolean consulEnabled;
@@ -40,14 +34,6 @@ public class CapiInfo {
         this.capiVersion = capiVersion;
     }
 
-    public String getCamelVersion() {
-        return camelVersion;
-    }
-
-    public void setCamelVersion(String camelVersion) {
-        this.camelVersion = camelVersion;
-    }
-
     public Date getStartTimestamp() {
         return startTimestamp;
     }
@@ -64,60 +50,12 @@ public class CapiInfo {
         this.totalRoutes = totalRoutes;
     }
 
-    public Integer getExchangesTotal() {
-        return exchangesTotal;
-    }
-
-    public void setExchangesTotal(Integer exchangesTotal) {
-        this.exchangesTotal = exchangesTotal;
-    }
-
-    public Integer getExchangesCompleted() {
-        return exchangesCompleted;
-    }
-
-    public void setExchangesCompleted(Integer exchangesCompleted) {
-        this.exchangesCompleted = exchangesCompleted;
-    }
-
-    public Integer getStartedRoutes() {
-        return startedRoutes;
-    }
-
-    public void setStartedRoutes(Integer startedRoutes) {
-        this.startedRoutes = startedRoutes;
-    }
-
     public String getUptime() {
         return uptime;
     }
 
     public void setUptime(String uptime) {
         this.uptime = uptime;
-    }
-
-    public Integer getStoppedRouteCount() {
-        return stoppedRouteCount;
-    }
-
-    public void setStoppedRouteCount(Integer stoppedRouteCount) {
-        this.stoppedRouteCount = stoppedRouteCount;
-    }
-
-    public Integer getRemovedRouteCount() {
-        return removedRouteCount;
-    }
-
-    public void setRemovedRouteCount(Integer removedRouteCount) {
-        this.removedRouteCount = removedRouteCount;
-    }
-
-    public Integer getFailedExchangeCount() {
-        return failedExchangeCount;
-    }
-
-    public void setFailedExchangeCount(Integer failedExchangeCount) {
-        this.failedExchangeCount = failedExchangeCount;
     }
 
     public String getCapiNameSpace() {
@@ -222,5 +160,13 @@ public class CapiInfo {
 
     public void setJavaVersion(String javaVersion) {
         this.javaVersion = javaVersion;
+    }
+
+    public String getOauth2CookieName() {
+        return oauth2CookieName;
+    }
+
+    public void setOauth2CookieName(String oauth2CookieName) {
+        this.oauth2CookieName = oauth2CookieName;
     }
 }

@@ -13,19 +13,12 @@ import io.surisoft.capi.schema.ApiKeyStoreEntry;
 import io.surisoft.capi.schema.ConsulKeyStoreEntry;
 import io.surisoft.capi.schema.GrpcClient;
 import io.surisoft.capi.schema.Service;
+import io.surisoft.capi.schema.RestClient;
 import io.surisoft.capi.schema.WebsocketClient;
 import io.surisoft.capi.service.*;
 import io.surisoft.capi.configuration.LocalCacheConfiguration;
-import io.surisoft.capi.tracer.CapiTracer;
 import io.surisoft.capi.tracer.TracingBootstrap;
 import jakarta.annotation.Nullable;
-import org.apache.camel.CamelContext;
-import org.apache.camel.component.http.HttpComponent;
-import org.apache.camel.component.undertow.UndertowComponent;
-import org.apache.camel.support.jsse.KeyManagersParameters;
-import org.apache.camel.support.jsse.KeyStoreParameters;
-import org.apache.camel.support.jsse.SSLContextParameters;
-import org.apache.camel.support.jsse.TrustManagersParameters;
 import org.apache.hc.core5.ssl.SSLContextBuilder;
 import org.apache.hc.core5.ssl.TrustStrategy;
 import org.cache2k.Cache;
@@ -46,14 +39,11 @@ public class Startup {
 
     private static final Logger log = LoggerFactory.getLogger(CAPIMain.class);
     private final CAPIConfiguration configuration;
-    private final CamelContext camelContext;
     private ServiceUtils serviceUtils;
     private RouteUtils routeUtils;
     private Cache<String, Service> serviceCache;
     private HttpUtils httpUtils;
     private ConsulNodeDiscovery consulNodeDiscovery;
-    private MetricsProcessor metricsProcessor;
-    private ContentTypeValidator contentTypeValidator;
     private ThrottleProcessor throttleProcessor;
     private HttpClient consulHttpClient;
 
@@ -64,17 +54,16 @@ public class Startup {
     @Nullable
     private CapiSslContextHolder capiSslContextHolder;
     @Nullable
-    private CapiTracer capiTracer;
-    @Nullable
-    private AuthorizationProcessor authorizationProcessor;
+    private io.opentelemetry.api.trace.Tracer openTelemetryTracer;
     @Nullable
     private OpaService opaService;
     @Nullable
     private WebsocketUtils websocketUtils;
     @Nullable
     private GrpcUtils grpcUtils;
-    private Map<String, WebsocketClient> webSocketClientMap = new java.util.concurrent.ConcurrentHashMap<>();
-    private Map<String, GrpcClient> grpcClientMap = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<String, WebsocketClient> webSocketClientMap = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<String, RestClient> restClientMap = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<String, GrpcClient> grpcClientMap = new java.util.concurrent.ConcurrentHashMap<>();
     @Nullable
     private SSLContext undertowSslContext;
     @Nullable
@@ -100,9 +89,8 @@ public class Startup {
     private CompositeMeterRegistry meterRegistry;
     private PrometheusMeterRegistry prometheusRegistry;
 
-    public Startup(CAPIConfiguration capiConfiguration, CamelContext camelContext) {
+    public Startup(CAPIConfiguration capiConfiguration) {
         this.configuration = capiConfiguration;
-        this.camelContext = camelContext;
     }
 
     public void start() {
@@ -122,7 +110,7 @@ public class Startup {
         startServiceUtils();
         startConsulNodeDiscoveryService();
         if(configuration.isCorsEnabled()) {
-            bindCapCorsFilterStrategy(camelContext);
+            //bindCapCorsFilterStrategy(camelContext);
         }
         if(configuration.getConsulStore().isEnabled()) {
             startConsulStore();
@@ -139,24 +127,6 @@ public class Startup {
             return;
         }
         log.info("Configuring Undertow SSL");
-
-        // Configure Camel's undertow component
-        KeyStoreParameters keyStoreParameters = new KeyStoreParameters();
-        keyStoreParameters.setResource(ssl.getPath());
-        keyStoreParameters.setPassword(ssl.getPassword());
-        keyStoreParameters.setType(ssl.getKeyStoreType());
-
-        KeyManagersParameters keyManagersParameters = new KeyManagersParameters();
-        keyManagersParameters.setKeyStore(keyStoreParameters);
-        keyManagersParameters.setKeyPassword(ssl.getPassword());
-
-        SSLContextParameters sslContextParameters = new SSLContextParameters();
-        sslContextParameters.setKeyManagers(keyManagersParameters);
-
-        UndertowComponent undertowComponent = (UndertowComponent) camelContext.getComponent("undertow");
-        undertowComponent.setSslContextParameters(sslContextParameters);
-
-        // Build SSLContext for non-Camel Undertow servers (AdminGateway, etc.)
         try {
             KeyStore keyStore = KeyStore.getInstance(ssl.getKeyStoreType());
             try(FileInputStream fis = new FileInputStream(ssl.getPath())) {
@@ -178,28 +148,34 @@ public class Startup {
     }
 
     private void startWebsocketUtils() {
-        if(configuration.getWebsocket().isEnabled()) {
-            if(oauth2Provider != null && oauth2Provider.getJwtProcessorList() != null) {
-                websocketUtils = new WebsocketUtils(configuration.getWebsocket(), oauth2Provider.getJwtProcessorList(), false, null, null, null);
-            } else {
-                websocketUtils = new WebsocketUtils(configuration.getWebsocket(), null, false, null, null, null);
-            }
+        List<DefaultJWTProcessor<SecurityContext>> jwtProcessors = null;
+        if (oauth2Provider != null && oauth2Provider.getJwtProcessorList() != null) {
+            jwtProcessors = oauth2Provider.getJwtProcessorList();
         }
+        websocketUtils = new WebsocketUtils(configuration.getWebsocket(), jwtProcessors, capiSslContextHolder);
     }
 
     private void startGrpcUtils() {
         if(configuration.getGrpc() != null && configuration.getGrpc().isEnabled()) {
-            boolean trustStoreEnabled = configuration.getTrustStore() != null && configuration.getTrustStore().isEnabled();
-            String trustStorePath = trustStoreEnabled ? configuration.getTrustStore().getPath() : null;
-            String trustStorePassword = trustStoreEnabled ? configuration.getTrustStore().getPassword() : null;
-            String trustStoreEncoded = trustStoreEnabled ? configuration.getTrustStore().getEncoded() : null;
-            grpcUtils = new GrpcUtils(trustStoreEnabled, trustStorePath, trustStorePassword, trustStoreEncoded);
+            grpcUtils = new GrpcUtils(capiSslContextHolder);
         }
     }
 
     private void startConsulStore() {
         if(configuration.getConsulStore().isEnabled() && configuration.getTrustStore().isEnabled()) {
-            consulStore = new ConsulStore(consulStoreCache, routeUtils, configuration.getConsulStore().getEndpoint(), configuration.getConsulStore().getToken(), configuration.getTrustStore().getPassword(), capiSslContextHolder, camelContext, consulHttpClient);
+            consulStore = new ConsulStore(consulStoreCache, routeUtils, configuration.getConsulStore().getEndpoint(), configuration.getConsulStore().getToken(), configuration.getTrustStore().getPassword(), capiSslContextHolder, consulHttpClient);
+            consulStore.setWebsocketUtils(websocketUtils);
+            consulStore.setHttpUtils(httpUtils);
+            consulStore.setServiceCache(serviceCache);
+            consulStore.setRestClientMap(restClientMap);
+            consulStore.setWebsocketClientMap(webSocketClientMap);
+            if (configuration.getRest() != null && configuration.getRest().getResponseTimeout() > 0) {
+                consulStore.setGlobalResponseTimeout(configuration.getRest().getResponseTimeout());
+            }
+            if (grpcUtils != null) {
+                consulStore.setGrpcUtils(grpcUtils);
+                consulStore.setGrpcClientMap(grpcClientMap);
+            }
         }
     }
 
@@ -215,14 +191,14 @@ public class Startup {
     }
 
     private void startRouteConsistencyChecker() {
-        routeConsistencyChecker = new RouteConsistencyChecker(camelContext, routeUtils, serviceCache);
+        routeConsistencyChecker = new RouteConsistencyChecker(serviceCache);
+        routeConsistencyChecker.setRestClientMap(restClientMap);
     }
 
     private void startConsulNodeDiscoveryService() {
-        consulNodeDiscovery = new ConsulNodeDiscovery(camelContext, capiSslContextHolder, configuration.getConsulHosts(), serviceUtils, serviceCache, routeUtils, websocketUtils, consulHttpClient);
+        consulNodeDiscovery = new ConsulNodeDiscovery(capiSslContextHolder, configuration.getConsulHosts(), serviceUtils, serviceCache, routeUtils, websocketUtils, consulHttpClient);
+        consulNodeDiscovery.setHttpUtils(httpUtils);
         consulNodeDiscovery.setThrottleProcessor(throttleProcessor);
-        consulNodeDiscovery.setContentTypeValidator(contentTypeValidator);
-        consulNodeDiscovery.setMetricsProcessor(metricsProcessor);
         consulNodeDiscovery.setOpaService(opaService);
         consulNodeDiscovery.setCapiRunningMode(configuration.getRunningMode());
         if(configuration.getRest().getContextPath() != null && !configuration.getRest().getContextPath().isEmpty()) {
@@ -239,12 +215,17 @@ public class Startup {
 
         consulNodeDiscovery.setStrictToInstanceName(configuration.isStrictToInstanceName());
 
+        if(configuration.getRest() != null && configuration.getRest().getResponseTimeout() > 0) {
+            consulNodeDiscovery.setGlobalResponseTimeout(configuration.getRest().getResponseTimeout());
+        }
+
         if(configuration.getTraces().getExtraMetadataPrefix() != null) {
             consulNodeDiscovery.setServiceMetaExtrasPrefix(configuration.getTraces().getExtraMetadataPrefix());
         }
 
         if(websocketUtils != null) {
             consulNodeDiscovery.setWebsocketClientMap(webSocketClientMap);
+            consulNodeDiscovery.setRestClientMap(restClientMap);
         }
 
         if(grpcUtils != null) {
@@ -299,18 +280,6 @@ public class Startup {
                             .build();
 
                 capiSslContextHolder = new CapiSslContextHolder(sslContext);
-
-                HttpComponent httpComponent = (HttpComponent) camelContext.getComponent("https");
-
-                TrustManagersParameters trustManagersParameters = new TrustManagersParameters();
-                trustManagersParameters.setTrustManager(capiTrustManager);
-
-                SSLContextParameters sslContextParameters = new SSLContextParameters();
-                sslContextParameters.setTrustManagers(trustManagersParameters);
-                sslContextParameters.setSessionTimeout("1");
-
-                sslContextParameters.createSSLContext(camelContext);
-                httpComponent.setSslContextParameters(sslContextParameters);
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
@@ -320,42 +289,20 @@ public class Startup {
     private void startTraceService() {
         if(configuration.getTraces().isEnabled()) {
             OpenTelemetry openTelemetry = TracingBootstrap.init(configuration.getTraces().getEndpoint(), configuration.getTraces().getServiceName());
-            capiTracer = new CapiTracer(httpUtils, configuration.getInstanceName(), serviceCache, openTelemetry.getTracer(configuration.getTraces().getServiceName()));
-            List<String> excludePatterns = new ArrayList<>();
-            excludePatterns.add("timer://");
-            excludePatterns.add("timer");
-            excludePatterns.add("bean://consulNodeDiscovery");
-            excludePatterns.add("bean://consistencyChecker");
-            excludePatterns.add("direct://");
-            excludePatterns.add("error");
-            capiTracer.setExcludePatterns(excludePatterns);
-            capiTracer.init(camelContext);
-
-
+            openTelemetryTracer = openTelemetry.getTracer(configuration.getTraces().getServiceName());
         }
     }
 
     private void startRouteUtils() {
-        routeUtils = new RouteUtils(new HttpErrorProcessor(),
-                httpUtils,
-                meterRegistry,
-                capiTracer,
-                camelContext,
-                authorizationProcessor,
-                configuration.isCorsEnabled(),
-                capiSslContextHolder,
-                configuration.getRest().getResponseTimeout(),
-                configuration.getRest().getConnectionRequestTimeout(),
-                configuration.getRest().getRequestTimeout());
+        routeUtils = new RouteUtils(meterRegistry);
     }
 
     private void startServiceUtils() {
-        serviceUtils = new ServiceUtils(httpUtils, Optional.empty(), routeUtils, camelContext, Optional.empty(), configuration.getRunningMode());
+        serviceUtils = new ServiceUtils(httpUtils, Optional.empty(), routeUtils, Optional.empty(), configuration.getRunningMode());
+        serviceUtils.setRestClientMap(restClientMap);
     }
 
     private void createRouteProcessors() {
-        metricsProcessor = new MetricsProcessor(meterRegistry);
-        contentTypeValidator = new ContentTypeValidator();
         boolean apiKeyStoreEnabled = configuration.getApiKeyStore() != null && configuration.getApiKeyStore().isEnabled();
         if(configuration.getThrottle() != null && configuration.getThrottle().isEnabled()) {
             log.info("Throttling enabled, starting Hazelcast");
@@ -366,7 +313,6 @@ public class Startup {
             throttleProcessor = new ThrottleProcessor(serviceCache, httpUtils, HazelcastCacheConfiguration.createThrottleCache(throttleConfig));
         }
         if(configuration.getOauth2().isEnabled() || apiKeyStoreEnabled) {
-            authorizationProcessor = new AuthorizationProcessor(httpUtils, serviceCache, opaService, apiKeyCache);
         }
     }
 
@@ -412,16 +358,24 @@ public class Startup {
         return webSocketClientMap;
     }
 
+    public Map<String, RestClient> getRestClientMap() {
+        return restClientMap;
+    }
+
+    public @Nullable ThrottleProcessor getThrottleProcessor() {
+        return throttleProcessor;
+    }
+
+    public @Nullable Cache<String, ApiKeyStoreEntry> getApiKeyCache() {
+        return apiKeyCache;
+    }
+
     public Map<String, GrpcClient> getGrpcClientMap() {
         return grpcClientMap;
     }
 
     public @Nullable SSLContext getUndertowSslContext() {
         return undertowSslContext;
-    }
-
-    private void bindCapCorsFilterStrategy(CamelContext camelContext) {
-        camelContext.getRegistry().bind("capiCorsFilterStrategy", new CapiCorsFilterStrategy(configuration.getAllowedHeaders()));
     }
 
     public @Nullable CapiTrustManager getCapiTrustManager() {
@@ -434,6 +388,10 @@ public class Startup {
 
     public @Nullable ApiKeyStore getApiKeyStore() {
         return apiKeyStore;
+    }
+
+    public @Nullable io.opentelemetry.api.trace.Tracer getOpenTelemetryTracer() {
+        return openTelemetryTracer;
     }
 
     public @Nullable OpaService getOpaService() {

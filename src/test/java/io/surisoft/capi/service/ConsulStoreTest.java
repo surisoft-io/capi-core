@@ -6,7 +6,6 @@ import io.surisoft.capi.configuration.CapiSslContextHolder;
 import io.surisoft.capi.schema.ConsulKeyStoreEntry;
 import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.RouteUtils;
-import org.apache.camel.CamelContext;
 import org.cache2k.Cache;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -16,7 +15,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.http.HttpClient;
@@ -41,9 +39,6 @@ class ConsulStoreTest {
     private CapiSslContextHolder capiSslContextHolder;
 
     @Mock
-    private CamelContext camelContext;
-
-    @Mock
     private HttpClient httpClient;
 
     private ConsulStore consulStore;
@@ -57,14 +52,12 @@ class ConsulStoreTest {
                 "test-token",
                 "changeit",
                 capiSslContextHolder,
-                camelContext,
                 httpClient
         );
     }
 
     @Test
     void consulKeyValueToInputStream_decodesBase64Correctly() throws JsonProcessingException {
-        // Double-encode: the value in consul is base64-encoded, and the inner value is also base64
         String originalContent = "hello world";
         String innerBase64 = Base64.getEncoder().encodeToString(originalContent.getBytes());
         String outerBase64 = Base64.getEncoder().encodeToString(innerBase64.getBytes());
@@ -76,7 +69,6 @@ class ConsulStoreTest {
     @SuppressWarnings("unchecked")
     @Test
     void process_noRemoteTrustStore_doesNothing() throws Exception {
-        // consulKvHost is set, but remote returns 404
         HttpResponse<String> mockResponse = mock(HttpResponse.class);
         when(mockResponse.statusCode()).thenReturn(404);
         when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class))).thenReturn(mockResponse);
@@ -85,8 +77,8 @@ class ConsulStoreTest {
 
         consulStore.process();
 
-        // No processTrustStore should be called since remote is null
-        verify(routeUtils, never()).reloadTrustStoreManager(any(InputStream.class), anyString());
+        // No cache put should happen since remote is null (404)
+        verify(consulTrustStoreCache, never()).put(eq(Constants.CONSUL_CAPI_TRUST_STORE_GROUP_KEY), any(ConsulKeyStoreEntry.class));
     }
 
     @SuppressWarnings("unchecked")
@@ -94,7 +86,6 @@ class ConsulStoreTest {
     void process_remoteExistsButNoCached_cachesRemote() throws Exception {
         ConsulKeyStoreEntry remoteEntry = new ConsulKeyStoreEntry();
         remoteEntry.setModifyIndex(10);
-        // Create a valid double-base64 encoded JKS content (empty will cause error, but that's ok for test)
         String innerBase64 = Base64.getEncoder().encodeToString("test-content".getBytes());
         String outerBase64 = Base64.getEncoder().encodeToString(innerBase64.getBytes());
         remoteEntry.setValue(outerBase64);
@@ -109,17 +100,15 @@ class ConsulStoreTest {
 
         when(consulTrustStoreCache.get(Constants.CONSUL_CAPI_TRUST_STORE_GROUP_KEY)).thenReturn(null);
 
-        // processTrustStore will fail because the content is not a valid keystore,
-        // but the error is caught internally
         consulStore.process();
 
-        // The method should still attempt to reload the trust store
-        verify(routeUtils).reloadTrustStoreManager(any(InputStream.class), eq("changeit"));
+        // Should cache the remote entry
+        verify(consulTrustStoreCache).put(eq(Constants.CONSUL_CAPI_TRUST_STORE_GROUP_KEY), any(ConsulKeyStoreEntry.class));
     }
 
     @SuppressWarnings("unchecked")
     @Test
-    void process_remoteSameAsCached_doesNotReloadTrustStore() throws Exception {
+    void process_remoteSameAsCached_doesNotReprocess() throws Exception {
         ConsulKeyStoreEntry cachedEntry = new ConsulKeyStoreEntry();
         cachedEntry.setModifyIndex(10);
 
@@ -139,15 +128,13 @@ class ConsulStoreTest {
 
         consulStore.process();
 
-        // Same modify index, so no reload
-        verify(routeUtils, never()).reloadTrustStoreManager(any(InputStream.class), anyString());
-        // Still caches (the deserialized remote object has same modifyIndex)
+        // Same modify index, still caches
         verify(consulTrustStoreCache).put(eq(Constants.CONSUL_CAPI_TRUST_STORE_GROUP_KEY), any(ConsulKeyStoreEntry.class));
     }
 
     @SuppressWarnings("unchecked")
     @Test
-    void process_remoteDifferentFromCached_reloadsTrustStore() throws Exception {
+    void process_remoteDifferentFromCached_reprocesses() throws Exception {
         ConsulKeyStoreEntry cachedEntry = new ConsulKeyStoreEntry();
         cachedEntry.setModifyIndex(5);
 
@@ -167,13 +154,11 @@ class ConsulStoreTest {
 
         when(consulTrustStoreCache.get(Constants.CONSUL_CAPI_TRUST_STORE_GROUP_KEY)).thenReturn(cachedEntry);
 
+        // processTrustStore will attempt to rebuild the HttpClient
         consulStore.process();
 
-        // Different modify index, processTrustStore is called which calls reloadTrustStoreManager.
-        // After reloadTrustStoreManager, processTrustStore tries to get the camel HTTPS component
-        // which is null in tests, causing an exception that is caught by the outer catch.
-        // So the put after processTrustStore is not reached.
-        verify(routeUtils).reloadTrustStoreManager(any(InputStream.class), eq("changeit"));
+        // Different modify index, so processTrustStore is called and cache updated
+        verify(consulTrustStoreCache).put(eq(Constants.CONSUL_CAPI_TRUST_STORE_GROUP_KEY), any(ConsulKeyStoreEntry.class));
     }
 
     @SuppressWarnings("unchecked")
@@ -196,7 +181,6 @@ class ConsulStoreTest {
                 "test-token",
                 "changeit",
                 capiSslContextHolder,
-                camelContext,
                 httpClient
         );
 
@@ -204,7 +188,6 @@ class ConsulStoreTest {
 
         // process will call getRemoteTrustStore which returns null for null host
         assertDoesNotThrow(() -> nullHostStore.process());
-        verify(routeUtils, never()).reloadTrustStoreManager(any(InputStream.class), anyString());
     }
 
     @Test
@@ -216,13 +199,11 @@ class ConsulStoreTest {
                 null,
                 "changeit",
                 capiSslContextHolder,
-                camelContext,
                 httpClient
         );
 
         when(consulTrustStoreCache.get(Constants.CONSUL_CAPI_TRUST_STORE_GROUP_KEY)).thenReturn(null);
 
-        // Should not crash when building request without token
         assertDoesNotThrow(() -> noTokenStore.process());
     }
 
@@ -235,7 +216,6 @@ class ConsulStoreTest {
                 "",
                 "changeit",
                 capiSslContextHolder,
-                camelContext,
                 httpClient
         );
 
@@ -246,7 +226,6 @@ class ConsulStoreTest {
 
     @Test
     void process_pathTraversalInHost_doesNotCallHttpClient() throws Exception {
-        // consulKvHost with ".." will trigger path traversal detection in buildServicesHttpRequest
         ConsulStore traversalStore = new ConsulStore(
                 consulTrustStoreCache,
                 routeUtils,
@@ -254,15 +233,12 @@ class ConsulStoreTest {
                 "test-token",
                 "changeit",
                 capiSslContextHolder,
-                camelContext,
                 httpClient
         );
 
         when(consulTrustStoreCache.get(Constants.CONSUL_CAPI_TRUST_STORE_GROUP_KEY)).thenReturn(null);
 
-        // Should not crash — the IllegalArgumentException is caught by getRemoteTrustStore's catch block
         assertDoesNotThrow(() -> traversalStore.process());
-        // httpClient.send should never be called because the exception occurs before it
         verify(httpClient, never()).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
     }
 }

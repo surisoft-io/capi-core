@@ -15,22 +15,23 @@
 </h5>
 
 # CAPI Gateway
-## _Light Apache Camel API Gateway_
+## _Lightweight API Gateway_
 
-CAPI is a lightweight API Gateway and load balancer powered by Apache Camel dynamic routes. Services register themselves in HashiCorp Consul, and CAPI automatically discovers them, creates routes, and applies security, throttling, and observability policies — no database required.
+CAPI is a lightweight API Gateway and load balancer built on Undertow's async proxy architecture. Services register themselves in HashiCorp Consul, and CAPI automatically discovers them, creates proxy handlers, and applies security, throttling, and observability policies — no database required.
 
 ## Features
 
-* REST, WebSocket, and SSE gateway with dynamic routing
+* REST, WebSocket, and SSE gateway with fully async proxying (zero threads blocked during backend calls)
 * Service discovery via HashiCorp Consul (automatic route creation and removal)
-* OAuth2 / OIDC token validation (multi-provider)
-* Fine-grained authorization via OPA (Open Policy Agent)
+* OAuth2 / OIDC token validation (multi-provider, cookie-based auth supported)
+* API Key authentication with per-key throttling (via Consul KV)
+* Fine-grained authorization via OPA (Open Policy Agent, async policy evaluation)
 * Distributed throttling (Hazelcast, with Kubernetes discovery)
 * Load balancing (Round Robin) and Failover
 * Distributed tracing (OpenTelemetry / OTLP)
 * Prometheus metrics
 * OpenAPI spec aggregation from upstream services
-* TLS termination and custom truststore management
+* TLS termination and dynamic truststore management (via Consul KV hot-reload)
 * CORS management
 * Admin API with health, metrics, and route inspection
 * Multi-instance support (route targeting per CAPI instance)

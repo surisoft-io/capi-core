@@ -1,32 +1,14 @@
 package io.surisoft.capi.utils;
 
 import io.surisoft.capi.configuration.CAPIConfiguration;
-import io.surisoft.capi.service.ConsulNodeDiscovery;
-import org.apache.camel.CamelContext;
-import org.apache.camel.component.http.HttpComponent;
-import org.apache.camel.spi.Registry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
 
-@ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
 class StartupTest {
-
-    @Mock
-    private CamelContext camelContext;
-
-    @Mock
-    private Registry registry;
 
     private CAPIConfiguration configuration;
     private Startup startup;
@@ -38,9 +20,7 @@ class StartupTest {
 
     @Test
     void start_minimalConfiguration_createsBasicComponents() {
-        when(camelContext.getRegistry()).thenReturn(registry);
-
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         assertNotNull(startup.getServiceCache());
@@ -53,29 +33,24 @@ class StartupTest {
 
     @Test
     void start_minimalConfig_oauth2ProviderIsNull() {
-        when(camelContext.getRegistry()).thenReturn(registry);
-
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         assertNull(startup.getOauth2Provider());
     }
 
     @Test
-    void start_minimalConfig_websocketUtilsIsNull() {
-        when(camelContext.getRegistry()).thenReturn(registry);
-
-        startup = new Startup(configuration, camelContext);
+    void start_minimalConfig_websocketUtilsIsNotNull() {
+        startup = new Startup(configuration);
         startup.start();
 
-        assertNull(startup.getWebsocketUtils());
+        // WebsocketUtils is always created (needed by RestGateway for proxy handlers)
+        assertNotNull(startup.getWebsocketUtils());
     }
 
     @Test
     void start_minimalConfig_consulStoreIsNull() {
-        when(camelContext.getRegistry()).thenReturn(registry);
-
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         assertNull(startup.getConsulStore());
@@ -83,9 +58,7 @@ class StartupTest {
 
     @Test
     void start_minimalConfig_opaServiceIsNull() {
-        when(camelContext.getRegistry()).thenReturn(registry);
-
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         assertNull(startup.getOpaService());
@@ -93,9 +66,7 @@ class StartupTest {
 
     @Test
     void start_minimalConfig_undertowSslContextIsNull() {
-        when(camelContext.getRegistry()).thenReturn(registry);
-
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         assertNull(startup.getUndertowSslContext());
@@ -103,9 +74,7 @@ class StartupTest {
 
     @Test
     void start_minimalConfig_capiTrustManagerIsNull() {
-        when(camelContext.getRegistry()).thenReturn(registry);
-
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         assertNull(startup.getCapiTrustManager());
@@ -113,9 +82,7 @@ class StartupTest {
 
     @Test
     void start_minimalConfig_webSocketClientMapIsEmpty() {
-        when(camelContext.getRegistry()).thenReturn(registry);
-
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         assertNotNull(startup.getWebSocketClientMap());
@@ -126,31 +93,29 @@ class StartupTest {
     void start_withCorsEnabled() {
         configuration.setCorsEnabled(true);
         configuration.setAllowedHeaders(List.of("Content-Type", "Authorization"));
-        when(camelContext.getRegistry()).thenReturn(registry);
 
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
-        verify(registry).bind(eq("capiCorsFilterStrategy"), any());
+        // Just verify it doesn't throw - cors filter strategy is now internal
+        assertNotNull(startup.getRouteUtils());
     }
 
     @Test
     void start_withCorsDisabled() {
         configuration.setCorsEnabled(false);
-        when(camelContext.getRegistry()).thenReturn(registry);
 
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
-        verify(registry, never()).bind(eq("capiCorsFilterStrategy"), any());
+        assertNotNull(startup.getRouteUtils());
     }
 
     @Test
     void start_withReverseProxyHost() {
         configuration.setReverseProxyHost("proxy.example.com");
-        when(camelContext.getRegistry()).thenReturn(registry);
 
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         assertNotNull(startup.getConsulNodeDiscovery());
@@ -159,9 +124,8 @@ class StartupTest {
     @Test
     void start_withInstanceName() {
         configuration.setInstanceName("my-instance");
-        when(camelContext.getRegistry()).thenReturn(registry);
 
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         assertNotNull(startup.getConsulNodeDiscovery());
@@ -171,9 +135,8 @@ class StartupTest {
     void start_withContextPath() {
         CAPIConfiguration.Rest rest = configuration.getRest();
         rest.setContextPath("/api");
-        when(camelContext.getRegistry()).thenReturn(registry);
 
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         assertNotNull(startup.getConsulNodeDiscovery());
@@ -183,9 +146,8 @@ class StartupTest {
     void start_withExtraMetadataPrefix() {
         CAPIConfiguration.Traces traces = configuration.getTraces();
         traces.setExtraMetadataPrefix("capi-extra-");
-        when(camelContext.getRegistry()).thenReturn(registry);
 
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         assertNotNull(startup.getConsulNodeDiscovery());
@@ -197,9 +159,8 @@ class StartupTest {
         opa.setEnabled(true);
         opa.setEndpoint("http://opa:8181");
         configuration.setOpa(opa);
-        when(camelContext.getRegistry()).thenReturn(registry);
 
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         assertNotNull(startup.getOpaService());
@@ -210,9 +171,8 @@ class StartupTest {
         CAPIConfiguration.Ssl ssl = new CAPIConfiguration.Ssl();
         ssl.setEnabled(false);
         configuration.setSsl(ssl);
-        when(camelContext.getRegistry()).thenReturn(registry);
 
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         assertNull(startup.getUndertowSslContext());
@@ -221,9 +181,8 @@ class StartupTest {
     @Test
     void start_withNullSsl() {
         configuration.setSsl(null);
-        when(camelContext.getRegistry()).thenReturn(registry);
 
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         assertNull(startup.getUndertowSslContext());
@@ -233,9 +192,8 @@ class StartupTest {
     void start_withStrictToInstanceName() {
         configuration.setStrictToInstanceName(true);
         configuration.setInstanceName("strict-inst");
-        when(camelContext.getRegistry()).thenReturn(registry);
 
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         assertNotNull(startup.getConsulNodeDiscovery());
@@ -244,9 +202,8 @@ class StartupTest {
     @Test
     void start_withEmptyReverseProxyHost() {
         configuration.setReverseProxyHost("");
-        when(camelContext.getRegistry()).thenReturn(registry);
 
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         assertNotNull(startup.getConsulNodeDiscovery());
@@ -256,9 +213,8 @@ class StartupTest {
     void start_withEmptyContextPath() {
         CAPIConfiguration.Rest rest = configuration.getRest();
         rest.setContextPath("");
-        when(camelContext.getRegistry()).thenReturn(registry);
 
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         assertNotNull(startup.getConsulNodeDiscovery());
@@ -268,9 +224,8 @@ class StartupTest {
     void start_withNullContextPath() {
         CAPIConfiguration.Rest rest = configuration.getRest();
         rest.setContextPath(null);
-        when(camelContext.getRegistry()).thenReturn(registry);
 
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         assertNotNull(startup.getConsulNodeDiscovery());
@@ -279,9 +234,8 @@ class StartupTest {
     @Test
     void start_withNullInstanceName() {
         configuration.setInstanceName(null);
-        when(camelContext.getRegistry()).thenReturn(registry);
 
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         assertNotNull(startup.getConsulNodeDiscovery());
@@ -291,9 +245,8 @@ class StartupTest {
     void start_withNullExtraMetadataPrefix() {
         CAPIConfiguration.Traces traces = configuration.getTraces();
         traces.setExtraMetadataPrefix(null);
-        when(camelContext.getRegistry()).thenReturn(registry);
 
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         assertNotNull(startup.getConsulNodeDiscovery());
@@ -307,9 +260,7 @@ class StartupTest {
         consulStore.setToken("token");
         configuration.setConsulStore(consulStore);
 
-        when(camelContext.getRegistry()).thenReturn(registry);
-
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         // TrustStore is disabled so ConsulStore won't be created
@@ -323,9 +274,8 @@ class StartupTest {
         CAPIConfiguration.HostConfig host2 = new CAPIConfiguration.HostConfig();
         host2.setEndpoint("http://consul-2:8500");
         configuration.setConsulHosts(List.of(host1, host2));
-        when(camelContext.getRegistry()).thenReturn(registry);
 
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         assertNotNull(startup.getConsulNodeDiscovery());
@@ -333,7 +283,6 @@ class StartupTest {
 
     @Test
     void start_withAllOptionalFeaturesDisabled() {
-        // Ensure all optional features are explicitly disabled
         configuration.setCorsEnabled(false);
         configuration.setReverseProxyHost(null);
         configuration.setInstanceName(null);
@@ -342,16 +291,14 @@ class StartupTest {
         CAPIConfiguration.Rest rest = configuration.getRest();
         rest.setContextPath(null);
 
-        when(camelContext.getRegistry()).thenReturn(registry);
-
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         assertNotNull(startup.getServiceCache());
         assertNotNull(startup.getHttpUtils());
         assertNotNull(startup.getRouteUtils());
         assertNull(startup.getOauth2Provider());
-        assertNull(startup.getWebsocketUtils());
+        assertNotNull(startup.getWebsocketUtils());
         assertNull(startup.getConsulStore());
         assertNull(startup.getOpaService());
         assertNull(startup.getCapiTrustManager());
@@ -361,9 +308,8 @@ class StartupTest {
     @Test
     void start_withDifferentRunningMode() {
         configuration.setRunningMode("websocket");
-        when(camelContext.getRegistry()).thenReturn(registry);
 
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         assertNotNull(startup.getConsulNodeDiscovery());
@@ -375,9 +321,8 @@ class StartupTest {
         rest.setResponseTimeout(60000);
         rest.setConnectionRequestTimeout(10000);
         rest.setRequestTimeout(15000);
-        when(camelContext.getRegistry()).thenReturn(registry);
 
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         assertNotNull(startup.getRouteUtils());
@@ -393,9 +338,8 @@ class StartupTest {
         mcp.setCircuitBreakerCooldownMs(30000);
         mcp.setMcpServerDiscoveryTimeoutMs(10000);
         configuration.setMcp(mcp);
-        when(camelContext.getRegistry()).thenReturn(registry);
 
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         assertNotNull(startup.getMcpToolRegistry());
@@ -409,9 +353,8 @@ class StartupTest {
         CAPIConfiguration.Mcp mcp = new CAPIConfiguration.Mcp();
         mcp.setEnabled(false);
         configuration.setMcp(mcp);
-        when(camelContext.getRegistry()).thenReturn(registry);
 
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         assertNull(startup.getMcpToolRegistry());
@@ -423,9 +366,8 @@ class StartupTest {
     @Test
     void start_withNullMcp_mcpComponentsAreNull() {
         configuration.setMcp(null);
-        when(camelContext.getRegistry()).thenReturn(registry);
 
-        startup = new Startup(configuration, camelContext);
+        startup = new Startup(configuration);
         startup.start();
 
         assertNull(startup.getMcpToolRegistry());

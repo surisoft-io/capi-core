@@ -6,9 +6,9 @@
   "links": [],
   "panels": [
     {
-      "title": "Total Gateway Requests",
+      "title": "Total Requests",
       "type": "stat",
-      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "gridPos": { "h": 6, "w": 4, "x": 0, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
       "fieldConfig": {
         "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] } },
@@ -17,29 +17,128 @@
       "options": { "graphMode": "area", "textMode": "auto", "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "targets": [
         {
-          "expr": "primary_route_total{application=\"CAPI\"}",
+          "expr": "sum(capi_requests_total{job=\"capi\"})",
           "legendFormat": "Total",
           "refId": "A"
         }
       ]
     },
     {
-      "title": "Gateway Request Rate",
+      "title": "Request Rate",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 4, "x": 4, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "decimals": 1, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 500 }, { "color": "red", "value": 1000 }] } },
+        "overrides": []
+      },
+      "options": { "graphMode": "area", "textMode": "auto", "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "expr": "sum(rate(capi_requests_total{job=\"capi\"}[1m]))",
+          "legendFormat": "req/s",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Error Rate (4xx+5xx)",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 4, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": { "unit": "percentunit", "decimals": 2, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.05 }, { "color": "red", "value": 0.1 }] } },
+        "overrides": []
+      },
+      "options": { "graphMode": "area", "textMode": "auto", "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "expr": "sum(rate(capi_requests_total{job=\"capi\", status_group=~\"4xx|5xx\"}[1m])) / sum(rate(capi_requests_total{job=\"capi\"}[1m]))",
+          "legendFormat": "Error %",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Avg Latency",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 4, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "decimals": 3, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.5 }, { "color": "red", "value": 2 }] } },
+        "overrides": []
+      },
+      "options": { "graphMode": "area", "textMode": "auto", "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "expr": "sum(rate(capi_request_duration_seconds_sum{job=\"capi\"}[1m])) / sum(rate(capi_request_duration_seconds_count{job=\"capi\"}[1m]))",
+          "legendFormat": "Avg",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Request Rate by Service",
       "type": "timeseries",
-      "gridPos": { "h": 6, "w": 10, "x": 6, "y": 0 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
       "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
       "fieldConfig": {
         "defaults": {
-          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 20, "gradientMode": "scheme" },
-          "color": { "mode": "fixed", "fixedColor": "blue" },
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 20, "gradientMode": "scheme", "stacking": { "mode": "normal" } },
           "unit": "reqps"
         },
         "overrides": []
       },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["mean", "max"] } },
       "targets": [
         {
-          "expr": "rate(primary_route_total{application=\"CAPI\"}[1m])",
-          "legendFormat": "req/s",
+          "expr": "sum by (service) (rate(capi_requests_total{job=\"capi\"}[1m]))",
+          "legendFormat": "{{service}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Response Status Distribution",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "bars", "lineWidth": 1, "fillOpacity": 80, "stacking": { "mode": "normal" } },
+          "unit": "reqps"
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "2xx" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] },
+          { "matcher": { "id": "byName", "options": "4xx" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } }] },
+          { "matcher": { "id": "byName", "options": "5xx" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] }
+        ]
+      },
+      "targets": [
+        {
+          "expr": "sum by (status_group) (rate(capi_requests_total{job=\"capi\"}[1m]))",
+          "legendFormat": "{{status_group}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Latency by Service",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["mean", "max"] } },
+      "targets": [
+        {
+          "expr": "sum by (service) (rate(capi_request_duration_seconds_sum{job=\"capi\"}[1m])) / sum by (service) (rate(capi_request_duration_seconds_count{job=\"capi\"}[1m]))",
+          "legendFormat": "{{service}}",
           "refId": "A"
         }
       ]
@@ -47,7 +146,7 @@
     {
       "title": "Live Threads",
       "type": "stat",
-      "gridPos": { "h": 6, "w": 4, "x": 16, "y": 0 },
+      "gridPos": { "h": 6, "w": 4, "x": 16, "y": 22 },
       "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
       "fieldConfig": {
         "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 500 }, { "color": "red", "value": 1000 }] } },
@@ -65,7 +164,7 @@
     {
       "title": "CPU Usage",
       "type": "gauge",
-      "gridPos": { "h": 6, "w": 4, "x": 20, "y": 0 },
+      "gridPos": { "h": 6, "w": 4, "x": 20, "y": 22 },
       "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
       "fieldConfig": {
         "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.5 }, { "color": "red", "value": 0.8 }] } },
@@ -80,133 +179,85 @@
       ]
     },
     {
-      "title": "Total Requests Over Time",
-      "type": "timeseries",
-      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 6 },
+      "title": "Heap Used",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 4, "x": 0, "y": 22 },
       "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
       "fieldConfig": {
-        "defaults": {
-          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 20, "gradientMode": "scheme" },
-          "color": { "mode": "fixed", "fixedColor": "blue" },
-          "unit": "short"
-        },
+        "defaults": { "unit": "bytes", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 500000000 }, { "color": "red", "value": 1000000000 }] } },
         "overrides": []
       },
+      "options": { "graphMode": "area", "textMode": "auto", "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "targets": [
         {
-          "expr": "primary_route_total{application=\"CAPI\"}",
-          "legendFormat": "Total requests",
+          "expr": "sum(jvm_memory_used_bytes{job=\"capi\", area=\"heap\"})",
+          "legendFormat": "Heap",
           "refId": "A"
         }
       ]
     },
     {
-      "title": "JVM Buffer Pools",
-      "type": "timeseries",
-      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 6 },
+      "title": "Direct Buffers",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 4, "x": 4, "y": 22 },
       "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
       "fieldConfig": {
-        "defaults": {
-          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 },
-          "unit": "bytes"
-        },
+        "defaults": { "unit": "bytes", "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }, { "color": "yellow", "value": 10000000 }, { "color": "red", "value": 50000000 }] } },
         "overrides": []
       },
+      "options": { "graphMode": "area", "textMode": "auto", "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "targets": [
         {
-          "expr": "jvm_buffer_memory_used_bytes{job=\"capi\"}",
-          "legendFormat": "Used ({{id}})",
+          "expr": "jvm_buffer_memory_used_bytes{job=\"capi\", id=\"direct\"}",
+          "legendFormat": "Direct",
           "refId": "A"
-        },
-        {
-          "expr": "jvm_buffer_total_capacity_bytes{job=\"capi\"}",
-          "legendFormat": "Capacity ({{id}})",
-          "refId": "B"
         }
       ]
     },
     {
-      "title": "JVM Heap Memory",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "title": "System Load (1m)",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 4, "x": 8, "y": 22 },
       "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
       "fieldConfig": {
-        "defaults": {
-          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 20 },
-          "unit": "bytes"
-        },
+        "defaults": { "unit": "short", "decimals": 2, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 4 }, { "color": "red", "value": 12 }] } },
         "overrides": []
       },
+      "options": { "graphMode": "area", "textMode": "auto", "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "targets": [
         {
-          "expr": "jvm_memory_used_bytes{job=\"capi\", area=\"heap\"}",
-          "legendFormat": "Used ({{id}})",
+          "expr": "system_load_average_1m{job=\"capi\"}",
+          "legendFormat": "Load",
           "refId": "A"
-        },
-        {
-          "expr": "jvm_memory_committed_bytes{job=\"capi\", area=\"heap\"}",
-          "legendFormat": "Committed ({{id}})",
-          "refId": "B"
         }
       ]
     },
     {
-      "title": "JVM Threads (platform only — virtual threads not observable via JMX)",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "title": "CPU Cores",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 4, "x": 12, "y": 22 },
       "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
       "fieldConfig": {
-        "defaults": {
-          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 },
-          "unit": "short"
-        },
+        "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] } },
         "overrides": []
       },
+      "options": { "graphMode": "none", "textMode": "auto", "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "targets": [
         {
-          "expr": "jvm_threads_live_threads{job=\"capi\"}",
-          "legendFormat": "Live",
+          "expr": "system_cpu_count{job=\"capi\"}",
+          "legendFormat": "Cores",
           "refId": "A"
-        },
-        {
-          "expr": "jvm_threads_daemon_threads{job=\"capi\"}",
-          "legendFormat": "Daemon",
-          "refId": "B"
-        },
-        {
-          "expr": "jvm_threads_peak_threads{job=\"capi\"}",
-          "legendFormat": "Peak",
-          "refId": "C"
-        }
-      ]
-    },
-    {
-      "title": "Thread States",
-      "type": "piechart",
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 24 },
-      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-      "fieldConfig": {
-        "defaults": { "unit": "short" },
-        "overrides": []
-      },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "legend": { "displayMode": "table", "placement": "right" } },
-      "targets": [
-        {
-          "expr": "jvm_threads_states_threads{job=\"capi\"} > 0",
-          "legendFormat": "{{state}}",
-          "refId": "A",
-          "instant": true
         }
       ]
     },
     {
       "title": "CPU & System Load",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 24 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
       "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
       "fieldConfig": {
         "defaults": {
-          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 },
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 20, "gradientMode": "scheme" },
           "unit": "percentunit"
         },
         "overrides": [
@@ -235,9 +286,118 @@
       ]
     },
     {
+      "title": "JVM Threads Over Time",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "jvm_threads_live_threads{job=\"capi\"}",
+          "legendFormat": "Live",
+          "refId": "A"
+        },
+        {
+          "expr": "jvm_threads_daemon_threads{job=\"capi\"}",
+          "legendFormat": "Daemon",
+          "refId": "B"
+        },
+        {
+          "expr": "jvm_threads_peak_threads{job=\"capi\"}",
+          "legendFormat": "Peak",
+          "refId": "C"
+        },
+        {
+          "expr": "rate(jvm_threads_started_threads_total{job=\"capi\"}[1m])",
+          "legendFormat": "Started/s",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "title": "JVM Heap Memory",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 20 },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "jvm_memory_used_bytes{job=\"capi\", area=\"heap\"}",
+          "legendFormat": "Used ({{id}})",
+          "refId": "A"
+        },
+        {
+          "expr": "jvm_memory_committed_bytes{job=\"capi\", area=\"heap\"}",
+          "legendFormat": "Committed ({{id}})",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "title": "JVM Buffer Pools",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "jvm_buffer_memory_used_bytes{job=\"capi\"}",
+          "legendFormat": "Used ({{id}})",
+          "refId": "A"
+        },
+        {
+          "expr": "jvm_buffer_total_capacity_bytes{job=\"capi\"}",
+          "legendFormat": "Capacity ({{id}})",
+          "refId": "B"
+        },
+        {
+          "expr": "jvm_buffer_count_buffers{job=\"capi\"}",
+          "legendFormat": "Count ({{id}})",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "title": "Thread States",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 44 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "legend": { "displayMode": "table", "placement": "right" } },
+      "targets": [
+        {
+          "expr": "jvm_threads_states_threads{job=\"capi\"} > 0",
+          "legendFormat": "{{state}}",
+          "refId": "A",
+          "instant": true
+        }
+      ]
+    },
+    {
       "title": "JVM Non-Heap Memory",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 24 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 44 },
       "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
       "fieldConfig": {
         "defaults": {
@@ -253,6 +413,31 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "title": "GC Activity",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 44 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "rate(jvm_gc_memory_allocated_bytes_total{job=\"capi\"}[1m])",
+          "legendFormat": "Allocated/s",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(jvm_gc_memory_promoted_bytes_total{job=\"capi\"}[1m])",
+          "legendFormat": "Promoted/s",
+          "refId": "B"
+        }
+      ]
     }
   ],
   "refresh": "10s",
@@ -264,5 +449,5 @@
   "timezone": "browser",
   "title": "CAPI Gateway",
   "uid": "capi-gateway",
-  "version": 3
+  "version": 4
 }
