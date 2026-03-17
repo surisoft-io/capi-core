@@ -383,9 +383,7 @@ class SmallPojosTest {
     void capiInfo_basic() {
         CapiInfo info = new CapiInfo();
         info.setCapiVersion("1.0");
-        info.setCamelVersion("4.17");
         assertEquals("1.0", info.getCapiVersion());
-        assertEquals("4.17", info.getCamelVersion());
     }
 
     @Test
@@ -411,52 +409,10 @@ class SmallPojosTest {
     }
 
     @Test
-    void capiInfo_exchangesTotal() {
-        CapiInfo info = new CapiInfo();
-        info.setExchangesTotal(100);
-        assertEquals(100, info.getExchangesTotal());
-    }
-
-    @Test
-    void capiInfo_exchangesCompleted() {
-        CapiInfo info = new CapiInfo();
-        info.setExchangesCompleted(95);
-        assertEquals(95, info.getExchangesCompleted());
-    }
-
-    @Test
-    void capiInfo_startedRoutes() {
-        CapiInfo info = new CapiInfo();
-        info.setStartedRoutes(10);
-        assertEquals(10, info.getStartedRoutes());
-    }
-
-    @Test
     void capiInfo_uptime() {
         CapiInfo info = new CapiInfo();
         info.setUptime("2h 30m");
         assertEquals("2h 30m", info.getUptime());
-    }
-
-    @Test
-    void capiInfo_stoppedRouteCount() {
-        CapiInfo info = new CapiInfo();
-        info.setStoppedRouteCount(2);
-        assertEquals(2, info.getStoppedRouteCount());
-    }
-
-    @Test
-    void capiInfo_removedRouteCount() {
-        CapiInfo info = new CapiInfo();
-        info.setRemovedRouteCount(1);
-        assertEquals(1, info.getRemovedRouteCount());
-    }
-
-    @Test
-    void capiInfo_failedExchangeCount() {
-        CapiInfo info = new CapiInfo();
-        info.setFailedExchangeCount(5);
-        assertEquals(5, info.getFailedExchangeCount());
     }
 
     @Test
@@ -559,16 +515,9 @@ class SmallPojosTest {
 
         info.setJavaVersion("21");
         info.setCapiVersion("4.0");
-        info.setCamelVersion("4.17");
         info.setStartTimestamp(now);
         info.setTotalRoutes(50);
-        info.setExchangesTotal(1000);
-        info.setExchangesCompleted(999);
-        info.setStartedRoutes(48);
         info.setUptime("5d 3h");
-        info.setStoppedRouteCount(2);
-        info.setRemovedRouteCount(0);
-        info.setFailedExchangeCount(1);
         info.setCapiNameSpace("prod");
         info.setOauth2Enabled(true);
         info.setOauth2Endpoint("http://auth.example.com");
@@ -584,16 +533,9 @@ class SmallPojosTest {
 
         assertEquals("21", info.getJavaVersion());
         assertEquals("4.0", info.getCapiVersion());
-        assertEquals("4.17", info.getCamelVersion());
         assertEquals(now, info.getStartTimestamp());
         assertEquals(50, info.getTotalRoutes());
-        assertEquals(1000, info.getExchangesTotal());
-        assertEquals(999, info.getExchangesCompleted());
-        assertEquals(48, info.getStartedRoutes());
         assertEquals("5d 3h", info.getUptime());
-        assertEquals(2, info.getStoppedRouteCount());
-        assertEquals(0, info.getRemovedRouteCount());
-        assertEquals(1, info.getFailedExchangeCount());
         assertEquals("prod", info.getCapiNameSpace());
         assertTrue(info.isOauth2Enabled());
         assertEquals("http://auth.example.com", info.getOauth2Endpoint());
@@ -613,16 +555,9 @@ class SmallPojosTest {
         CapiInfo info = new CapiInfo();
         assertNull(info.getJavaVersion());
         assertNull(info.getCapiVersion());
-        assertNull(info.getCamelVersion());
         assertNull(info.getStartTimestamp());
         assertNull(info.getTotalRoutes());
-        assertNull(info.getExchangesTotal());
-        assertNull(info.getExchangesCompleted());
-        assertNull(info.getStartedRoutes());
         assertNull(info.getUptime());
-        assertNull(info.getStoppedRouteCount());
-        assertNull(info.getRemovedRouteCount());
-        assertNull(info.getFailedExchangeCount());
         assertNull(info.getCapiNameSpace());
         assertFalse(info.isOauth2Enabled());
         assertNull(info.getOauth2Endpoint());

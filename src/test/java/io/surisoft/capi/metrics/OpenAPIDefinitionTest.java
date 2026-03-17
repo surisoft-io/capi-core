@@ -3,7 +3,6 @@ package io.surisoft.capi.metrics;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.schema.ServiceMeta;
-import org.apache.camel.util.json.JsonObject;
 import org.cache2k.Cache;
 import org.cache2k.Cache2kBuilder;
 import org.junit.jupiter.api.AfterEach;
@@ -16,6 +15,7 @@ import io.undertow.Undertow;
 import io.undertow.util.Headers;
 
 import java.net.ServerSocket;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -48,7 +48,7 @@ class OpenAPIDefinitionTest {
         service.setId("test-service");
         // serviceMeta is null
 
-        JsonObject result = openAPIDefinition.getCacheOpenApiDefinition(service, objectMapper, "test:service");
+        Map<String, Object> result = openAPIDefinition.getCacheOpenApiDefinition(service, objectMapper, "test:service");
         assertNull(result);
     }
 
@@ -61,7 +61,7 @@ class OpenAPIDefinitionTest {
         service.setId("test-service");
         service.setServiceMeta(serviceMeta);
 
-        JsonObject result = openAPIDefinition.getCacheOpenApiDefinition(service, objectMapper, "test:service");
+        Map<String, Object> result = openAPIDefinition.getCacheOpenApiDefinition(service, objectMapper, "test:service");
         assertNull(result);
     }
 
@@ -75,7 +75,7 @@ class OpenAPIDefinitionTest {
         service.setServiceMeta(serviceMeta);
 
         // This will fail with IOException/ConnectException and return null
-        JsonObject result = openAPIDefinition.getCacheOpenApiDefinition(service, objectMapper, "test:service");
+        Map<String, Object> result = openAPIDefinition.getCacheOpenApiDefinition(service, objectMapper, "test:service");
         assertNull(result);
     }
 
@@ -118,7 +118,7 @@ class OpenAPIDefinitionTest {
             service.setId("my-svc");
             service.setServiceMeta(meta);
 
-            JsonObject result = openAPIDefinition.getCacheOpenApiDefinition(service, objectMapper, "my-svc:v1");
+            Map<String, Object> result = openAPIDefinition.getCacheOpenApiDefinition(service, objectMapper, "my-svc:v1");
             assertNotNull(result, "Expected non-null result from valid endpoint");
             // info should be replaced with CAPI-generated info
             Object info = result.get("info");

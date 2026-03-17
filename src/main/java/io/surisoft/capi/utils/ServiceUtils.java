@@ -5,7 +5,6 @@ import io.surisoft.capi.schema.*;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.parser.OpenAPIV3Parser;
 import io.swagger.v3.parser.core.models.SwaggerParseResult;
-import org.apache.camel.CamelContext;
 import org.cache2k.Cache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,22 +26,24 @@ public class ServiceUtils {
     private final HttpUtils httpUtils;
     private final Optional<Map<String, WebsocketClient>> websocketClientMap;
     private final RouteUtils routeUtils;
-    private final CamelContext camelContext;
+    private Map<String, RestClient> restClientMap;
     private final Optional<WebsocketUtils> websocketUtils;
     private final String capiRunningMode;
 
     public ServiceUtils(HttpUtils httpUtils,
                         Optional<Map<String, WebsocketClient>> websocketClientMap,
                         RouteUtils routeUtils,
-                        CamelContext camelContext,
                         Optional<WebsocketUtils> websocketUtils,
                         String capiRunningMode) {
         this.httpUtils = httpUtils;
         this.websocketClientMap = websocketClientMap;
         this.routeUtils = routeUtils;
-        this.camelContext = camelContext;
         this.websocketUtils = websocketUtils;
         this.capiRunningMode = capiRunningMode;
+    }
+
+    public void setRestClientMap(Map<String, RestClient> restClientMap) {
+        this.restClientMap = restClientMap;
     }
 
     public String getServiceId(Service service) {
@@ -132,16 +133,9 @@ public class ServiceUtils {
                 websocketClientMap.isPresent() &&
                 websocketClientMap.get().containsKey(existingService.getId())) {
             websocketClientMap.get().remove(existingService.getContext());
-        } else {
-            try {
-                List<String> apiRouteIdList = routeUtils.getAllRouteIdForAGivenService(existingService);
-                for(String routeId : apiRouteIdList) {
-                    camelContext.getRouteController().stopRoute(routeId);
-                    camelContext.removeRoute(routeId);
-                }
-            } catch (Exception e) {
-                log.error(e.getMessage(), e);
-            }
+        } else if(restClientMap != null) {
+            restClientMap.remove(existingService.getContext());
+            log.info("REST client removed for update: {}", existingService.getContext());
         }
     }
 
@@ -217,15 +211,12 @@ public class ServiceUtils {
     }
 
 
-    public void removeUnusedService(CamelContext camelContext, RouteUtils routeUtils, Service service) throws Exception {
+    public void removeUnusedService(Service service) {
         if((service.getServiceMeta().getType().equals(Constants.WEBSOCKET_TYPE) || service.getServiceMeta().getType().equals(Constants.SSE_TYPE)) && websocketClientMap.isPresent() && websocketUtils.isPresent()) {
             websocketUtils.get().removeClientFromMap(websocketClientMap.get(), service);
-        } else {
-            List<String> serviceRouteIdList = routeUtils.getAllRouteIdForAGivenService(service);
-            for (String routeId : serviceRouteIdList) {
-                camelContext.getRouteController().stopRoute(routeId);
-                camelContext.removeRoute(routeId);
-            }
+        } else if(restClientMap != null) {
+            restClientMap.remove(service.getContext());
+            log.info("REST client removed: {}", service.getContext());
         }
     }
 

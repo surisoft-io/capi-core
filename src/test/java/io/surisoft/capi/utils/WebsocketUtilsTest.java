@@ -35,9 +35,6 @@ class WebsocketUtilsTest {
         websocketUtils = new WebsocketUtils(
                 websocketConfig,
                 List.of(jwtProcessor),
-                false,
-                null,
-                null,
                 null
         );
     }
@@ -55,7 +52,7 @@ class WebsocketUtilsTest {
     void normalizeBaseContextName_withMultipleSlashes() {
         CAPIConfiguration.Websocket config = new CAPIConfiguration.Websocket();
         config.setContextPath("/ws/sub/*");
-        WebsocketUtils utils = new WebsocketUtils(config, List.of(jwtProcessor), false, null, null, null);
+        WebsocketUtils utils = new WebsocketUtils(config, List.of(jwtProcessor), null);
         assertEquals("wssub", utils.normalizeBaseContextName());
     }
 
@@ -144,7 +141,7 @@ class WebsocketUtilsTest {
     @Test
     void createWebsocketAuthorization_withoutProcessor_throwsException() {
         WebsocketUtils utilsNoProcessor = new WebsocketUtils(
-                websocketConfig, null, false, null, null, null
+                websocketConfig, null, null
         );
         assertThrows(CapiUndertowException.class, utilsNoProcessor::createWebsocketAuthorization);
     }
@@ -168,7 +165,7 @@ class WebsocketUtilsTest {
         ServiceMeta meta = new ServiceMeta();
         service.setServiceMeta(meta);
 
-        HttpHandler handler = websocketUtils.createClientHttpHandler(client, service);
+        HttpHandler handler = websocketUtils.createClientHttpHandler(client, service, null);
         assertNotNull(handler);
     }
 
@@ -188,7 +185,7 @@ class WebsocketUtilsTest {
         meta.setScheme("https");
         service.setServiceMeta(meta);
 
-        HttpHandler handler = websocketUtils.createClientHttpHandler(client, service);
+        HttpHandler handler = websocketUtils.createClientHttpHandler(client, service, null);
         assertNotNull(handler);
     }
 

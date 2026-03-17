@@ -16,8 +16,7 @@ import io.undertow.util.HeaderMap;
 import io.undertow.util.Headers;
 import io.undertow.util.HttpString;
 import io.undertow.io.Sender;
-import org.apache.camel.CamelContext;
-import org.apache.camel.util.json.JsonObject;
+
 import org.cache2k.Cache;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,7 +34,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -51,8 +49,6 @@ class AdminGatewayTest {
     @Mock
     private CAPIConfiguration capiConfiguration;
     @Mock
-    private CamelContext camelContext;
-    @Mock
     private Cache<String, Service> serviceCache;
     @Mock
     private SSLContext sslContext;
@@ -64,13 +60,13 @@ class AdminGatewayTest {
 
     @BeforeEach
     void setUp() {
-        adminGateway = new AdminGateway(9090, prometheusRegistry, capiConfiguration, camelContext, serviceCache, sslContext, capiTrustManager);
-        adminGatewayNoSsl = new AdminGateway(9091, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager);
+        adminGateway = new AdminGateway(9090, prometheusRegistry, capiConfiguration, serviceCache, sslContext, capiTrustManager);
+        adminGatewayNoSsl = new AdminGateway(9091, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager);
     }
 
     @Test
     void buildError_returnsJsonObjectWithMessageAndCode() {
-        JsonObject error = adminGateway.buildError(404, "Not Found");
+        Map<String, Object> error = adminGateway.buildError(404, "Not Found");
 
         assertEquals("Not Found", error.get(Constants.ERROR_MESSAGE));
         assertEquals(404, error.get(Constants.ERROR_CODE));
@@ -78,7 +74,7 @@ class AdminGatewayTest {
 
     @Test
     void buildError_withDifferentStatusCode() {
-        JsonObject error = adminGateway.buildError(500, "Internal Server Error");
+        Map<String, Object> error = adminGateway.buildError(500, "Internal Server Error");
 
         assertEquals("Internal Server Error", error.get(Constants.ERROR_MESSAGE));
         assertEquals(500, error.get(Constants.ERROR_CODE));
@@ -133,7 +129,7 @@ class AdminGatewayTest {
 
     @Test
     void buildError_withZeroStatusCode() {
-        JsonObject error = adminGateway.buildError(0, "");
+        Map<String, Object> error = adminGateway.buildError(0, "");
 
         assertEquals("", error.get(Constants.ERROR_MESSAGE));
         assertEquals(0, error.get(Constants.ERROR_CODE));
@@ -222,9 +218,6 @@ class AdminGatewayTest {
         omField.setAccessible(true);
         omField.set(adminGateway, brokenMapper);
 
-        when(camelContext.getUptime()).thenReturn(Duration.ofMinutes(1));
-        when(camelContext.getVersion()).thenReturn("4.17.0");
-        when(camelContext.getRoutesSize()).thenReturn(0);
         when(capiConfiguration.getVersion()).thenReturn("1.0");
         when(capiConfiguration.getInstanceName()).thenReturn("test");
 
@@ -244,22 +237,23 @@ class AdminGatewayTest {
         ObjectMapper brokenMapper = mock(ObjectMapper.class);
         when(brokenMapper.writeValueAsString(any())).thenThrow(new com.fasterxml.jackson.core.JsonProcessingException("fail") {});
 
-        AdminGateway gw = new AdminGateway(9093, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager);
+        AdminGateway gw = new AdminGateway(9093, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager);
         Field omField = AdminGateway.class.getDeclaredField("objectMapper");
         omField.setAccessible(true);
         omField.set(gw, brokenMapper);
 
-        when(camelContext.getRoutes()).thenReturn(java.util.Collections.emptyList());
-
         HttpServerExchange exchange = mock(HttpServerExchange.class);
         HeaderMap headerMap = new HeaderMap();
         when(exchange.getResponseHeaders()).thenReturn(headerMap);
+        io.undertow.io.Sender sender = mock(io.undertow.io.Sender.class);
+        when(exchange.getResponseSender()).thenReturn(sender);
 
         Method handleRoutesInfo = AdminGateway.class.getDeclaredMethod("handleRoutesInfo", HttpServerExchange.class);
         handleRoutesInfo.setAccessible(true);
 
-        Exception thrown = assertThrows(Exception.class, () -> handleRoutesInfo.invoke(gw, exchange));
-        assertTrue(thrown.getCause() instanceof RuntimeException);
+        // With no restClients set, handleRoutesInfo returns "[]" directly
+        handleRoutesInfo.invoke(gw, exchange);
+        verify(sender).send("[]");
     }
 
     @Test
@@ -267,7 +261,7 @@ class AdminGatewayTest {
         ObjectMapper brokenMapper = mock(ObjectMapper.class);
         when(brokenMapper.writeValueAsString(any())).thenThrow(new com.fasterxml.jackson.core.JsonProcessingException("fail") {});
 
-        AdminGateway gw = new AdminGateway(9094, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager);
+        AdminGateway gw = new AdminGateway(9094, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager);
         Field omField = AdminGateway.class.getDeclaredField("objectMapper");
         omField.setAccessible(true);
         omField.set(gw, brokenMapper);
@@ -289,7 +283,7 @@ class AdminGatewayTest {
         ObjectMapper brokenMapper = mock(ObjectMapper.class);
         when(brokenMapper.writeValueAsString(any())).thenThrow(new com.fasterxml.jackson.core.JsonProcessingException("fail") {});
 
-        AdminGateway gw = new AdminGateway(9095, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager);
+        AdminGateway gw = new AdminGateway(9095, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager);
         Field omField = AdminGateway.class.getDeclaredField("objectMapper");
         omField.setAccessible(true);
         omField.set(gw, brokenMapper);
@@ -311,7 +305,7 @@ class AdminGatewayTest {
         ObjectMapper brokenMapper = mock(ObjectMapper.class);
         when(brokenMapper.writeValueAsString(any())).thenThrow(new com.fasterxml.jackson.core.JsonProcessingException("fail") {});
 
-        AdminGateway gw = new AdminGateway(9096, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager);
+        AdminGateway gw = new AdminGateway(9096, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager);
         Field omField = AdminGateway.class.getDeclaredField("objectMapper");
         omField.setAccessible(true);
         omField.set(gw, brokenMapper);
@@ -340,7 +334,7 @@ class AdminGatewayTest {
         ObjectMapper brokenMapper = mock(ObjectMapper.class);
         when(brokenMapper.writeValueAsString(any())).thenThrow(new com.fasterxml.jackson.core.JsonProcessingException("fail") {});
 
-        AdminGateway gw = new AdminGateway(9097, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager);
+        AdminGateway gw = new AdminGateway(9097, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager);
         Field omField = AdminGateway.class.getDeclaredField("objectMapper");
         omField.setAccessible(true);
         omField.set(gw, brokenMapper);
@@ -425,9 +419,6 @@ class AdminGatewayTest {
 
     @Test
     void handleCapiInfo_sendsInfoJson() throws Exception {
-        when(camelContext.getUptime()).thenReturn(Duration.ofMinutes(90));
-        when(camelContext.getVersion()).thenReturn("4.17.0");
-        when(camelContext.getRoutesSize()).thenReturn(5);
         when(capiConfiguration.getVersion()).thenReturn("1.0");
         when(capiConfiguration.getInstanceName()).thenReturn("test-instance");
 
@@ -447,8 +438,6 @@ class AdminGatewayTest {
 
     @Test
     void handleRoutesInfo_sendsRoutesList() throws Exception {
-        when(camelContext.getRoutes()).thenReturn(java.util.Collections.emptyList());
-
         HttpServerExchange exchange = mock(HttpServerExchange.class);
         HeaderMap headerMap = new HeaderMap();
         when(exchange.getResponseHeaders()).thenReturn(headerMap);
@@ -628,7 +617,7 @@ class AdminGatewayTest {
         when(capiConfiguration.getTrustStore()).thenReturn(trustStoreConfig);
 
         // Create an AdminGateway with null capiTrustManager
-        AdminGateway gatewayNoTrustManager = new AdminGateway(9092, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, null);
+        AdminGateway gatewayNoTrustManager = new AdminGateway(9092, prometheusRegistry, capiConfiguration, serviceCache, null, null);
 
         HttpServerExchange exchange = mock(HttpServerExchange.class);
         HeaderMap headerMap = new HeaderMap();
@@ -711,9 +700,6 @@ class AdminGatewayTest {
 
     @Test
     void handleCapiInfo_withRestConfig_sendsContextPath() throws Exception {
-        when(camelContext.getUptime()).thenReturn(Duration.ofHours(2));
-        when(camelContext.getVersion()).thenReturn("4.17.0");
-        when(camelContext.getRoutesSize()).thenReturn(3);
         when(capiConfiguration.getVersion()).thenReturn("2.0");
         when(capiConfiguration.getInstanceName()).thenReturn("ns");
 
@@ -751,10 +737,10 @@ class AdminGatewayTest {
 
     @Test
     void buildError_containsCorrectKeys() {
-        JsonObject error = adminGateway.buildError(403, "Forbidden");
+        Map<String, Object> error = adminGateway.buildError(403, "Forbidden");
         assertTrue(error.containsKey(Constants.ERROR_MESSAGE));
         assertTrue(error.containsKey(Constants.ERROR_CODE));
-        assertEquals("Forbidden", error.getString(Constants.ERROR_MESSAGE));
+        assertEquals("Forbidden", error.get(Constants.ERROR_MESSAGE));
     }
 
     // === Lifecycle tests for start() and stop() ===
@@ -765,7 +751,7 @@ class AdminGatewayTest {
         connectedField.setAccessible(true);
         connectedField.set(null, true);
 
-        try (AdminGateway gw = new AdminGateway(19100, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager)) {
+        try (AdminGateway gw = new AdminGateway(19100, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -786,7 +772,7 @@ class AdminGatewayTest {
         connectedField.setAccessible(true);
         connectedField.set(null, false);
 
-        try (AdminGateway gw = new AdminGateway(19113, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager)) {
+        try (AdminGateway gw = new AdminGateway(19113, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -805,7 +791,7 @@ class AdminGatewayTest {
     void start_withoutSsl_metricsEndpoint() throws Exception {
         when(prometheusRegistry.scrape()).thenReturn("# HELP test_metric\n# TYPE test_metric counter\ntest_metric 42");
 
-        try (AdminGateway gw = new AdminGateway(19101, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager)) {
+        try (AdminGateway gw = new AdminGateway(19101, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -822,9 +808,7 @@ class AdminGatewayTest {
 
     @Test
     void start_withoutSsl_routesEndpoint() throws Exception {
-        when(camelContext.getRoutes()).thenReturn(Collections.emptyList());
-
-        try (AdminGateway gw = new AdminGateway(19102, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager)) {
+        try (AdminGateway gw = new AdminGateway(19102, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -842,13 +826,10 @@ class AdminGatewayTest {
 
     @Test
     void start_withoutSsl_capiInfoEndpoint() throws Exception {
-        when(camelContext.getUptime()).thenReturn(Duration.ofMinutes(5));
-        when(camelContext.getVersion()).thenReturn("4.17.0");
-        when(camelContext.getRoutesSize()).thenReturn(2);
         when(capiConfiguration.getVersion()).thenReturn("2.0");
         when(capiConfiguration.getInstanceName()).thenReturn("my-instance");
 
-        try (AdminGateway gw = new AdminGateway(19103, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager)) {
+        try (AdminGateway gw = new AdminGateway(19103, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -869,7 +850,7 @@ class AdminGatewayTest {
         connectedField.setAccessible(true);
         connectedField.set(null, true);
 
-        AdminGateway gw = new AdminGateway(19104, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager);
+        AdminGateway gw = new AdminGateway(19104, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager);
         gw.start();
 
         // Verify the server is running
@@ -900,7 +881,7 @@ class AdminGatewayTest {
 
     @Test
     void stop_afterStart_canBeCalledMultipleTimes() throws Exception {
-        AdminGateway gw = new AdminGateway(19105, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager);
+        AdminGateway gw = new AdminGateway(19105, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager);
         gw.start();
         gw.stop();
         // Second stop should not throw
@@ -917,7 +898,7 @@ class AdminGatewayTest {
         keyStore.load(null, null);
         when(capiTrustManager.getKeyStore()).thenReturn(keyStore);
 
-        try (AdminGateway gw = new AdminGateway(19106, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager)) {
+        try (AdminGateway gw = new AdminGateway(19106, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -937,7 +918,7 @@ class AdminGatewayTest {
         trustStoreConfig.setEnabled(false);
         when(capiConfiguration.getTrustStore()).thenReturn(trustStoreConfig);
 
-        try (AdminGateway gw = new AdminGateway(19107, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager)) {
+        try (AdminGateway gw = new AdminGateway(19107, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -957,7 +938,7 @@ class AdminGatewayTest {
         wsConfig.setEnabled(false);
         when(capiConfiguration.getWebsocket()).thenReturn(wsConfig);
 
-        try (AdminGateway gw = new AdminGateway(19108, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager)) {
+        try (AdminGateway gw = new AdminGateway(19108, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -982,7 +963,7 @@ class AdminGatewayTest {
         client.setServiceId("ws-test");
         clients.put("/ws/test", client);
 
-        try (AdminGateway gw = new AdminGateway(19109, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager)) {
+        try (AdminGateway gw = new AdminGateway(19109, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager)) {
             gw.setWebsocketClients(clients);
             gw.start();
 
@@ -1001,7 +982,7 @@ class AdminGatewayTest {
     void start_withoutSsl_routeByIdEndpoint_serviceNotFoundReturns404() throws Exception {
         when(serviceCache.containsKey("nonexistent")).thenReturn(false);
 
-        try (AdminGateway gw = new AdminGateway(19110, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager)) {
+        try (AdminGateway gw = new AdminGateway(19110, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -1023,7 +1004,7 @@ class AdminGatewayTest {
         when(serviceCache.containsKey("my-svc")).thenReturn(true);
         when(serviceCache.get("my-svc")).thenReturn(service);
 
-        try (AdminGateway gw = new AdminGateway(19111, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager)) {
+        try (AdminGateway gw = new AdminGateway(19111, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -1043,7 +1024,7 @@ class AdminGatewayTest {
         when(capiConfiguration.getPublicEndpoint()).thenReturn("http://localhost:8080");
         when(serviceCache.containsKey("unknown")).thenReturn(false);
 
-        try (AdminGateway gw = new AdminGateway(19112, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager)) {
+        try (AdminGateway gw = new AdminGateway(19112, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -1165,7 +1146,7 @@ class AdminGatewayTest {
         when(exchange.getResponseSender()).thenReturn(sender);
 
         // Don't set mcpToolRegistry — it stays null
-        AdminGateway freshGw = new AdminGateway(9098, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager);
+        AdminGateway freshGw = new AdminGateway(9098, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager);
 
         Method handleMcpTools = AdminGateway.class.getDeclaredMethod("handleMcpTools", HttpServerExchange.class);
         handleMcpTools.setAccessible(true);
@@ -1209,7 +1190,7 @@ class AdminGatewayTest {
         Sender sender = mock(Sender.class);
         when(exchange.getResponseSender()).thenReturn(sender);
 
-        AdminGateway freshGw = new AdminGateway(9099, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager);
+        AdminGateway freshGw = new AdminGateway(9099, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager);
 
         Method handleMcpSessions = AdminGateway.class.getDeclaredMethod("handleMcpSessions", HttpServerExchange.class);
         handleMcpSessions.setAccessible(true);
@@ -1227,7 +1208,7 @@ class AdminGatewayTest {
         when(capiConfiguration.getMcp()).thenReturn(mcp);
 
         int mcpAdminPort = findFreePort();
-        try (AdminGateway gw = new AdminGateway(mcpAdminPort, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager)) {
+        try (AdminGateway gw = new AdminGateway(mcpAdminPort, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -1245,7 +1226,7 @@ class AdminGatewayTest {
     @Test
     void start_withoutSsl_mcpToolsEndpoint_noRegistry_returns404() throws Exception {
         int mcpAdminPort = findFreePort();
-        try (AdminGateway gw = new AdminGateway(mcpAdminPort, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager)) {
+        try (AdminGateway gw = new AdminGateway(mcpAdminPort, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -1262,7 +1243,7 @@ class AdminGatewayTest {
     @Test
     void start_withoutSsl_mcpSessionsEndpoint_noStore_returns404() throws Exception {
         int mcpAdminPort = findFreePort();
-        try (AdminGateway gw = new AdminGateway(mcpAdminPort, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager)) {
+        try (AdminGateway gw = new AdminGateway(mcpAdminPort, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -1304,7 +1285,7 @@ class AdminGatewayTest {
 
     @Test
     void start_withoutSsl_infoEndpoint_returnsLinks() throws Exception {
-        try (AdminGateway gw = new AdminGateway(19114, prometheusRegistry, capiConfiguration, camelContext, serviceCache, null, capiTrustManager)) {
+        try (AdminGateway gw = new AdminGateway(19114, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();

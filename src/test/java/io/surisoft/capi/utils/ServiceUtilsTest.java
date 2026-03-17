@@ -1,8 +1,6 @@
 package io.surisoft.capi.utils;
 
 import io.surisoft.capi.schema.*;
-import org.apache.camel.CamelContext;
-import org.apache.camel.spi.RouteController;
 import org.cache2k.Cache;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,10 +23,6 @@ import static org.mockito.Mockito.*;
 class ServiceUtilsTest {
 
     @Mock
-    private CamelContext camelContext;
-    @Mock
-    private RouteController routeController;
-    @Mock
     private RouteUtils routeUtils;
     @Mock
     private Cache<String, Service> serviceCache;
@@ -41,7 +35,7 @@ class ServiceUtilsTest {
     @BeforeEach
     void setUp() {
         httpUtils = new HttpUtils(null, null);
-        serviceUtils = new ServiceUtils(httpUtils, Optional.empty(), null, null, Optional.empty(), "full");
+        serviceUtils = new ServiceUtils(httpUtils, Optional.empty(), null, Optional.empty(), "full");
     }
 
     @Test
@@ -388,8 +382,7 @@ class ServiceUtilsTest {
 
     @Test
     void updateExistingService_changed_redeploysService() throws Exception {
-        when(camelContext.getRouteController()).thenReturn(routeController);
-        ServiceUtils spyServiceUtils = new ServiceUtils(httpUtils, Optional.empty(), routeUtils, camelContext, Optional.empty(), "full");
+        ServiceUtils spyServiceUtils = new ServiceUtils(httpUtils, Optional.empty(), routeUtils, Optional.empty(), "full");
 
         Service existing = createServiceWithMapping("svc", "dev", "host1", 8080);
         existing.setId("svc:dev");
@@ -407,7 +400,7 @@ class ServiceUtilsTest {
 
     @Test
     void updateExistingService_notChanged_returnsFalse() {
-        ServiceUtils spyServiceUtils = new ServiceUtils(httpUtils, Optional.empty(), routeUtils, camelContext, Optional.empty(), "full");
+        ServiceUtils spyServiceUtils = new ServiceUtils(httpUtils, Optional.empty(), routeUtils, Optional.empty(), "full");
 
         Service existing = createServiceWithMapping("svc", "dev", "host1", 8080);
         existing.setId("svc:dev");
@@ -428,7 +421,7 @@ class ServiceUtilsTest {
         wc.setServiceId("svc:dev");
         wsMap.put("svc:dev", wc);
 
-        ServiceUtils wsServiceUtils = new ServiceUtils(httpUtils, Optional.of(wsMap), routeUtils, camelContext, Optional.empty(), "full");
+        ServiceUtils wsServiceUtils = new ServiceUtils(httpUtils, Optional.of(wsMap), routeUtils, Optional.empty(), "full");
 
         Service existing = createServiceWithMapping("svc", "dev", "host1", 8080);
         existing.setId("svc:dev");
@@ -449,7 +442,7 @@ class ServiceUtilsTest {
         wc.setServiceId("svc:dev");
         wsMap.put("svc:dev", wc);
 
-        ServiceUtils sseServiceUtils = new ServiceUtils(httpUtils, Optional.of(wsMap), routeUtils, camelContext, Optional.empty(), "full");
+        ServiceUtils sseServiceUtils = new ServiceUtils(httpUtils, Optional.of(wsMap), routeUtils, Optional.empty(), "full");
 
         Service existing = createServiceWithMapping("svc", "dev", "host1", 8080);
         existing.setId("svc:dev");
@@ -470,13 +463,13 @@ class ServiceUtilsTest {
         Map<String, WebsocketClient> wsMap = new HashMap<>();
         wsMap.put("/svc/dev", new WebsocketClient());
 
-        ServiceUtils wsServiceUtils = new ServiceUtils(httpUtils, Optional.of(wsMap), routeUtils, camelContext, Optional.of(websocketUtils), "full");
+        ServiceUtils wsServiceUtils = new ServiceUtils(httpUtils, Optional.of(wsMap), routeUtils, Optional.of(websocketUtils), "full");
 
         Service service = createService("svc", "dev");
         service.setContext("/svc/dev");
         service.getServiceMeta().setType("websocket");
 
-        wsServiceUtils.removeUnusedService(camelContext, routeUtils, service);
+        wsServiceUtils.removeUnusedService(service);
         verify(websocketUtils).removeClientFromMap(wsMap, service);
     }
 
@@ -485,38 +478,33 @@ class ServiceUtilsTest {
         Map<String, WebsocketClient> wsMap = new HashMap<>();
         wsMap.put("/svc/dev", new WebsocketClient());
 
-        ServiceUtils sseServiceUtils = new ServiceUtils(httpUtils, Optional.of(wsMap), routeUtils, camelContext, Optional.of(websocketUtils), "full");
+        ServiceUtils sseServiceUtils = new ServiceUtils(httpUtils, Optional.of(wsMap), routeUtils, Optional.of(websocketUtils), "full");
 
         Service service = createService("svc", "dev");
         service.setContext("/svc/dev");
         service.getServiceMeta().setType("sse");
 
-        sseServiceUtils.removeUnusedService(camelContext, routeUtils, service);
+        sseServiceUtils.removeUnusedService(service);
         verify(websocketUtils).removeClientFromMap(wsMap, service);
     }
 
     @Test
-    void removeUnusedService_restType_removesRoutes() throws Exception {
-        when(camelContext.getRouteController()).thenReturn(routeController);
-        ServiceUtils restServiceUtils = new ServiceUtils(httpUtils, Optional.empty(), routeUtils, camelContext, Optional.empty(), "full");
+    void removeUnusedService_restType_doesNotThrow() throws Exception {
+        ServiceUtils restServiceUtils = new ServiceUtils(httpUtils, Optional.empty(), routeUtils, Optional.empty(), "full");
 
         Service service = createServiceWithMapping("svc", "dev", "host1", 8080);
         service.setId("svc:dev");
         service.setContext("/svc/dev");
         service.getServiceMeta().setType("rest");
 
-        when(routeUtils.getAllRouteIdForAGivenService(service)).thenReturn(List.of("svc:dev:GET"));
-
-        restServiceUtils.removeUnusedService(camelContext, routeUtils, service);
-        verify(routeController).stopRoute("svc:dev:GET");
-        verify(camelContext).removeRoute("svc:dev:GET");
+        assertDoesNotThrow(() -> restServiceUtils.removeUnusedService(service));
     }
 
     // --- checkIfOpenApiIsEnabled tests ---
 
     @Test
     void checkIfOpenApiIsEnabled_notFullMode_returnsTrue() {
-        ServiceUtils notFullServiceUtils = new ServiceUtils(httpUtils, Optional.empty(), routeUtils, camelContext, Optional.empty(), "websocket");
+        ServiceUtils notFullServiceUtils = new ServiceUtils(httpUtils, Optional.empty(), routeUtils, Optional.empty(), "websocket");
 
         Service service = createService("svc", "dev");
         service.getServiceMeta().setOpenApiEndpoint("http://example.com/api-docs");

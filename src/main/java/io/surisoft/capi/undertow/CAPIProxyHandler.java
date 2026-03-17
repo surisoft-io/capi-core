@@ -1,5 +1,7 @@
 package io.surisoft.capi.undertow;
 
+import io.surisoft.capi.exception.HttpErrorHandler;
+import io.surisoft.capi.utils.Constants;
 import io.undertow.UndertowLogger;
 import io.undertow.UndertowMessages;
 import io.undertow.attribute.ExchangeAttribute;
@@ -54,14 +56,16 @@ public final class CAPIProxyHandler implements HttpHandler {
     private final HttpHandler next;
     private final int maxConnectionRetries;
     private final Predicate idempotentRequestPredicate;
+    private final HttpErrorHandler errorHandler;
 
-    public CAPIProxyHandler(Builder builder) {
+    public CAPIProxyHandler(Builder builder, HttpErrorHandler httpErrorHandler) {
         this.proxyClient = builder.proxyClient;
         this.maxRequestTime = builder.maxRequestTime;
         this.next = builder.next;
         this.maxConnectionRetries = builder.maxConnectionRetries;
         this.idempotentRequestPredicate = builder.idempotentRequestPredicate;
         requestHeaders.putAll(builder.requestHeaders);
+        this.errorHandler = httpErrorHandler;
     }
 
     public void handleRequest(final HttpServerExchange exchange) throws Exception {
@@ -75,8 +79,7 @@ public final class CAPIProxyHandler implements HttpHandler {
         if(exchange.isResponseStarted()) {
             //we can't proxy a request that has already started, this is basically a server configuration error
             UndertowLogger.REQUEST_LOGGER.cannotProxyStartedRequest(exchange);
-            exchange.setStatusCode(StatusCodes.INTERNAL_SERVER_ERROR);
-            exchange.endExchange();
+            sendProxyError(exchange, StatusCodes.INTERNAL_SERVER_ERROR, "Proxy configuration error");
             return;
         }
         final long timeout = maxRequestTime > 0 ? System.currentTimeMillis() + maxRequestTime : 0;
@@ -196,8 +199,14 @@ public final class CAPIProxyHandler implements HttpHandler {
             if (exchange.isResponseStarted()) {
                 IoUtils.safeClose(exchange.getConnection());
             } else {
-                exchange.setStatusCode(StatusCodes.SERVICE_UNAVAILABLE);
-                exchange.endExchange();
+                Throwable connectionError = exchange.getAttachment(CAPILoadBalancerProxyClient.CONNECTION_ERROR_KEY);
+                String message;
+                if (connectionError != null && isSslException(connectionError)) {
+                    message = Constants.ERROR_SERVICE_CERTIFICATE;
+                } else {
+                    message = Constants.ERROR_NO_SERVER_AVAILABLE;
+                }
+                CAPIProxyHandler.this.sendProxyError(exchange, StatusCodes.SERVICE_UNAVAILABLE, message);
             }
         }
 
@@ -214,8 +223,7 @@ public final class CAPIProxyHandler implements HttpHandler {
             if (exchange.isResponseStarted()) {
                 IoUtils.safeClose(exchange.getConnection());
             } else {
-                exchange.setStatusCode(StatusCodes.GATEWAY_TIME_OUT);
-                exchange.endExchange();
+                CAPIProxyHandler.this.sendProxyError(exchange, StatusCodes.GATEWAY_TIME_OUT, Constants.ERROR_REMOTE_SERVER_TIMEOUT);
             }
         }
 
@@ -509,11 +517,13 @@ public final class CAPIProxyHandler implements HttpHandler {
         }
 
     static void handleFailure(HttpServerExchange exchange, ProxyClientHandler proxyClientHandler, Predicate idempotentRequestPredicate, IOException e) {
+        // Store the actual exception so error handler can determine the cause (SSL, timeout, etc.)
+        exchange.putAttachment(CAPILoadBalancerProxyClient.CONNECTION_ERROR_KEY, e);
         UndertowLogger.PROXY_REQUEST_LOGGER.proxyRequestFailed(exchange.getRequestURI(), e);
         if(exchange.isResponseStarted()) {
             IoUtils.safeClose(exchange.getConnection());
         } else if(idempotentRequestPredicate.resolve(exchange) && proxyClientHandler != null) {
-            proxyClientHandler.failed(exchange); //this will attempt a retry if configured to do so
+            proxyClientHandler.failed(exchange);
         } else {
             exchange.setStatusCode(StatusCodes.SERVICE_UNAVAILABLE);
             exchange.endExchange();
@@ -544,6 +554,10 @@ public final class CAPIProxyHandler implements HttpHandler {
             final HeaderMap outboundResponseHeaders = exchange.getResponseHeaders();
             exchange.setStatusCode(response.getResponseCode());
             copyHeaders(exchange, outboundResponseHeaders, inboundResponseHeaders);
+
+            // Strip reverse-proxy headers — only meant for CAPI→backend, not for the client
+            outboundResponseHeaders.remove(Constants.X_FORWARDED_HOST);
+            outboundResponseHeaders.remove(Constants.X_FORWARDED_PREFIX);
 
             //https://www.rfc-editor.org/rfc/rfc9113#name-compressing-the-cookie-head
             //NOTE: this will be required if this is passed into app
@@ -670,6 +684,31 @@ public final class CAPIProxyHandler implements HttpHandler {
             }
         }
 
+    private static boolean isSslException(Throwable t) {
+        while (t != null) {
+            if (t instanceof javax.net.ssl.SSLException || t instanceof javax.net.ssl.SSLHandshakeException) {
+                return true;
+            }
+            // ClosedChannelException from SslConduit indicates SSL handshake failure
+            for (StackTraceElement element : t.getStackTrace()) {
+                if (element.getClassName().contains("SslConduit")) {
+                    return true;
+                }
+            }
+            t = t.getCause();
+        }
+        return false;
+    }
+
+    void sendProxyError(HttpServerExchange exchange, int statusCode, String message) {
+        if (errorHandler != null && !exchange.isResponseStarted()) {
+            errorHandler.sendError(exchange, statusCode, message);
+        } else {
+            exchange.setStatusCode(statusCode);
+            exchange.endExchange();
+        }
+    }
+
     public static Builder builder() {
         return new Builder();
     }
@@ -682,6 +721,7 @@ public final class CAPIProxyHandler implements HttpHandler {
         private HttpHandler next = ResponseCodeHandler.HANDLE_404;
         private final int maxConnectionRetries = DEFAULT_MAX_RETRY_ATTEMPTS;
         private final Predicate idempotentRequestPredicate = IdempotentPredicate.INSTANCE;
+        private HttpErrorHandler httpErrorHandler;
 
         Builder() {}
 
@@ -703,8 +743,13 @@ public final class CAPIProxyHandler implements HttpHandler {
             return this;
         }
 
+        public Builder setHttpErrorHandler(HttpErrorHandler httpErrorHandler) {
+            this.httpErrorHandler = httpErrorHandler;
+            return this;
+        }
+
         public CAPIProxyHandler build() {
-            return new CAPIProxyHandler(this);
+            return new CAPIProxyHandler(this, httpErrorHandler);
         }
     }
 }

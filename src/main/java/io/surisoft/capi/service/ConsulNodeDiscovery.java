@@ -2,20 +2,14 @@ package io.surisoft.capi.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.surisoft.capi.builder.DirectRouteProcessor;
 import io.surisoft.capi.configuration.CAPIConfiguration;
 import io.surisoft.capi.configuration.CapiSslContextHolder;
-import io.surisoft.capi.processor.ContentTypeValidator;
-import io.surisoft.capi.processor.MetricsProcessor;
 import io.surisoft.capi.processor.ServiceCapiInstanceMapper;
 import io.surisoft.capi.processor.ThrottleProcessor;
 import io.surisoft.capi.schema.*;
 import io.surisoft.capi.utils.*;
 import io.surisoft.capi.schema.GrpcClient;
 import jakarta.annotation.Nullable;
-import org.apache.camel.CamelContext;
-import org.apache.camel.Route;
-import org.apache.camel.util.json.JsonObject;
 import org.cache2k.Cache;
 import org.cache2k.CacheEntry;
 import org.slf4j.Logger;
@@ -38,7 +32,6 @@ public class ConsulNodeDiscovery {
 
     private static volatile boolean connectedToConsul = false;
     private static final Logger log = LoggerFactory.getLogger(ConsulNodeDiscovery.class);
-    private final CamelContext camelContext;
     private HttpClient httpClient;
     private CapiSslContextHolder capiSslContextHolder;
     private List<CAPIConfiguration.HostConfig> consulHosts;
@@ -57,21 +50,20 @@ public class ConsulNodeDiscovery {
 
     private Map<String, WebsocketClient> websocketClientMap;
     private Map<String, GrpcClient> grpcClientMap;
+    private Map<String, RestClient> restClientMap;
 
-    private MetricsProcessor metricsProcessor;
     private ThrottleProcessor throttleProcessor;
-    private ContentTypeValidator contentTypeValidator;
 
     private String reverseProxyHost;
     private String capiContext;
+    private int globalResponseTimeout = 120000;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public ConsulNodeDiscovery(CamelContext camelContext, @Nullable CapiSslContextHolder capiSslContextHolder,
+    public ConsulNodeDiscovery(@Nullable CapiSslContextHolder capiSslContextHolder,
                                List<CAPIConfiguration.HostConfig> consulHosts,
                                ServiceUtils serviceUtils, Cache<String, Service> serviceCache,
                                RouteUtils routeUtils, WebsocketUtils websocketUtils, HttpClient httpClient) {
-        this.camelContext = camelContext;
         this.capiSslContextHolder = capiSslContextHolder;
         this.consulHosts = consulHosts;
         this.serviceUtils = serviceUtils;
@@ -102,8 +94,8 @@ public class ConsulNodeDiscovery {
         for(CAPIConfiguration.HostConfig consulHost : consulHosts) {
             log.trace("Querying Consul {} for new services", consulHost);
             response = httpClient.send(buildServicesHttpRequest(consulHost), HttpResponse.BodyHandlers.ofString());
-            JsonObject responseObject = objectMapper.readValue(response.body(), JsonObject.class);
-            //We want to ignore the consul array
+            @SuppressWarnings("unchecked")
+            Map<String, Object> responseObject = objectMapper.readValue(response.body(), Map.class);
             responseObject.remove("consul");
             Set<String> services = responseObject.keySet();
 
@@ -173,7 +165,7 @@ public class ConsulNodeDiscovery {
             for(CacheEntry<String, Service> stringServiceCacheEntry : serviceCache.entries()) {
                 if(!servicesOnConsul.containsKey(stringServiceCacheEntry.getKey())) {
                     log.debug("This service is not on Consul: {}, and will be removed.", stringServiceCacheEntry.getKey());
-                    serviceUtils.removeUnusedService(camelContext, routeUtils, Objects.requireNonNull(serviceCache.get(stringServiceCacheEntry.getKey())));
+                    serviceUtils.removeUnusedService(Objects.requireNonNull(serviceCache.get(stringServiceCacheEntry.getKey())));
                     serviceCache.remove(stringServiceCacheEntry.getKey());
                 }
             }
@@ -457,19 +449,34 @@ public class ConsulNodeDiscovery {
                 if(grpcClient != null && grpcClientMap != null) {
                     grpcClientMap.put(grpcClient.getServiceId(), grpcClient);
                 }
-            } else if(capiContext != null && capiRunningMode.equalsIgnoreCase(Constants.FULL_TYPE) && (incomingService.getServiceMeta().getType() == null || incomingService.getServiceMeta().getType().equals("rest"))) {
-                List<String> apiRouteIdList = routeUtils.getAllRouteIdForAGivenService(incomingService);
-                for(String routeId : apiRouteIdList) {
-                    Route existingRoute = camelContext.getRoute(routeId);
-                    if(existingRoute == null) {
-                        try {
-                            DirectRouteProcessor directRouteProcessor = new DirectRouteProcessor(camelContext, incomingService, routeUtils, metricsProcessor, routeId, capiContext, reverseProxyHost, contentTypeValidator, throttleProcessor);
-                            directRouteProcessor.setOpaService(opaService);
-                            directRouteProcessor.setServiceCache(serviceCache);
-                            camelContext.addRoutes(directRouteProcessor);
-                        } catch (Exception e) {
-                            log.error(e.getMessage(), e);
+            } else if(capiRunningMode.equalsIgnoreCase(Constants.FULL_TYPE) && (incomingService.getServiceMeta().getType() == null || incomingService.getServiceMeta().getType().equals("rest"))) {
+                if(restClientMap != null && websocketUtils != null) {
+                    String clientId = incomingService.getContext();
+                    if(!restClientMap.containsKey(clientId)) {
+                        RestClient restClient = new RestClient();
+                        restClient.setServiceId(clientId);
+                        restClient.setMappingList(incomingService.getMappingList());
+                        String rootContext = incomingService.getMappingList().stream().toList().get(0).getRootContext();
+                        if(rootContext != null && !rootContext.isEmpty() && !rootContext.equals("/") && !rootContext.equals("*")) {
+                            restClient.setRootContext(rootContext);
                         }
+                        restClient.setSecured(incomingService.getServiceMeta().isSecured());
+                        restClient.setSubscriptionGroup(incomingService.getServiceMeta().getSubscriptionGroup());
+                        restClient.setOpaRego(incomingService.getServiceMeta().getOpaRego());
+                        restClient.setApiKeyEnabled(incomingService.getServiceMeta().isApiKeyEnabled());
+                        restClient.setThrottle(incomingService.getServiceMeta().isThrottle());
+                        restClient.setThrottleGlobal(incomingService.getServiceMeta().isThrottleGlobal());
+                        restClient.setThrottleTotalCalls(incomingService.getServiceMeta().getThrottleTotalCalls());
+                        restClient.setThrottleDuration(incomingService.getServiceMeta().getThrottleDuration());
+                        restClient.setFailOverEnabled(incomingService.isFailOverEnabled());
+                        restClient.setRoundRobinEnabled(incomingService.isRoundRobinEnabled());
+                        restClient.setB3TraceId(incomingService.getServiceMeta().isB3TraceId());
+                        restClient.setKeepGroup(incomingService.getServiceMeta().isKeepGroup());
+                        WebsocketClient tempClient = new WebsocketClient();
+                        tempClient.setMappingList(incomingService.getMappingList());
+                        restClient.setHttpHandler(websocketUtils.createClientHttpHandler(tempClient, incomingService, new io.surisoft.capi.exception.HttpErrorHandler(httpUtils), globalResponseTimeout));
+                        restClientMap.put(clientId, restClient);
+                        log.trace("REST client registered: {} with {} backend(s)", clientId, incomingService.getMappingList().size());
                     }
                 }
             }
@@ -496,16 +503,8 @@ public class ConsulNodeDiscovery {
         return connectedToConsul;
     }
 
-    public void setMetricsProcessor(MetricsProcessor metricsProcessor) {
-        this.metricsProcessor = metricsProcessor;
-    }
-
     public void setThrottleProcessor(ThrottleProcessor throttleProcessor) {
         this.throttleProcessor = throttleProcessor;
-    }
-
-    public void setContentTypeValidator(ContentTypeValidator contentTypeValidator) {
-        this.contentTypeValidator = contentTypeValidator;
     }
 
     public void setReverseProxyHost(String reverseProxyHost) {
@@ -514,6 +513,10 @@ public class ConsulNodeDiscovery {
 
     public void setCapiContext(String capiContext) {
         this.capiContext = capiContext;
+    }
+
+    public void setGlobalResponseTimeout(int globalResponseTimeout) {
+        this.globalResponseTimeout = globalResponseTimeout;
     }
 
     public void setStrictToInstanceName(boolean strictToInstanceName) {
@@ -530,5 +533,9 @@ public class ConsulNodeDiscovery {
 
     public void setGrpcClientMap(Map<String, GrpcClient> grpcClientMap) {
         this.grpcClientMap = grpcClientMap;
+    }
+
+    public void setRestClientMap(Map<String, RestClient> restClientMap) {
+        this.restClientMap = restClientMap;
     }
 }

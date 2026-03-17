@@ -2,8 +2,9 @@ package io.surisoft.capi.metrics;
 
 import io.surisoft.capi.configuration.CAPIConfiguration;
 import io.surisoft.capi.schema.CapiInfo;
-import org.apache.camel.CamelContext;
 
+import java.lang.management.ManagementFactory;
+import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -11,18 +12,19 @@ import java.util.stream.Collectors;
 public class Info {
 
     private final CAPIConfiguration configuration;
-    private final CamelContext camelContext;
+    private final int totalRoutes;
 
-    public Info(CAPIConfiguration configuration, CamelContext camelContext) {
+    public Info(CAPIConfiguration configuration, int totalRoutes) {
         this.configuration = configuration;
-        this.camelContext = camelContext;
+        this.totalRoutes = totalRoutes;
     }
 
     public CapiInfo getInfo() {
         CapiInfo capiInfo = new CapiInfo();
-        capiInfo.setUptime(camelContext.getUptime().toString());
-        capiInfo.setCamelVersion(camelContext.getVersion());
-        capiInfo.setTotalRoutes(camelContext.getRoutesSize());
+
+        long uptimeMs = ManagementFactory.getRuntimeMXBean().getUptime();
+        capiInfo.setUptime(Duration.ofMillis(uptimeMs).toString());
+        capiInfo.setTotalRoutes(totalRoutes);
         capiInfo.setCapiVersion(configuration.getVersion());
         capiInfo.setCapiNameSpace(configuration.getInstanceName());
         if(configuration.getRest() != null && configuration.getRest().getContextPath() != null) {
@@ -35,6 +37,9 @@ public class Info {
             capiInfo.setOauth2Enabled(configuration.getOauth2().isEnabled());
             if(configuration.getOauth2().getKeys() != null) {
                 capiInfo.setOauth2Endpoint(String.join(",", configuration.getOauth2().getKeys()));
+            }
+            if(configuration.getOauth2().getCookieName() != null) {
+                capiInfo.setOauth2CookieName(configuration.getOauth2().getCookieName());
             }
         }
 

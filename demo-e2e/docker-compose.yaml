@@ -36,7 +36,7 @@ services:
       - "8181:8181"
     volumes:
       - ./opa-policy:/policies:ro
-    command: run --server /policies
+    command: run --server --addr 0.0.0.0:8181 /policies
 
   # --- Observability ---
 
@@ -183,6 +183,15 @@ services:
       - ./services:/app:ro
     command: sh -c "pip install --quiet flask && python sse_service.py"
 
+  upload-service:
+    image: python:3-alpine
+    container_name: demo-e2e-upload
+    working_dir: /app
+    volumes:
+      - ./services:/app:ro
+      - upload-data:/uploads
+    command: python upload_service.py
+
   # --- MCP Backend Services ---
 
   weather-service:
@@ -325,3 +334,6 @@ services:
     depends_on:
       consul:
         condition: service_healthy
+
+volumes:
+  upload-data:

@@ -3,21 +3,12 @@ package io.surisoft.capi;
 import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.joran.JoranConfigurator;
 import ch.qos.logback.core.joran.spi.JoranException;
-import io.surisoft.capi.builder.ErrorRoute;
-import io.surisoft.capi.builder.PrimaryRoute;
 import io.surisoft.capi.configuration.CAPIConfiguration;
-import io.surisoft.capi.configuration.CamelStartupListener;
-import io.surisoft.capi.service.CamelProxyPeerAddressHandler;
-import io.surisoft.capi.service.CapiAccessLogReceiver;
 import io.surisoft.capi.service.McpBackendLoadBalancer;
-import io.surisoft.capi.undertow.AdminGateway;
-import io.surisoft.capi.undertow.GrpcGateway;
-import io.surisoft.capi.undertow.McpGateway;
-import io.surisoft.capi.undertow.WebsocketGateway;
+import io.surisoft.capi.tracer.CapiTracer;
+import io.surisoft.capi.undertow.*;
 import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.Startup;
-import org.apache.camel.CamelContext;
-import org.apache.camel.impl.DefaultCamelContext;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,21 +20,25 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public class CAPIMain {
 
     private static Logger log;
     private final CAPIConfiguration capiConfiguration;
 
+    public static void main(String[] args) {
+        new CAPIMain();
+    }
+
     public CAPIMain() {
         capiConfiguration = loadConfiguration();
 
-        log.info("Starting CAPI Camel Context (virtual threads: {})",
-                System.getProperty("camel.threads.virtual.enabled", "false"));
-        CamelContext camelContext = new DefaultCamelContext();
-        camelContext.setStreamCaching(true);
+        log.info("Starting CAPI Gateway");
 
-        Startup startup = new Startup(capiConfiguration, camelContext);
+        Startup startup = new Startup(capiConfiguration);
         startup.start();
 
         try {
@@ -51,21 +46,13 @@ public class CAPIMain {
 
             WebsocketGateway websocketGateway = getWebsocketGateway(startup);
             GrpcGateway grpcGateway = getGrpcGateway(startup);
-            AdminGateway adminGateway = configureAdminGateway(startup, camelContext);
+            AdminGateway adminGateway = configureAdminGateway(startup);
             McpGateway mcpGateway = getMcpGateway(startup);
+            RestGateway restGateway = getRestGateway(startup, managedHeaders);
 
-            bindRegistryServices(startup, camelContext);
-            camelContext.addRoutes(new ErrorRoute(startup.getHttpUtils()));
+            ScheduledExecutorService scheduler = startSchedulers(startup);
 
-            String primaryEndpoint = buildPrimaryEndpoint(camelContext);
-            addPrimaryRoute(startup, camelContext, managedHeaders, primaryEndpoint);
-
-            boolean mcpServerEnabled = startup.getMcpServerClient() != null;
-            boolean apiKeyStoreEnabled = startup.getApiKeyStore() != null;
-            camelContext.addStartupListener(new CamelStartupListener(capiConfiguration.getConsulCatalogDiscoverInterval(), capiConfiguration.getConsulStore().isEnabled(), capiConfiguration.getTrustStore().isEnabled(), mcpServerEnabled, apiKeyStoreEnabled));
-            camelContext.start();
-
-            registerShutdownHook(websocketGateway, grpcGateway, mcpGateway, camelContext, adminGateway);
+            registerShutdownHook(websocketGateway, grpcGateway, mcpGateway, restGateway, scheduler, adminGateway);
 
             log.info("CAPI Gateway started successfully.");
             Thread.currentThread().join();
@@ -113,8 +100,8 @@ public class CAPIMain {
         return managedHeaders;
     }
 
-    private AdminGateway configureAdminGateway(Startup startup, CamelContext camelContext) {
-        AdminGateway adminGateway = new AdminGateway(capiConfiguration.getAdminPort(), startup.getPrometheusRegistry(), capiConfiguration, camelContext, startup.getServiceCache(), startup.getUndertowSslContext(), startup.getCapiTrustManager());
+    private AdminGateway configureAdminGateway(Startup startup) {
+        AdminGateway adminGateway = new AdminGateway(capiConfiguration.getAdminPort(), startup.getPrometheusRegistry(), capiConfiguration, startup.getServiceCache(), startup.getUndertowSslContext(), startup.getCapiTrustManager());
         if(startup.getWebSocketClientMap() != null) {
             adminGateway.setWebsocketClients(startup.getWebSocketClientMap());
         }
@@ -124,63 +111,124 @@ public class CAPIMain {
         if(startup.getMcpSessionStore() != null) {
             adminGateway.setMcpSessionStore(startup.getMcpSessionStore());
         }
+        adminGateway.setRestClients(startup.getRestClientMap());
         adminGateway.start();
         return adminGateway;
     }
 
-    private void bindRegistryServices(Startup startup, CamelContext camelContext) {
-        camelContext.getRegistry().bind("consulNodeDiscovery", startup.getConsulNodeDiscovery());
-        if(capiConfiguration.getConsulStore().isEnabled()) {
-            camelContext.getRegistry().bind("consulStore", startup.getConsulStore());
-        }
-        camelContext.getRegistry().bind("routeConsistencyChecker", startup.getRouteConsistencyChecker());
-        if(startup.getApiKeyStore() != null) {
-            camelContext.getRegistry().bind("apiKeyStore", startup.getApiKeyStore());
-        }
-        if(startup.getMcpServerClient() != null) {
-            camelContext.getRegistry().bind("mcpServerClient", startup.getMcpServerClient());
-        }
-    }
+    /*
+    // PrimaryRoute replaced by RestGateway — async Undertow proxy
+    private String buildPrimaryEndpoint(CamelContext camelContext) { ... }
+    private void addPrimaryRoute(...) { ... }
+    */
 
-    private String buildPrimaryEndpoint(CamelContext camelContext) {
-        String scheme = capiConfiguration.getSsl().isEnabled() ? "https" : "http";
-        CamelProxyPeerAddressHandler proxyPeerAddressHandler = new CamelProxyPeerAddressHandler();
-        camelContext.getRegistry().bind("camelProxyPeerAddressHandler", proxyPeerAddressHandler);
-
-        String base = "undertow:" + scheme + "://" + capiConfiguration.getRest().getListeningAddress() + ":" + capiConfiguration.getRest().getPort() + capiConfiguration.getRest().getContextPath();
-        if(capiConfiguration.getAccessLogs().isEnabled()) {
-            CapiAccessLogReceiver capiAccessLogReceiver = new CapiAccessLogReceiver();
-            camelContext.getRegistry().bind("capiAccessLogReceiver", capiAccessLogReceiver);
-            return base + "?accessLog=true&accessLogReceiver=#capiAccessLogReceiver&handlers=#camelProxyPeerAddressHandler&matchOnUriPrefix=true&optionsEnabled=true&httpMethodRestrict=GET,POST,PUT,DELETE,OPTIONS,PATCH";
-        }
-        return base + "?matchOnUriPrefix=true&optionsEnabled=true&httpMethodRestrict=GET,POST,PUT,DELETE,OPTIONS,PATCH";
-    }
-
-    private void addPrimaryRoute(Startup startup, CamelContext camelContext, Map<String, String> managedHeaders, String primaryEndpoint) throws Exception {
-        if(capiConfiguration.getRest().isEnabled()
-                && capiConfiguration.getRest().getContextPath() != null
-                && !capiConfiguration.getRest().getContextPath().isEmpty()) {
-            boolean sslEnabled = capiConfiguration.getSsl() != null && capiConfiguration.getSsl().isEnabled();
-            camelContext.addRoutes(new PrimaryRoute(startup.getRouteUtils(), capiConfiguration.getRest().getPort(), capiConfiguration.getRest().getListeningAddress(), capiConfiguration.getRest().getContextPath(), sslEnabled, capiConfiguration.isCorsEnabled(), managedHeaders, startup.getServiceCache(), primaryEndpoint, capiConfiguration.getRest().getProxyPoolSize(), capiConfiguration.getRest().getProxyMaxPoolSize()));
-        }
-    }
-
-    private static void registerShutdownHook(@Nullable WebsocketGateway websocketGateway, @Nullable GrpcGateway grpcGateway, @Nullable McpGateway mcpGateway, CamelContext camelContext, AdminGateway adminGateway) {
+    private static void registerShutdownHook(@Nullable WebsocketGateway websocketGateway, @Nullable GrpcGateway grpcGateway, @Nullable McpGateway mcpGateway, @Nullable RestGateway restGateway, ScheduledExecutorService scheduler, AdminGateway adminGateway) {
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             log.info("Shutting down CAPI Gateway...");
-            if(websocketGateway != null) {
-                websocketGateway.stop();
-            }
-            if(grpcGateway != null) {
-                grpcGateway.stop();
-            }
-            if(mcpGateway != null) {
-                mcpGateway.stop();
-            }
-            camelContext.stop();
+            if(websocketGateway != null) websocketGateway.stop();
+            if(grpcGateway != null) grpcGateway.stop();
+            if(mcpGateway != null) mcpGateway.stop();
+            if(restGateway != null) restGateway.stop();
+            scheduler.shutdownNow();
             adminGateway.stop();
             log.info("CAPI Gateway stopped.");
         }));
+    }
+
+    private ScheduledExecutorService startSchedulers(Startup startup) {
+        ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
+        long interval = capiConfiguration.getConsulCatalogDiscoverInterval();
+
+        // Consul service discovery
+        scheduler.scheduleAtFixedRate(() -> {
+            try {
+                startup.getConsulNodeDiscovery().processInfo();
+                if (startup.getMcpServerClient() != null) {
+                    startup.getMcpServerClient().refreshMcpServerTools();
+                }
+            } catch (Exception e) {
+                log.error("Consul discovery error: {}", e.getMessage());
+            }
+        }, 0, interval, TimeUnit.MILLISECONDS);
+
+        // Consul KV store
+        if (capiConfiguration.getConsulStore().isEnabled() && startup.getConsulStore() != null) {
+            scheduler.scheduleAtFixedRate(() -> {
+                try {
+                    startup.getConsulStore().process();
+                } catch (Exception e) {
+                    log.error("Consul store error: {}", e.getMessage());
+                }
+            }, 0, interval, TimeUnit.MILLISECONDS);
+        }
+
+        // API key store
+        if (startup.getApiKeyStore() != null) {
+            scheduler.scheduleAtFixedRate(() -> {
+                try {
+                    startup.getApiKeyStore().process();
+                } catch (Exception e) {
+                    log.error("API key store error: {}", e.getMessage());
+                }
+            }, 0, interval, TimeUnit.MILLISECONDS);
+        }
+
+        // Route consistency checker
+        scheduler.scheduleAtFixedRate(() -> {
+            try {
+                startup.getRouteConsistencyChecker().process();
+            } catch (Exception e) {
+                log.error("Consistency checker error: {}", e.getMessage());
+            }
+        }, 60, 60, TimeUnit.SECONDS);
+
+        log.info("Schedulers started (consul interval: {}ms)", interval);
+        return scheduler;
+    }
+
+    private @Nullable RestGateway getRestGateway(Startup startup, Map<String, String> managedHeaders) {
+        if (capiConfiguration.getRest().isEnabled()) {
+            List<String> allowedHeaders = capiConfiguration.getAllowedHeaders() != null ? capiConfiguration.getAllowedHeaders() : new ArrayList<>();
+            String cookieName = capiConfiguration.getOauth2() != null && capiConfiguration.getOauth2().getCookieName() != null ? capiConfiguration.getOauth2().getCookieName() : "";
+            RestGateway gateway = new RestGateway(
+                    capiConfiguration.getRest().getPort(),
+                    capiConfiguration.getRest().getContextPath(),
+                    startup.getRestClientMap(),
+                    startup.getHttpUtils(),
+                    startup.getServiceCache(),
+                    startup.getUndertowSslContext(),
+                    allowedHeaders,
+                    cookieName
+            );
+            if (startup.getWebsocketUtils() != null) {
+                try {
+                    gateway.setWebsocketAuthorization(startup.getWebsocketUtils().createWebsocketAuthorization());
+                } catch (Exception e) {
+                    log.warn("No OIDC configured for RestGateway: {}", e.getMessage());
+                }
+            }
+            if (startup.getOpaService() != null) gateway.setOpaService(startup.getOpaService());
+            if (startup.getThrottleProcessor() != null) gateway.setThrottleProcessor(startup.getThrottleProcessor());
+            if (startup.getApiKeyCache() != null) gateway.setApiKeyCache(startup.getApiKeyCache());
+            if (startup.getOpenTelemetryTracer() != null) {
+                gateway.setRestTracer(new CapiTracer(
+                        startup.getOpenTelemetryTracer(),
+                        startup.getHttpUtils(),
+                        startup.getServiceCache(),
+                        capiConfiguration.getInstanceName()
+                ));
+            }
+            if (startup.getWebsocketUtils() != null) {
+                gateway.setWebsocketUtils(startup.getWebsocketUtils());
+            }
+            if (capiConfiguration.getReverseProxyHost() != null && !capiConfiguration.getReverseProxyHost().isEmpty()) {
+                gateway.setReverseProxyHost(capiConfiguration.getReverseProxyHost());
+            }
+            gateway.setMeterRegistry(startup.getPrometheusRegistry());
+            gateway.runProxy();
+            return gateway;
+        }
+        return null;
     }
 
     private @Nullable WebsocketGateway getWebsocketGateway(Startup startup) {
