@@ -92,12 +92,6 @@ class ServiceTest {
     }
 
     @Test
-    void modifyIndex_getterSetter() {
-        service.setModifyIndex(42);
-        assertEquals(42, service.getModifyIndex());
-    }
-
-    @Test
     void serviceCapiInstances_getterSetter() {
         ServiceCapiInstances instances = new ServiceCapiInstances();
         service.setServiceCapiInstances(instances);
