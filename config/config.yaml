@@ -7,7 +7,7 @@ capi:
   adminPort: 8381
   reverseProxyHost:
   rest:
-    enabled: false
+    enabled: true
     port: 8380
     listeningAddress: 0.0.0.0
     contextPath: /api

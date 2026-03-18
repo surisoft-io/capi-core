@@ -27,6 +27,8 @@ register() {
         \"root-context\": \"/${NAME}\",
         \"scheme\": \"http\",
         \"type\": \"rest\",
+        \"ex_business-unit\": \"TestUnit\",
+        \"ex_owner\": \"Tester\",
         \"capi-instance\": \"default\"${META}
       }
     }"

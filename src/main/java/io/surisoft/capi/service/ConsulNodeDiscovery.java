@@ -472,6 +472,9 @@ public class ConsulNodeDiscovery {
                         restClient.setRoundRobinEnabled(incomingService.isRoundRobinEnabled());
                         restClient.setB3TraceId(incomingService.getServiceMeta().isB3TraceId());
                         restClient.setKeepGroup(incomingService.getServiceMeta().isKeepGroup());
+                        if (incomingService.getOpenAPI() != null) {
+                            restClient.setOpenAPI(incomingService.getOpenAPI());
+                        }
                         WebsocketClient tempClient = new WebsocketClient();
                         tempClient.setMappingList(incomingService.getMappingList());
                         restClient.setHttpHandler(websocketUtils.createClientHttpHandler(tempClient, incomingService, new io.surisoft.capi.exception.HttpErrorHandler(httpUtils), globalResponseTimeout));
