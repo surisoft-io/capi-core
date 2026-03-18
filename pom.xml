@@ -173,6 +173,18 @@
             <version>${mockito.version}</version>
             <scope>test</scope>
         </dependency>
+        <!-- OPA Wasm evaluation (Chicory-based) -->
+        <dependency>
+            <groupId>com.styra.opa</groupId>
+            <artifactId>opa-java-wasm</artifactId>
+            <version>0.0.6</version>
+        </dependency>
+        <!-- tar.gz extraction for OPA bundles -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-compress</artifactId>
+            <version>1.27.1</version>
+        </dependency>
     </dependencies>
     <build>
     <plugins>

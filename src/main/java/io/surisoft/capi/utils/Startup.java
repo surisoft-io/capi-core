@@ -58,6 +58,8 @@ public class Startup {
     @Nullable
     private OpaService opaService;
     @Nullable
+    private OpaWasmService opaWasmService;
+    @Nullable
     private WebsocketUtils websocketUtils;
     @Nullable
     private GrpcUtils grpcUtils;
@@ -108,6 +110,7 @@ public class Startup {
         createRouteProcessors();
         startRouteUtils();
         startServiceUtils();
+        startOpaService();
         startConsulNodeDiscoveryService();
         if(configuration.isCorsEnabled()) {
             //bindCapCorsFilterStrategy(camelContext);
@@ -117,7 +120,6 @@ public class Startup {
         }
         startApiKeyStore();
         startRouteConsistencyChecker();
-        startOpaService();
         startMcpService();
     }
 
@@ -200,6 +202,9 @@ public class Startup {
         consulNodeDiscovery.setHttpUtils(httpUtils);
         consulNodeDiscovery.setThrottleProcessor(throttleProcessor);
         consulNodeDiscovery.setOpaService(opaService);
+        if (opaWasmService != null) {
+            consulNodeDiscovery.setOpaWasmService(opaWasmService);
+        }
         consulNodeDiscovery.setCapiRunningMode(configuration.getRunningMode());
         if(configuration.getRest().getContextPath() != null && !configuration.getRest().getContextPath().isEmpty()) {
             consulNodeDiscovery.setCapiContext(configuration.getRest().getContextPath());
@@ -319,6 +324,17 @@ public class Startup {
     private void startOpaService() {
         if(configuration.getOpa().isEnabled()) {
             opaService = new OpaService(configuration.getOpa().getEndpoint(), consulHttpClient);
+            if (configuration.getOpa().isWasmEnabled() && configuration.getOpa().getWasmBundleUrl() != null) {
+                log.info("OPA Wasm enabled, bundle URL: {}, pool size: {}",
+                        configuration.getOpa().getWasmBundleUrl(),
+                        configuration.getOpa().getWasmPoolSize());
+                opaWasmService = new OpaWasmService(
+                        configuration.getOpa().getWasmBundleUrl(),
+                        configuration.getOpa().getWasmPoolSize(),
+                        consulHttpClient,
+                        opaService
+                );
+            }
         }
     }
 
@@ -396,6 +412,10 @@ public class Startup {
 
     public @Nullable OpaService getOpaService() {
         return opaService;
+    }
+
+    public @Nullable OpaWasmService getOpaWasmService() {
+        return opaWasmService;
     }
 
     public RouteConsistencyChecker getRouteConsistencyChecker() {
