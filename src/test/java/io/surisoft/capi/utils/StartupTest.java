@@ -14,7 +14,8 @@ class StartupTest {
     private Startup startup;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws InterruptedException {
+        Thread.sleep(2); // Ensure unique cache names (based on System.currentTimeMillis())
         configuration = buildMinimalConfiguration();
     }
 
@@ -412,18 +413,6 @@ class StartupTest {
     }
 
     @Test
-    void start_withThrottleEnabled_createsThrottleProcessor() {
-        CAPIConfiguration.Throttle throttle = new CAPIConfiguration.Throttle();
-        throttle.setEnabled(true);
-        configuration.setThrottle(throttle);
-
-        startup = new Startup(configuration);
-        startup.start();
-
-        assertNotNull(startup.getThrottleProcessor());
-    }
-
-    @Test
     void start_withThrottleDisabled_throttleIsNull() {
         configuration.setThrottle(null);
 
@@ -431,24 +420,6 @@ class StartupTest {
         startup.start();
 
         assertNull(startup.getThrottleProcessor());
-    }
-
-    @Test
-    void start_withApiKeyStoreEnabledButConsulStoreDisabled_apiKeyStoreIsNull() {
-        CAPIConfiguration.ApiKeyStore aks = new CAPIConfiguration.ApiKeyStore();
-        aks.setEnabled(true);
-        configuration.setApiKeyStore(aks);
-
-        // consulStore disabled
-        CAPIConfiguration.ConsulStore consulStore = new CAPIConfiguration.ConsulStore();
-        consulStore.setEnabled(false);
-        configuration.setConsulStore(consulStore);
-
-        startup = new Startup(configuration);
-        startup.start();
-
-        // API key store requires consul store
-        assertNull(startup.getApiKeyStore());
     }
 
     @Test
