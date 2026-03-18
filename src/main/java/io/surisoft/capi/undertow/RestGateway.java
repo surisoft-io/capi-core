@@ -4,6 +4,8 @@ import io.surisoft.capi.exception.AuthorizationException;
 import io.surisoft.capi.exception.HttpErrorHandler;
 import io.surisoft.capi.oidc.WebsocketAuthorization;
 import io.surisoft.capi.processor.ThrottleProcessor;
+import io.swagger.v3.oas.models.OpenAPI;
+import io.swagger.v3.oas.models.Operation;
 import io.surisoft.capi.schema.ApiKeyEntry;
 import io.surisoft.capi.schema.ApiKeyStoreEntry;
 import io.surisoft.capi.schema.RestClient;
@@ -227,6 +229,16 @@ public class RestGateway {
 
             // --- Pre-proxy checks (all synchronous, fast, no I/O to backends) ---
 
+            // 0. OpenAPI operation validation
+            if (restClient.getOpenAPI() != null) {
+                String forwardPath = normalizePathForForwarding(restClient, requestPath);
+                String openApiResult = checkOpenApi(exchange, restClient, forwardPath);
+                if (openApiResult != null) {
+                    httpErrorHandler.sendError(exchange, openApiResult.startsWith("Call not allowed") ? 400 : 401, openApiResult);
+                    return;
+                }
+            }
+
             // 1. API Key check
             if (restClient.isApiKeyEnabled()) {
                 String apiKeyResult = checkApiKey(exchange, restClient);
@@ -438,6 +450,64 @@ public class RestGateway {
         }
     }
 
+
+    private String checkOpenApi(HttpServerExchange exchange, RestClient restClient, String forwardPath) {
+        OpenAPI openAPI = restClient.getOpenAPI();
+        String callingMethod = exchange.getRequestMethod().toString().toLowerCase();
+
+        for (String path : openAPI.getPaths().keySet()) {
+            if (isOpenApiPathMatch(forwardPath, path)) {
+                Operation operation = switch (callingMethod) {
+                    case "get" -> openAPI.getPaths().get(path).getGet();
+                    case "post" -> openAPI.getPaths().get(path).getPost();
+                    case "put" -> openAPI.getPaths().get(path).getPut();
+                    case "patch" -> openAPI.getPaths().get(path).getPatch();
+                    case "delete" -> openAPI.getPaths().get(path).getDelete();
+                    default -> null;
+                };
+                if (operation != null) {
+                    if (operation.getSecurity() != null && !operation.getSecurity().isEmpty()) {
+                        try {
+                            String accessToken = httpUtils.processAuthorizationAccessToken(exchange);
+                            if (accessToken == null) {
+                                return "No authorization provided";
+                            }
+                            String serviceKey = httpUtils.contextToRole(restClient.getServiceId());
+                            Service service = serviceCache.get(serviceKey);
+                            if (service != null) {
+                                if (!httpUtils.isAuthorized(accessToken, serviceKey, service, opaService)) {
+                                    return "Invalid authentication";
+                                }
+                            } else {
+                                return "Call not allowed";
+                            }
+                        } catch (Exception e) {
+                            return "Invalid authorization provided";
+                        }
+                    }
+                    return null; // Operation found, no security or authorized
+                }
+            }
+        }
+        return "Call not allowed"; // No matching operation found
+    }
+
+    private boolean isOpenApiPathMatch(String requestPath, String definedPath) {
+        String req = requestPath.replaceAll("^/+|/+$", "");
+        String def = definedPath.replaceAll("^/+|/+$", "");
+
+        String[] reqSegments = req.split("/");
+        String[] defSegments = def.split("/");
+
+        if (reqSegments.length != defSegments.length) return false;
+
+        for (int i = 0; i < reqSegments.length; i++) {
+            if (!defSegments[i].equals(reqSegments[i]) && !defSegments[i].matches("\\{.*\\}")) {
+                return false;
+            }
+        }
+        return true;
+    }
 
     private void handleOptions(HttpServerExchange exchange) {
         if (websocketUtils != null) {

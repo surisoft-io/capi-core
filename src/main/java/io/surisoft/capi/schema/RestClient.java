@@ -1,6 +1,7 @@
 package io.surisoft.capi.schema;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import io.swagger.v3.oas.models.OpenAPI;
 import io.undertow.server.HttpHandler;
 
 import java.util.Set;
@@ -34,6 +35,10 @@ public class RestClient {
 
     // Group
     private boolean keepGroup;
+
+    // OpenAPI
+    @JsonIgnore
+    private OpenAPI openAPI;
 
     public String getServiceId() {
         return serviceId;
@@ -161,5 +166,13 @@ public class RestClient {
 
     public void setKeepGroup(boolean keepGroup) {
         this.keepGroup = keepGroup;
+    }
+
+    public OpenAPI getOpenAPI() {
+        return openAPI;
+    }
+
+    public void setOpenAPI(OpenAPI openAPI) {
+        this.openAPI = openAPI;
     }
 }
