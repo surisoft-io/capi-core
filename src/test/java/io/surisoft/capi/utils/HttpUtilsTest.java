@@ -645,4 +645,138 @@ class HttpUtilsTest {
         boolean result = httpUtilsWithProcessor.isAuthorized("token", "groupA");
         assertFalse(result);
     }
+
+    // === propagateAuthorization with HttpServerExchange ===
+
+    @Test
+    void propagateAuthorization_withBearerToken_setsAuthHeader() {
+        io.undertow.server.HttpServerExchange exchange = mock(io.undertow.server.HttpServerExchange.class);
+        io.undertow.util.HeaderMap headerMap = new io.undertow.util.HeaderMap();
+        headerMap.put(io.undertow.util.HttpString.tryFromString(Constants.AUTHORIZATION_HEADER), "Bearer my-propagated-token");
+        when(exchange.getRequestHeaders()).thenReturn(headerMap);
+
+        httpUtils.propagateAuthorization(exchange);
+
+        String authValue = headerMap.get(Constants.AUTHORIZATION_HEADER).getFirst();
+        assertEquals("Bearer my-propagated-token", authValue);
+    }
+
+    @Test
+    void propagateAuthorization_withoutToken_doesNotThrow() {
+        io.undertow.server.HttpServerExchange exchange = mock(io.undertow.server.HttpServerExchange.class);
+        io.undertow.util.HeaderMap headerMap = new io.undertow.util.HeaderMap();
+        when(exchange.getRequestHeaders()).thenReturn(headerMap);
+
+        assertDoesNotThrow(() -> httpUtils.propagateAuthorization(exchange));
+    }
+
+    @Test
+    void propagateAuthorization_withAccessTokenParam_setsBearer() {
+        io.undertow.server.HttpServerExchange exchange = mock(io.undertow.server.HttpServerExchange.class);
+        io.undertow.util.HeaderMap headerMap = new io.undertow.util.HeaderMap();
+        headerMap.put(new io.undertow.util.HttpString(Constants.AUTHORIZATION_REQUEST_PARAMETER), "param-token-value");
+        when(exchange.getRequestHeaders()).thenReturn(headerMap);
+
+        httpUtils.propagateAuthorization(exchange);
+
+        String authValue = headerMap.get(Constants.AUTHORIZATION_HEADER).getFirst();
+        assertEquals("Bearer param-token-value", authValue);
+    }
+
+    // === processAuthorizationAccessToken with cookie-based auth (HttpServerExchange) ===
+
+    @Test
+    void processAuthorizationAccessToken_httpServerExchange_withCookieAuth() throws AuthorizationException {
+        HttpUtils httpUtilsWithCookie = new HttpUtils("auth-cookie", null);
+
+        io.undertow.server.HttpServerExchange exchange = mock(io.undertow.server.HttpServerExchange.class);
+        io.undertow.util.HeaderMap headerMap = new io.undertow.util.HeaderMap();
+        // Set Cookie header and cookie name header
+        headerMap.put(io.undertow.util.HttpString.tryFromString(Constants.COOKIE_HEADER), "auth-cookie-name=my-cookie-token;session=abc");
+        headerMap.put(io.undertow.util.HttpString.tryFromString("auth-cookie"), "auth-cookie-name");
+        when(exchange.getRequestHeaders()).thenReturn(headerMap);
+
+        String result = httpUtilsWithCookie.processAuthorizationAccessToken(exchange);
+        assertEquals("my-cookie-token", result);
+    }
+
+    @Test
+    void processAuthorizationAccessToken_httpServerExchange_cookieNameNotInHeader_returnsNull() throws AuthorizationException {
+        HttpUtils httpUtilsWithCookie = new HttpUtils("auth-cookie", null);
+
+        io.undertow.server.HttpServerExchange exchange = mock(io.undertow.server.HttpServerExchange.class);
+        io.undertow.util.HeaderMap headerMap = new io.undertow.util.HeaderMap();
+        headerMap.put(io.undertow.util.HttpString.tryFromString(Constants.COOKIE_HEADER), "session=abc");
+        // auth-cookie header is NOT present
+        when(exchange.getRequestHeaders()).thenReturn(headerMap);
+
+        String result = httpUtilsWithCookie.processAuthorizationAccessToken(exchange);
+        assertNull(result);
+    }
+
+    @Test
+    void processAuthorizationAccessToken_httpServerExchange_noCookieName_noCookieHeader_returnsNull() throws AuthorizationException {
+        // httpUtils has null authorizationCookieName
+        io.undertow.server.HttpServerExchange exchange = mock(io.undertow.server.HttpServerExchange.class);
+        io.undertow.util.HeaderMap headerMap = new io.undertow.util.HeaderMap();
+        headerMap.put(io.undertow.util.HttpString.tryFromString(Constants.COOKIE_HEADER), "session=abc");
+        when(exchange.getRequestHeaders()).thenReturn(headerMap);
+
+        String result = httpUtils.processAuthorizationAccessToken(exchange);
+        assertNull(result);
+    }
+
+    // === hashApiKey ===
+
+    @Test
+    void hashApiKey_sameInput_sameOutput() {
+        String hash1 = HttpUtils.hashApiKey("test-key");
+        String hash2 = HttpUtils.hashApiKey("test-key");
+        assertEquals(hash1, hash2);
+    }
+
+    @Test
+    void hashApiKey_differentInput_differentOutput() {
+        String hash1 = HttpUtils.hashApiKey("key-a");
+        String hash2 = HttpUtils.hashApiKey("key-b");
+        assertNotEquals(hash1, hash2);
+    }
+
+    @Test
+    void hashApiKey_returnsHexString() {
+        String hash = HttpUtils.hashApiKey("any-key");
+        assertNotNull(hash);
+        assertTrue(hash.matches("^[0-9a-f]+$"));
+        assertEquals(64, hash.length()); // SHA-256 = 32 bytes = 64 hex chars
+    }
+
+    // === getCookiesFromExchange (private, tested indirectly via processAuthorizationAccessToken) ===
+
+    @Test
+    void processAuthorizationAccessToken_httpServerExchange_cookieWithQuotedValues() throws AuthorizationException {
+        HttpUtils httpUtilsWithCookie = new HttpUtils("auth-cookie", null);
+
+        io.undertow.server.HttpServerExchange exchange = mock(io.undertow.server.HttpServerExchange.class);
+        io.undertow.util.HeaderMap headerMap = new io.undertow.util.HeaderMap();
+        headerMap.put(io.undertow.util.HttpString.tryFromString(Constants.COOKIE_HEADER), "\"my-auth\"=\"token-value\";other=val");
+        headerMap.put(io.undertow.util.HttpString.tryFromString("auth-cookie"), "my-auth");
+        when(exchange.getRequestHeaders()).thenReturn(headerMap);
+
+        String result = httpUtilsWithCookie.processAuthorizationAccessToken(exchange);
+        assertEquals("token-value", result);
+    }
+
+    @Test
+    void processAuthorizationAccessToken_httpServerExchange_cookieNotFound_returnsNull() throws AuthorizationException {
+        HttpUtils httpUtilsWithCookie = new HttpUtils("auth-cookie", null);
+
+        io.undertow.server.HttpServerExchange exchange = mock(io.undertow.server.HttpServerExchange.class);
+        io.undertow.util.HeaderMap headerMap = new io.undertow.util.HeaderMap();
+        headerMap.put(io.undertow.util.HttpString.tryFromString(Constants.COOKIE_HEADER), "session=abc;other=def");
+        headerMap.put(io.undertow.util.HttpString.tryFromString("auth-cookie"), "nonexistent-cookie");
+        when(exchange.getRequestHeaders()).thenReturn(headerMap);
+
+        String result = httpUtilsWithCookie.processAuthorizationAccessToken(exchange);
+        assertNull(result);
+    }
 }

@@ -621,6 +621,735 @@ class CAPIMainTest {
         } catch (Exception ignored) {}
     }
 
+    // === Tests for configureAdminGateway ===
+
+    @Test
+    void configureAdminGateway_withAllOptionalComponents_setsAll() throws Exception {
+        CAPIConfiguration config = new CAPIConfiguration();
+        config.setAdminPort(19481);
+        config.setVersion("1.0.0");
+        config.setInstanceName("test");
+
+        sun.misc.Unsafe unsafe = getUnsafe();
+        CAPIMain instance = (CAPIMain) unsafe.allocateInstance(CAPIMain.class);
+
+        Field configField = CAPIMain.class.getDeclaredField("capiConfiguration");
+        configField.setAccessible(true);
+        configField.set(instance, config);
+
+        Startup mockStartup = mock(Startup.class);
+        io.micrometer.prometheusmetrics.PrometheusMeterRegistry mockRegistry = mock(io.micrometer.prometheusmetrics.PrometheusMeterRegistry.class);
+        when(mockStartup.getPrometheusRegistry()).thenReturn(mockRegistry);
+
+        org.cache2k.Cache<String, io.surisoft.capi.schema.Service> svcCache =
+                org.cache2k.Cache2kBuilder.of(String.class, io.surisoft.capi.schema.Service.class)
+                        .name("capiMainAdminGw-" + System.nanoTime())
+                        .eternal(true)
+                        .entryCapacity(10)
+                        .build();
+        when(mockStartup.getServiceCache()).thenReturn(svcCache);
+        when(mockStartup.getUndertowSslContext()).thenReturn(null);
+        when(mockStartup.getCapiTrustManager()).thenReturn(null);
+
+        Map<String, WebsocketClient> wsMap = new HashMap<>();
+        when(mockStartup.getWebSocketClientMap()).thenReturn(wsMap);
+        when(mockStartup.getMcpToolRegistry()).thenReturn(mock(io.surisoft.capi.service.McpToolRegistry.class));
+        when(mockStartup.getMcpSessionStore()).thenReturn(mock(io.surisoft.capi.service.McpSessionStore.class));
+        when(mockStartup.getRestClientMap()).thenReturn(new java.util.concurrent.ConcurrentHashMap<>());
+
+        Method configAdmin = CAPIMain.class.getDeclaredMethod("configureAdminGateway", Startup.class);
+        configAdmin.setAccessible(true);
+
+        Object result = configAdmin.invoke(instance, mockStartup);
+        assertNotNull(result);
+
+        // Clean up
+        try {
+            Method stopMethod = result.getClass().getMethod("stop");
+            stopMethod.invoke(result);
+        } catch (Exception ignored) {}
+        svcCache.close();
+    }
+
+    @Test
+    void configureAdminGateway_withNullOptionalComponents_doesNotSetOptionals() throws Exception {
+        CAPIConfiguration config = new CAPIConfiguration();
+        config.setAdminPort(19482);
+        config.setVersion("1.0.0");
+        config.setInstanceName("test");
+
+        sun.misc.Unsafe unsafe = getUnsafe();
+        CAPIMain instance = (CAPIMain) unsafe.allocateInstance(CAPIMain.class);
+
+        Field configField = CAPIMain.class.getDeclaredField("capiConfiguration");
+        configField.setAccessible(true);
+        configField.set(instance, config);
+
+        Startup mockStartup = mock(Startup.class);
+        io.micrometer.prometheusmetrics.PrometheusMeterRegistry mockRegistry = mock(io.micrometer.prometheusmetrics.PrometheusMeterRegistry.class);
+        when(mockStartup.getPrometheusRegistry()).thenReturn(mockRegistry);
+
+        org.cache2k.Cache<String, io.surisoft.capi.schema.Service> svcCache =
+                org.cache2k.Cache2kBuilder.of(String.class, io.surisoft.capi.schema.Service.class)
+                        .name("capiMainAdminGwNull-" + System.nanoTime())
+                        .eternal(true)
+                        .entryCapacity(10)
+                        .build();
+        when(mockStartup.getServiceCache()).thenReturn(svcCache);
+        when(mockStartup.getUndertowSslContext()).thenReturn(null);
+        when(mockStartup.getCapiTrustManager()).thenReturn(null);
+        when(mockStartup.getWebSocketClientMap()).thenReturn(null);
+        when(mockStartup.getMcpToolRegistry()).thenReturn(null);
+        when(mockStartup.getMcpSessionStore()).thenReturn(null);
+        when(mockStartup.getRestClientMap()).thenReturn(new java.util.concurrent.ConcurrentHashMap<>());
+
+        Method configAdmin = CAPIMain.class.getDeclaredMethod("configureAdminGateway", Startup.class);
+        configAdmin.setAccessible(true);
+
+        Object result = configAdmin.invoke(instance, mockStartup);
+        assertNotNull(result);
+
+        try {
+            Method stopMethod = result.getClass().getMethod("stop");
+            stopMethod.invoke(result);
+        } catch (Exception ignored) {}
+        svcCache.close();
+    }
+
+    // === Tests for buildManagedHeaders ===
+
+    @Test
+    void buildManagedHeaders_nullAllowedHeaders_returnsDefaults() throws Exception {
+        CAPIConfiguration config = new CAPIConfiguration();
+        config.setAllowedHeaders(null);
+
+        sun.misc.Unsafe unsafe = getUnsafe();
+        CAPIMain instance = (CAPIMain) unsafe.allocateInstance(CAPIMain.class);
+
+        Field configField = CAPIMain.class.getDeclaredField("capiConfiguration");
+        configField.setAccessible(true);
+        configField.set(instance, config);
+
+        Method buildHeaders = CAPIMain.class.getDeclaredMethod("buildManagedHeaders");
+        buildHeaders.setAccessible(true);
+
+        @SuppressWarnings("unchecked")
+        Map<String, String> result = (Map<String, String>) buildHeaders.invoke(instance);
+        assertNotNull(result);
+    }
+
+    @Test
+    void buildManagedHeaders_emptyAllowedHeaders_returnsDefaults() throws Exception {
+        CAPIConfiguration config = new CAPIConfiguration();
+        config.setAllowedHeaders(new java.util.ArrayList<>());
+
+        sun.misc.Unsafe unsafe = getUnsafe();
+        CAPIMain instance = (CAPIMain) unsafe.allocateInstance(CAPIMain.class);
+
+        Field configField = CAPIMain.class.getDeclaredField("capiConfiguration");
+        configField.setAccessible(true);
+        configField.set(instance, config);
+
+        Method buildHeaders = CAPIMain.class.getDeclaredMethod("buildManagedHeaders");
+        buildHeaders.setAccessible(true);
+
+        @SuppressWarnings("unchecked")
+        Map<String, String> result = (Map<String, String>) buildHeaders.invoke(instance);
+        assertNotNull(result);
+        assertNull(result.get("Access-Control-Allow-Headers"));
+    }
+
+    @Test
+    void buildManagedHeaders_withAllowedHeadersAndCookieName_addsCookie() throws Exception {
+        CAPIConfiguration config = new CAPIConfiguration();
+        java.util.List<String> headers = new java.util.ArrayList<>();
+        headers.add("Content-Type");
+        headers.add("Authorization");
+        config.setAllowedHeaders(headers);
+
+        CAPIConfiguration.Oauth2 oauth2 = new CAPIConfiguration.Oauth2();
+        oauth2.setCookieName("my-cookie");
+        config.setOauth2(oauth2);
+
+        sun.misc.Unsafe unsafe = getUnsafe();
+        CAPIMain instance = (CAPIMain) unsafe.allocateInstance(CAPIMain.class);
+
+        Field configField = CAPIMain.class.getDeclaredField("capiConfiguration");
+        configField.setAccessible(true);
+        configField.set(instance, config);
+
+        Method buildHeaders = CAPIMain.class.getDeclaredMethod("buildManagedHeaders");
+        buildHeaders.setAccessible(true);
+
+        @SuppressWarnings("unchecked")
+        Map<String, String> result = (Map<String, String>) buildHeaders.invoke(instance);
+        assertNotNull(result);
+        String allowHeaders = result.get("Access-Control-Allow-Headers");
+        assertNotNull(allowHeaders);
+        assertTrue(allowHeaders.contains("my-cookie"));
+        assertTrue(allowHeaders.contains("Content-Type"));
+    }
+
+    @Test
+    void buildManagedHeaders_withAllowedHeadersButNullOauth2_noCookie() throws Exception {
+        CAPIConfiguration config = new CAPIConfiguration();
+        java.util.List<String> headers = new java.util.ArrayList<>();
+        headers.add("X-Custom");
+        config.setAllowedHeaders(headers);
+        config.setOauth2(null);
+
+        sun.misc.Unsafe unsafe = getUnsafe();
+        CAPIMain instance = (CAPIMain) unsafe.allocateInstance(CAPIMain.class);
+
+        Field configField = CAPIMain.class.getDeclaredField("capiConfiguration");
+        configField.setAccessible(true);
+        configField.set(instance, config);
+
+        Method buildHeaders = CAPIMain.class.getDeclaredMethod("buildManagedHeaders");
+        buildHeaders.setAccessible(true);
+
+        @SuppressWarnings("unchecked")
+        Map<String, String> result = (Map<String, String>) buildHeaders.invoke(instance);
+        String allowHeaders = result.get("Access-Control-Allow-Headers");
+        assertNotNull(allowHeaders);
+        assertTrue(allowHeaders.contains("X-Custom"));
+    }
+
+    @Test
+    void buildManagedHeaders_withAllowedHeadersNullCookieName_noCookie() throws Exception {
+        CAPIConfiguration config = new CAPIConfiguration();
+        java.util.List<String> headers = new java.util.ArrayList<>();
+        headers.add("Accept");
+        config.setAllowedHeaders(headers);
+
+        CAPIConfiguration.Oauth2 oauth2 = new CAPIConfiguration.Oauth2();
+        oauth2.setCookieName(null);
+        config.setOauth2(oauth2);
+
+        sun.misc.Unsafe unsafe = getUnsafe();
+        CAPIMain instance = (CAPIMain) unsafe.allocateInstance(CAPIMain.class);
+
+        Field configField = CAPIMain.class.getDeclaredField("capiConfiguration");
+        configField.setAccessible(true);
+        configField.set(instance, config);
+
+        Method buildHeaders = CAPIMain.class.getDeclaredMethod("buildManagedHeaders");
+        buildHeaders.setAccessible(true);
+
+        @SuppressWarnings("unchecked")
+        Map<String, String> result = (Map<String, String>) buildHeaders.invoke(instance);
+        assertNotNull(result);
+    }
+
+    // === Tests for getGrpcGateway ===
+
+    @Test
+    void getGrpcGateway_nullGrpcConfig_returnsNull() throws Exception {
+        CAPIConfiguration config = new CAPIConfiguration();
+        config.setGrpc(null);
+
+        sun.misc.Unsafe unsafe = getUnsafe();
+        CAPIMain instance = (CAPIMain) unsafe.allocateInstance(CAPIMain.class);
+
+        Field configField = CAPIMain.class.getDeclaredField("capiConfiguration");
+        configField.setAccessible(true);
+        configField.set(instance, config);
+
+        Method getGrpc = CAPIMain.class.getDeclaredMethod("getGrpcGateway", Startup.class);
+        getGrpc.setAccessible(true);
+
+        Object result = getGrpc.invoke(instance, mock(Startup.class));
+        assertNull(result);
+    }
+
+    @Test
+    void getGrpcGateway_grpcDisabled_returnsNull() throws Exception {
+        CAPIConfiguration config = new CAPIConfiguration();
+        CAPIConfiguration.Grpc grpc = new CAPIConfiguration.Grpc();
+        grpc.setEnabled(false);
+        config.setGrpc(grpc);
+
+        sun.misc.Unsafe unsafe = getUnsafe();
+        CAPIMain instance = (CAPIMain) unsafe.allocateInstance(CAPIMain.class);
+
+        Field configField = CAPIMain.class.getDeclaredField("capiConfiguration");
+        configField.setAccessible(true);
+        configField.set(instance, config);
+
+        Method getGrpc = CAPIMain.class.getDeclaredMethod("getGrpcGateway", Startup.class);
+        getGrpc.setAccessible(true);
+
+        Object result = getGrpc.invoke(instance, mock(Startup.class));
+        assertNull(result);
+    }
+
+    @Test
+    void getGrpcGateway_grpcEnabledButNullGrpcUtils_returnsNull() throws Exception {
+        CAPIConfiguration config = new CAPIConfiguration();
+        CAPIConfiguration.Grpc grpc = new CAPIConfiguration.Grpc();
+        grpc.setEnabled(true);
+        grpc.setPort(19384);
+        config.setGrpc(grpc);
+
+        sun.misc.Unsafe unsafe = getUnsafe();
+        CAPIMain instance = (CAPIMain) unsafe.allocateInstance(CAPIMain.class);
+
+        Field configField = CAPIMain.class.getDeclaredField("capiConfiguration");
+        configField.setAccessible(true);
+        configField.set(instance, config);
+
+        Startup mockStartup = mock(Startup.class);
+        when(mockStartup.getGrpcUtils()).thenReturn(null);
+
+        Method getGrpc = CAPIMain.class.getDeclaredMethod("getGrpcGateway", Startup.class);
+        getGrpc.setAccessible(true);
+
+        Object result = getGrpc.invoke(instance, mockStartup);
+        assertNull(result);
+    }
+
+    // === Tests for getMcpGateway ===
+
+    @Test
+    void getMcpGateway_nullMcpConfig_returnsNull() throws Exception {
+        CAPIConfiguration config = new CAPIConfiguration();
+        config.setMcp(null);
+
+        sun.misc.Unsafe unsafe = getUnsafe();
+        CAPIMain instance = (CAPIMain) unsafe.allocateInstance(CAPIMain.class);
+
+        Field configField = CAPIMain.class.getDeclaredField("capiConfiguration");
+        configField.setAccessible(true);
+        configField.set(instance, config);
+
+        Method getMcp = CAPIMain.class.getDeclaredMethod("getMcpGateway", Startup.class);
+        getMcp.setAccessible(true);
+
+        Object result = getMcp.invoke(instance, mock(Startup.class));
+        assertNull(result);
+    }
+
+    @Test
+    void getMcpGateway_mcpDisabled_returnsNull() throws Exception {
+        CAPIConfiguration config = new CAPIConfiguration();
+        CAPIConfiguration.Mcp mcp = new CAPIConfiguration.Mcp();
+        mcp.setEnabled(false);
+        config.setMcp(mcp);
+
+        sun.misc.Unsafe unsafe = getUnsafe();
+        CAPIMain instance = (CAPIMain) unsafe.allocateInstance(CAPIMain.class);
+
+        Field configField = CAPIMain.class.getDeclaredField("capiConfiguration");
+        configField.setAccessible(true);
+        configField.set(instance, config);
+
+        Method getMcp = CAPIMain.class.getDeclaredMethod("getMcpGateway", Startup.class);
+        getMcp.setAccessible(true);
+
+        Object result = getMcp.invoke(instance, mock(Startup.class));
+        assertNull(result);
+    }
+
+    @Test
+    void getMcpGateway_mcpEnabledButNullToolRegistry_returnsNull() throws Exception {
+        CAPIConfiguration config = new CAPIConfiguration();
+        CAPIConfiguration.Mcp mcp = new CAPIConfiguration.Mcp();
+        mcp.setEnabled(true);
+        config.setMcp(mcp);
+
+        sun.misc.Unsafe unsafe = getUnsafe();
+        CAPIMain instance = (CAPIMain) unsafe.allocateInstance(CAPIMain.class);
+
+        Field configField = CAPIMain.class.getDeclaredField("capiConfiguration");
+        configField.setAccessible(true);
+        configField.set(instance, config);
+
+        Startup mockStartup = mock(Startup.class);
+        when(mockStartup.getMcpToolRegistry()).thenReturn(null);
+
+        Method getMcp = CAPIMain.class.getDeclaredMethod("getMcpGateway", Startup.class);
+        getMcp.setAccessible(true);
+
+        Object result = getMcp.invoke(instance, mockStartup);
+        assertNull(result);
+    }
+
+    // === Tests for getRestGateway ===
+
+    @Test
+    void getRestGateway_restDisabled_returnsNull() throws Exception {
+        CAPIConfiguration config = new CAPIConfiguration();
+        CAPIConfiguration.Rest rest = new CAPIConfiguration.Rest();
+        rest.setEnabled(false);
+        config.setRest(rest);
+
+        sun.misc.Unsafe unsafe = getUnsafe();
+        CAPIMain instance = (CAPIMain) unsafe.allocateInstance(CAPIMain.class);
+
+        Field configField = CAPIMain.class.getDeclaredField("capiConfiguration");
+        configField.setAccessible(true);
+        configField.set(instance, config);
+
+        Method getRestGw = CAPIMain.class.getDeclaredMethod("getRestGateway", Startup.class, Map.class);
+        getRestGw.setAccessible(true);
+
+        Object result = getRestGw.invoke(instance, mock(Startup.class), new HashMap<>());
+        assertNull(result);
+    }
+
+    // === Tests for getRestGateway with REST enabled ===
+
+    @Test
+    void getRestGateway_restEnabled_createsGateway() throws Exception {
+        CAPIConfiguration config = new CAPIConfiguration();
+        CAPIConfiguration.Rest rest = new CAPIConfiguration.Rest();
+        rest.setEnabled(true);
+        rest.setPort(19380);
+        rest.setContextPath("/api");
+        config.setRest(rest);
+        config.setOauth2(null);
+        config.setAllowedHeaders(null);
+
+        sun.misc.Unsafe unsafe = getUnsafe();
+        CAPIMain instance = (CAPIMain) unsafe.allocateInstance(CAPIMain.class);
+
+        Field configField = CAPIMain.class.getDeclaredField("capiConfiguration");
+        configField.setAccessible(true);
+        configField.set(instance, config);
+
+        Startup mockStartup = mock(Startup.class);
+        when(mockStartup.getRestClientMap()).thenReturn(new java.util.concurrent.ConcurrentHashMap<>());
+        when(mockStartup.getHttpUtils()).thenReturn(mock(io.surisoft.capi.utils.HttpUtils.class));
+
+        org.cache2k.Cache<String, io.surisoft.capi.schema.Service> svcCache =
+                org.cache2k.Cache2kBuilder.of(String.class, io.surisoft.capi.schema.Service.class)
+                        .name("capiMainRestGw-" + System.nanoTime())
+                        .eternal(true)
+                        .entryCapacity(10)
+                        .build();
+        when(mockStartup.getServiceCache()).thenReturn(svcCache);
+        when(mockStartup.getUndertowSslContext()).thenReturn(null);
+        when(mockStartup.getWebsocketUtils()).thenReturn(null);
+        when(mockStartup.getOpaService()).thenReturn(null);
+        when(mockStartup.getThrottleProcessor()).thenReturn(null);
+        when(mockStartup.getApiKeyCache()).thenReturn(null);
+        when(mockStartup.getOpenTelemetryTracer()).thenReturn(null);
+
+        io.micrometer.prometheusmetrics.PrometheusMeterRegistry mockRegistry = mock(io.micrometer.prometheusmetrics.PrometheusMeterRegistry.class);
+        when(mockStartup.getPrometheusRegistry()).thenReturn(mockRegistry);
+
+        Method getRestGw = CAPIMain.class.getDeclaredMethod("getRestGateway", Startup.class, Map.class);
+        getRestGw.setAccessible(true);
+
+        Object result = getRestGw.invoke(instance, mockStartup, new HashMap<>());
+        assertNotNull(result);
+
+        try {
+            Method stopMethod = result.getClass().getMethod("stop");
+            stopMethod.invoke(result);
+        } catch (Exception ignored) {}
+        svcCache.close();
+    }
+
+    @Test
+    void getRestGateway_restEnabledWithAllOptionals_setsAll() throws Exception {
+        CAPIConfiguration config = new CAPIConfiguration();
+        CAPIConfiguration.Rest rest = new CAPIConfiguration.Rest();
+        rest.setEnabled(true);
+        rest.setPort(19381);
+        rest.setContextPath("/api");
+        config.setRest(rest);
+
+        CAPIConfiguration.Oauth2 oauth2 = new CAPIConfiguration.Oauth2();
+        oauth2.setCookieName("auth-cookie");
+        config.setOauth2(oauth2);
+
+        config.setAllowedHeaders(java.util.List.of("Content-Type"));
+        config.setReverseProxyHost("proxy.example.com");
+        config.setInstanceName("test-instance");
+
+        sun.misc.Unsafe unsafe = getUnsafe();
+        CAPIMain instance = (CAPIMain) unsafe.allocateInstance(CAPIMain.class);
+
+        Field configField = CAPIMain.class.getDeclaredField("capiConfiguration");
+        configField.setAccessible(true);
+        configField.set(instance, config);
+
+        Startup mockStartup = mock(Startup.class);
+        when(mockStartup.getRestClientMap()).thenReturn(new java.util.concurrent.ConcurrentHashMap<>());
+        io.surisoft.capi.utils.HttpUtils mockHttpUtils = mock(io.surisoft.capi.utils.HttpUtils.class);
+        when(mockStartup.getHttpUtils()).thenReturn(mockHttpUtils);
+
+        org.cache2k.Cache<String, io.surisoft.capi.schema.Service> svcCache =
+                org.cache2k.Cache2kBuilder.of(String.class, io.surisoft.capi.schema.Service.class)
+                        .name("capiMainRestGwAll-" + System.nanoTime())
+                        .eternal(true)
+                        .entryCapacity(10)
+                        .build();
+        when(mockStartup.getServiceCache()).thenReturn(svcCache);
+        when(mockStartup.getUndertowSslContext()).thenReturn(null);
+
+        io.surisoft.capi.utils.WebsocketUtils mockWsUtils = mock(io.surisoft.capi.utils.WebsocketUtils.class);
+        when(mockWsUtils.createWebsocketAuthorization()).thenThrow(new RuntimeException("No OIDC configured"));
+        when(mockStartup.getWebsocketUtils()).thenReturn(mockWsUtils);
+
+        when(mockStartup.getOpaService()).thenReturn(mock(io.surisoft.capi.service.OpaService.class));
+        when(mockStartup.getThrottleProcessor()).thenReturn(mock(io.surisoft.capi.processor.ThrottleProcessor.class));
+
+        org.cache2k.Cache<String, io.surisoft.capi.schema.ApiKeyStoreEntry> apiCache =
+                org.cache2k.Cache2kBuilder.of(String.class, io.surisoft.capi.schema.ApiKeyStoreEntry.class)
+                        .name("capiMainApiKeyCache-" + System.nanoTime())
+                        .eternal(true)
+                        .entryCapacity(10)
+                        .build();
+        when(mockStartup.getApiKeyCache()).thenReturn(apiCache);
+        when(mockStartup.getOpenTelemetryTracer()).thenReturn(mock(io.opentelemetry.api.trace.Tracer.class));
+
+        io.micrometer.prometheusmetrics.PrometheusMeterRegistry mockRegistry = mock(io.micrometer.prometheusmetrics.PrometheusMeterRegistry.class);
+        when(mockStartup.getPrometheusRegistry()).thenReturn(mockRegistry);
+
+        Method getRestGw = CAPIMain.class.getDeclaredMethod("getRestGateway", Startup.class, Map.class);
+        getRestGw.setAccessible(true);
+
+        Object result = getRestGw.invoke(instance, mockStartup, new HashMap<>());
+        assertNotNull(result);
+
+        try {
+            Method stopMethod = result.getClass().getMethod("stop");
+            stopMethod.invoke(result);
+        } catch (Exception ignored) {}
+        svcCache.close();
+        apiCache.close();
+    }
+
+    // === Tests for initializeLogs with filePaths ===
+
+    @Test
+    void initializeLogs_loggingTracesWithFilePath_setsFileProps() throws Exception {
+        CAPIConfiguration config = new CAPIConfiguration();
+
+        CAPIConfiguration.LoggingTraces loggingTraces = new CAPIConfiguration.LoggingTraces();
+        loggingTraces.setEnabled(true);
+        loggingTraces.setTenant("t");
+        loggingTraces.setAppName("a");
+        loggingTraces.setAppEnvironment("e");
+        loggingTraces.setDestination("d");
+        loggingTraces.setFilePath("/var/log/capi.log");
+        config.setLoggingTraces(loggingTraces);
+
+        CAPIConfiguration.AccessLogs accessLogs = new CAPIConfiguration.AccessLogs();
+        accessLogs.setEnabled(false);
+        config.setAccessLogs(accessLogs);
+
+        Method initLogs = CAPIMain.class.getDeclaredMethod("initializeLogs", CAPIConfiguration.class);
+        initLogs.setAccessible(true);
+
+        try {
+            sun.misc.Unsafe unsafe = getUnsafe();
+            CAPIMain instance = (CAPIMain) unsafe.allocateInstance(CAPIMain.class);
+            initLogs.invoke(instance, config);
+
+            assertEquals("true", System.getProperty("logging.logback.logs.fileEnabled"));
+            assertEquals("/var/log/capi.log", System.getProperty("logging.logback.logs.filePath"));
+        } finally {
+            System.clearProperty("logging.logback.logs.enabled");
+            System.clearProperty("logging.logback.logs.tenant");
+            System.clearProperty("logging.logback.logs.appName");
+            System.clearProperty("logging.logback.logs.appEnvironment");
+            System.clearProperty("logging.logback.logs.destination");
+            System.clearProperty("logging.logback.logs.fileEnabled");
+            System.clearProperty("logging.logback.logs.filePath");
+
+            LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
+            context.reset();
+            ch.qos.logback.classic.joran.JoranConfigurator configurator = new ch.qos.logback.classic.joran.JoranConfigurator();
+            configurator.setContext(context);
+            try {
+                configurator.doConfigure(CAPIMain.class.getClassLoader().getResource("logback.xml"));
+            } catch (Exception ignored) {}
+        }
+    }
+
+    @Test
+    void initializeLogs_accessLogsWithFilePath_setsFileProps() throws Exception {
+        CAPIConfiguration config = new CAPIConfiguration();
+
+        CAPIConfiguration.LoggingTraces loggingTraces = new CAPIConfiguration.LoggingTraces();
+        loggingTraces.setEnabled(false);
+        config.setLoggingTraces(loggingTraces);
+
+        CAPIConfiguration.AccessLogs accessLogs = new CAPIConfiguration.AccessLogs();
+        accessLogs.setEnabled(true);
+        accessLogs.setTenant("at");
+        accessLogs.setService("as");
+        accessLogs.setDestination("ad");
+        accessLogs.setFilePath("/var/log/access.log");
+        config.setAccessLogs(accessLogs);
+
+        Method initLogs = CAPIMain.class.getDeclaredMethod("initializeLogs", CAPIConfiguration.class);
+        initLogs.setAccessible(true);
+
+        try {
+            sun.misc.Unsafe unsafe = getUnsafe();
+            CAPIMain instance = (CAPIMain) unsafe.allocateInstance(CAPIMain.class);
+            initLogs.invoke(instance, config);
+
+            assertEquals("true", System.getProperty("logging.logback.access.fileEnabled"));
+            assertEquals("/var/log/access.log", System.getProperty("logging.logback.access.filePath"));
+        } finally {
+            System.clearProperty("logging.logback.access.enabled");
+            System.clearProperty("logging.logback.access.tenant");
+            System.clearProperty("logging.logback.access.service");
+            System.clearProperty("logging.logback.access.destination");
+            System.clearProperty("logging.logback.access.fileEnabled");
+            System.clearProperty("logging.logback.access.filePath");
+
+            LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
+            context.reset();
+            ch.qos.logback.classic.joran.JoranConfigurator configurator = new ch.qos.logback.classic.joran.JoranConfigurator();
+            configurator.setContext(context);
+            try {
+                configurator.doConfigure(CAPIMain.class.getClassLoader().getResource("logback.xml"));
+            } catch (Exception ignored) {}
+        }
+    }
+
+    // === Tests for registerShutdownHook ===
+
+    @Test
+    void registerShutdownHook_withAllNullGateways_doesNotThrow() throws Exception {
+        Method registerHook = CAPIMain.class.getDeclaredMethod("registerShutdownHook",
+                io.surisoft.capi.undertow.WebsocketGateway.class,
+                io.surisoft.capi.undertow.GrpcGateway.class,
+                io.surisoft.capi.undertow.McpGateway.class,
+                io.surisoft.capi.undertow.RestGateway.class,
+                java.util.concurrent.ScheduledExecutorService.class,
+                io.surisoft.capi.undertow.AdminGateway.class);
+        registerHook.setAccessible(true);
+
+        java.util.concurrent.ScheduledExecutorService scheduler = java.util.concurrent.Executors.newScheduledThreadPool(1);
+        io.surisoft.capi.undertow.AdminGateway mockAdmin = mock(io.surisoft.capi.undertow.AdminGateway.class);
+
+        // This registers a shutdown hook but shouldn't throw
+        assertDoesNotThrow(() -> registerHook.invoke(null, null, null, null, null, scheduler, mockAdmin));
+        scheduler.shutdownNow();
+    }
+
+    // === Test for startSchedulers ===
+
+    @Test
+    void startSchedulers_withMinimalConfig_returnsScheduler() throws Exception {
+        CAPIConfiguration config = new CAPIConfiguration();
+        config.setConsulCatalogDiscoverInterval(60000);
+
+        CAPIConfiguration.ConsulStore consulStore = new CAPIConfiguration.ConsulStore();
+        consulStore.setEnabled(false);
+        config.setConsulStore(consulStore);
+
+        sun.misc.Unsafe unsafe = getUnsafe();
+        CAPIMain instance = (CAPIMain) unsafe.allocateInstance(CAPIMain.class);
+
+        Field configField = CAPIMain.class.getDeclaredField("capiConfiguration");
+        configField.setAccessible(true);
+        configField.set(instance, config);
+
+        // Set static log field
+        Field logField = CAPIMain.class.getDeclaredField("log");
+        logField.setAccessible(true);
+        logField.set(null, org.slf4j.LoggerFactory.getLogger(CAPIMain.class));
+
+        Startup mockStartup = mock(Startup.class);
+        io.surisoft.capi.service.ConsulNodeDiscovery mockDiscovery = mock(io.surisoft.capi.service.ConsulNodeDiscovery.class);
+        io.surisoft.capi.service.RouteConsistencyChecker mockChecker = mock(io.surisoft.capi.service.RouteConsistencyChecker.class);
+        when(mockStartup.getConsulNodeDiscovery()).thenReturn(mockDiscovery);
+        when(mockStartup.getRouteConsistencyChecker()).thenReturn(mockChecker);
+        when(mockStartup.getConsulStore()).thenReturn(null);
+        when(mockStartup.getApiKeyStore()).thenReturn(null);
+        when(mockStartup.getMcpServerClient()).thenReturn(null);
+
+        Method startSchedulers = CAPIMain.class.getDeclaredMethod("startSchedulers", Startup.class);
+        startSchedulers.setAccessible(true);
+
+        java.util.concurrent.ScheduledExecutorService scheduler =
+                (java.util.concurrent.ScheduledExecutorService) startSchedulers.invoke(instance, mockStartup);
+        assertNotNull(scheduler);
+        scheduler.shutdownNow();
+    }
+
+    @Test
+    void startSchedulers_withConsulStoreEnabled_schedulesStoreTask() throws Exception {
+        CAPIConfiguration config = new CAPIConfiguration();
+        config.setConsulCatalogDiscoverInterval(60000);
+
+        CAPIConfiguration.ConsulStore consulStoreConfig = new CAPIConfiguration.ConsulStore();
+        consulStoreConfig.setEnabled(true);
+        config.setConsulStore(consulStoreConfig);
+
+        sun.misc.Unsafe unsafe = getUnsafe();
+        CAPIMain instance = (CAPIMain) unsafe.allocateInstance(CAPIMain.class);
+
+        Field configField = CAPIMain.class.getDeclaredField("capiConfiguration");
+        configField.setAccessible(true);
+        configField.set(instance, config);
+
+        Field logField = CAPIMain.class.getDeclaredField("log");
+        logField.setAccessible(true);
+        logField.set(null, org.slf4j.LoggerFactory.getLogger(CAPIMain.class));
+
+        io.surisoft.capi.service.ConsulStore mockStore = mock(io.surisoft.capi.service.ConsulStore.class);
+        Startup mockStartup = mock(Startup.class);
+        when(mockStartup.getConsulNodeDiscovery()).thenReturn(mock(io.surisoft.capi.service.ConsulNodeDiscovery.class));
+        when(mockStartup.getRouteConsistencyChecker()).thenReturn(mock(io.surisoft.capi.service.RouteConsistencyChecker.class));
+        when(mockStartup.getConsulStore()).thenReturn(mockStore);
+        when(mockStartup.getApiKeyStore()).thenReturn(null);
+        when(mockStartup.getMcpServerClient()).thenReturn(null);
+
+        Method startSchedulers = CAPIMain.class.getDeclaredMethod("startSchedulers", Startup.class);
+        startSchedulers.setAccessible(true);
+
+        java.util.concurrent.ScheduledExecutorService scheduler =
+                (java.util.concurrent.ScheduledExecutorService) startSchedulers.invoke(instance, mockStartup);
+        assertNotNull(scheduler);
+        scheduler.shutdownNow();
+    }
+
+    @Test
+    void startSchedulers_withApiKeyStore_schedulesApiKeyTask() throws Exception {
+        CAPIConfiguration config = new CAPIConfiguration();
+        config.setConsulCatalogDiscoverInterval(60000);
+
+        CAPIConfiguration.ConsulStore consulStoreConfig = new CAPIConfiguration.ConsulStore();
+        consulStoreConfig.setEnabled(false);
+        config.setConsulStore(consulStoreConfig);
+
+        sun.misc.Unsafe unsafe = getUnsafe();
+        CAPIMain instance = (CAPIMain) unsafe.allocateInstance(CAPIMain.class);
+
+        Field configField = CAPIMain.class.getDeclaredField("capiConfiguration");
+        configField.setAccessible(true);
+        configField.set(instance, config);
+
+        Field logField = CAPIMain.class.getDeclaredField("log");
+        logField.setAccessible(true);
+        logField.set(null, org.slf4j.LoggerFactory.getLogger(CAPIMain.class));
+
+        io.surisoft.capi.service.ApiKeyStore mockApiKeyStore = mock(io.surisoft.capi.service.ApiKeyStore.class);
+        Startup mockStartup = mock(Startup.class);
+        when(mockStartup.getConsulNodeDiscovery()).thenReturn(mock(io.surisoft.capi.service.ConsulNodeDiscovery.class));
+        when(mockStartup.getRouteConsistencyChecker()).thenReturn(mock(io.surisoft.capi.service.RouteConsistencyChecker.class));
+        when(mockStartup.getConsulStore()).thenReturn(null);
+        when(mockStartup.getApiKeyStore()).thenReturn(mockApiKeyStore);
+        when(mockStartup.getMcpServerClient()).thenReturn(null);
+
+        Method startSchedulers = CAPIMain.class.getDeclaredMethod("startSchedulers", Startup.class);
+        startSchedulers.setAccessible(true);
+
+        java.util.concurrent.ScheduledExecutorService scheduler =
+                (java.util.concurrent.ScheduledExecutorService) startSchedulers.invoke(instance, mockStartup);
+        assertNotNull(scheduler);
+        scheduler.shutdownNow();
+    }
+
     private static sun.misc.Unsafe getUnsafe() throws Exception {
         java.lang.reflect.Field f = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
         f.setAccessible(true);

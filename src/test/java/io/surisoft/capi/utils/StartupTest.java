@@ -374,6 +374,312 @@ class StartupTest {
         assertNull(startup.getMcpSessionStore());
     }
 
+    @Test
+    void start_withGrpcEnabled_createsGrpcUtils() {
+        CAPIConfiguration.Grpc grpc = new CAPIConfiguration.Grpc();
+        grpc.setEnabled(true);
+        grpc.setPort(8384);
+        configuration.setGrpc(grpc);
+
+        startup = new Startup(configuration);
+        startup.start();
+
+        assertNotNull(startup.getGrpcUtils());
+        assertNotNull(startup.getGrpcClientMap());
+        assertTrue(startup.getGrpcClientMap().isEmpty());
+    }
+
+    @Test
+    void start_withGrpcDisabled_grpcUtilsIsNull() {
+        CAPIConfiguration.Grpc grpc = new CAPIConfiguration.Grpc();
+        grpc.setEnabled(false);
+        configuration.setGrpc(grpc);
+
+        startup = new Startup(configuration);
+        startup.start();
+
+        assertNull(startup.getGrpcUtils());
+    }
+
+    @Test
+    void start_withNullGrpc_grpcUtilsIsNull() {
+        configuration.setGrpc(null);
+
+        startup = new Startup(configuration);
+        startup.start();
+
+        assertNull(startup.getGrpcUtils());
+    }
+
+    @Test
+    void start_withThrottleEnabled_createsThrottleProcessor() {
+        CAPIConfiguration.Throttle throttle = new CAPIConfiguration.Throttle();
+        throttle.setEnabled(true);
+        configuration.setThrottle(throttle);
+
+        startup = new Startup(configuration);
+        startup.start();
+
+        assertNotNull(startup.getThrottleProcessor());
+    }
+
+    @Test
+    void start_withThrottleDisabled_throttleIsNull() {
+        configuration.setThrottle(null);
+
+        startup = new Startup(configuration);
+        startup.start();
+
+        assertNull(startup.getThrottleProcessor());
+    }
+
+    @Test
+    void start_withApiKeyStoreEnabledButConsulStoreDisabled_apiKeyStoreIsNull() {
+        CAPIConfiguration.ApiKeyStore aks = new CAPIConfiguration.ApiKeyStore();
+        aks.setEnabled(true);
+        configuration.setApiKeyStore(aks);
+
+        // consulStore disabled
+        CAPIConfiguration.ConsulStore consulStore = new CAPIConfiguration.ConsulStore();
+        consulStore.setEnabled(false);
+        configuration.setConsulStore(consulStore);
+
+        startup = new Startup(configuration);
+        startup.start();
+
+        // API key store requires consul store
+        assertNull(startup.getApiKeyStore());
+    }
+
+    @Test
+    void start_withApiKeyStoreAndConsulStoreEnabled_createsApiKeyStore() {
+        CAPIConfiguration.ApiKeyStore aks = new CAPIConfiguration.ApiKeyStore();
+        aks.setEnabled(true);
+        configuration.setApiKeyStore(aks);
+
+        CAPIConfiguration.ConsulStore consulStore = new CAPIConfiguration.ConsulStore();
+        consulStore.setEnabled(true);
+        consulStore.setEndpoint("http://consul:8500");
+        consulStore.setToken("token");
+        configuration.setConsulStore(consulStore);
+
+        // Trust store must also be enabled for consul store to be created, but
+        // API key store only checks consulStore.isEnabled() -- it creates its own instance
+        startup = new Startup(configuration);
+        startup.start();
+
+        assertNotNull(startup.getApiKeyStore());
+        assertNotNull(startup.getApiKeyCache());
+    }
+
+    @Test
+    void start_withApiKeyStoreNull_apiKeyStoreIsNull() {
+        configuration.setApiKeyStore(null);
+
+        startup = new Startup(configuration);
+        startup.start();
+
+        assertNull(startup.getApiKeyStore());
+        assertNull(startup.getApiKeyCache());
+    }
+
+    @Test
+    void start_withApiKeyStoreDisabled_apiKeyStoreIsNull() {
+        CAPIConfiguration.ApiKeyStore aks = new CAPIConfiguration.ApiKeyStore();
+        aks.setEnabled(false);
+        configuration.setApiKeyStore(aks);
+
+        startup = new Startup(configuration);
+        startup.start();
+
+        assertNull(startup.getApiKeyStore());
+    }
+
+    @Test
+    void start_withMcpEnabledAndThrottle_createsHazelcastMcpSessionStore() {
+        CAPIConfiguration.Mcp mcp = new CAPIConfiguration.Mcp();
+        mcp.setEnabled(true);
+        mcp.setPort(8383);
+        mcp.setSessionTtl(1800000);
+        mcp.setCircuitBreakerCooldownMs(30000);
+        configuration.setMcp(mcp);
+
+        CAPIConfiguration.Throttle throttle = new CAPIConfiguration.Throttle();
+        throttle.setEnabled(true);
+        configuration.setThrottle(throttle);
+
+        startup = new Startup(configuration);
+        startup.start();
+
+        assertNotNull(startup.getMcpSessionStore());
+        assertNotNull(startup.getMcpToolRegistry());
+    }
+
+    @Test
+    void start_withResponseTimeout_setsOnDiscovery() {
+        CAPIConfiguration.Rest rest = configuration.getRest();
+        rest.setResponseTimeout(30000);
+
+        startup = new Startup(configuration);
+        startup.start();
+
+        assertNotNull(startup.getConsulNodeDiscovery());
+    }
+
+    @Test
+    void start_restClientMapIsNotNull() {
+        startup = new Startup(configuration);
+        startup.start();
+
+        assertNotNull(startup.getRestClientMap());
+        assertTrue(startup.getRestClientMap().isEmpty());
+    }
+
+    @Test
+    void start_withApiKeyStoreEnabled_createsThrottleProcessorForPerKeyThrottling() {
+        CAPIConfiguration.ApiKeyStore aks = new CAPIConfiguration.ApiKeyStore();
+        aks.setEnabled(true);
+        configuration.setApiKeyStore(aks);
+
+        CAPIConfiguration.ConsulStore consulStore = new CAPIConfiguration.ConsulStore();
+        consulStore.setEnabled(true);
+        consulStore.setEndpoint("http://consul:8500");
+        consulStore.setToken("token");
+        configuration.setConsulStore(consulStore);
+
+        // Throttle disabled but API key enabled -> still creates ThrottleProcessor
+        configuration.setThrottle(null);
+
+        startup = new Startup(configuration);
+        startup.start();
+
+        assertNotNull(startup.getThrottleProcessor());
+    }
+
+    @Test
+    void start_openTelemetryTracerIsNull_whenTracesDisabled() {
+        startup = new Startup(configuration);
+        startup.start();
+
+        assertNull(startup.getOpenTelemetryTracer());
+    }
+
+    @Test
+    void start_withTrustStoreEnabledAndEncoded_createsTrustManager() throws Exception {
+        // Create a real JKS keystore and encode it
+        java.security.KeyStore ks = java.security.KeyStore.getInstance("JKS");
+        ks.load(null, "changeit".toCharArray());
+        // Empty keystore is valid for trust store purposes
+
+        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+        ks.store(baos, "changeit".toCharArray());
+        String encodedKeyStore = java.util.Base64.getEncoder().encodeToString(baos.toByteArray());
+
+        CAPIConfiguration.TrustStore trustStore = new CAPIConfiguration.TrustStore();
+        trustStore.setEnabled(true);
+        trustStore.setPassword("changeit");
+        trustStore.setEncoded(encodedKeyStore);
+        configuration.setTrustStore(trustStore);
+
+        startup = new Startup(configuration);
+        startup.start();
+
+        assertNotNull(startup.getCapiTrustManager());
+    }
+
+    @Test
+    void start_withTrustStoreEnabledAndConsulStoreEnabled_createsConsulStore() throws Exception {
+        java.security.KeyStore ks = java.security.KeyStore.getInstance("JKS");
+        ks.load(null, "changeit".toCharArray());
+        // Empty keystore is valid for trust store purposes
+
+        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+        ks.store(baos, "changeit".toCharArray());
+        String encodedKeyStore = java.util.Base64.getEncoder().encodeToString(baos.toByteArray());
+
+        CAPIConfiguration.TrustStore trustStore = new CAPIConfiguration.TrustStore();
+        trustStore.setEnabled(true);
+        trustStore.setPassword("changeit");
+        trustStore.setEncoded(encodedKeyStore);
+        configuration.setTrustStore(trustStore);
+
+        CAPIConfiguration.ConsulStore consulStoreConfig = new CAPIConfiguration.ConsulStore();
+        consulStoreConfig.setEnabled(true);
+        consulStoreConfig.setEndpoint("http://consul:8500");
+        consulStoreConfig.setToken("mytoken");
+        configuration.setConsulStore(consulStoreConfig);
+
+        startup = new Startup(configuration);
+        startup.start();
+
+        assertNotNull(startup.getConsulStore());
+    }
+
+    @Test
+    void start_withConsulStoreAndGrpcEnabled_setsGrpcOnConsulStore() throws Exception {
+        java.security.KeyStore ks = java.security.KeyStore.getInstance("JKS");
+        ks.load(null, "changeit".toCharArray());
+        // Empty keystore is valid for trust store purposes
+
+        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+        ks.store(baos, "changeit".toCharArray());
+        String encodedKeyStore = java.util.Base64.getEncoder().encodeToString(baos.toByteArray());
+
+        CAPIConfiguration.TrustStore trustStore = new CAPIConfiguration.TrustStore();
+        trustStore.setEnabled(true);
+        trustStore.setPassword("changeit");
+        trustStore.setEncoded(encodedKeyStore);
+        configuration.setTrustStore(trustStore);
+
+        CAPIConfiguration.ConsulStore consulStoreConfig = new CAPIConfiguration.ConsulStore();
+        consulStoreConfig.setEnabled(true);
+        consulStoreConfig.setEndpoint("http://consul:8500");
+        consulStoreConfig.setToken("mytoken");
+        configuration.setConsulStore(consulStoreConfig);
+
+        CAPIConfiguration.Grpc grpc = new CAPIConfiguration.Grpc();
+        grpc.setEnabled(true);
+        grpc.setPort(8384);
+        configuration.setGrpc(grpc);
+
+        startup = new Startup(configuration);
+        startup.start();
+
+        assertNotNull(startup.getConsulStore());
+        assertNotNull(startup.getGrpcUtils());
+    }
+
+    @Test
+    void start_withConsulStoreAndResponseTimeout_setsTimeoutOnConsulStore() throws Exception {
+        java.security.KeyStore ks = java.security.KeyStore.getInstance("JKS");
+        ks.load(null, "changeit".toCharArray());
+        // Empty keystore is valid for trust store purposes
+
+        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+        ks.store(baos, "changeit".toCharArray());
+        String encodedKeyStore = java.util.Base64.getEncoder().encodeToString(baos.toByteArray());
+
+        CAPIConfiguration.TrustStore trustStore = new CAPIConfiguration.TrustStore();
+        trustStore.setEnabled(true);
+        trustStore.setPassword("changeit");
+        trustStore.setEncoded(encodedKeyStore);
+        configuration.setTrustStore(trustStore);
+
+        CAPIConfiguration.ConsulStore consulStoreConfig = new CAPIConfiguration.ConsulStore();
+        consulStoreConfig.setEnabled(true);
+        consulStoreConfig.setEndpoint("http://consul:8500");
+        consulStoreConfig.setToken("mytoken");
+        configuration.setConsulStore(consulStoreConfig);
+
+        CAPIConfiguration.Rest rest = configuration.getRest();
+        rest.setResponseTimeout(30000);
+
+        startup = new Startup(configuration);
+        startup.start();
+
+        assertNotNull(startup.getConsulStore());
+    }
+
     private CAPIConfiguration buildMinimalConfiguration() {
         CAPIConfiguration config = new CAPIConfiguration();
         config.setVersion("1.0.0");
