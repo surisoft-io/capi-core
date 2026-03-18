@@ -98,41 +98,6 @@ class ConsulNodeDiscoveryTest {
     }
 
     @Test
-    void getModifyIndex_returnsIndexForMatchingGroup() {
-        ServiceMeta meta = new ServiceMeta();
-        meta.setGroup("v1");
-
-        ConsulObject co = new ConsulObject();
-        co.setServiceMeta(meta);
-        co.setModifyIndex(42);
-
-        int result = consulNodeDiscovery.getModifyIndex("v1", List.of(co));
-        assertEquals(42, result);
-    }
-
-    @Test
-    void getModifyIndex_returnsMinusOneWhenNoMatch() {
-        ServiceMeta meta = new ServiceMeta();
-        meta.setGroup("v1");
-
-        ConsulObject co = new ConsulObject();
-        co.setServiceMeta(meta);
-        co.setModifyIndex(42);
-
-        int result = consulNodeDiscovery.getModifyIndex("v2", List.of(co));
-        assertEquals(-1, result);
-    }
-
-    @Test
-    void getModifyIndex_returnsMinusOneForNullGroup() {
-        ConsulObject co = new ConsulObject();
-        co.setServiceMeta(new ServiceMeta());
-
-        int result = consulNodeDiscovery.getModifyIndex("v1", List.of(co));
-        assertEquals(-1, result);
-    }
-
-    @Test
     void isConnectedToConsul_returnsBooleanValue() {
         // Just verify the static method is accessible and returns a value
         // Initially static field might be false or true depending on previous test runs
@@ -238,32 +203,8 @@ class ConsulNodeDiscoveryTest {
     }
 
     @Test
-    void getModifyIndex_multipleConsulObjects_returnsCorrectIndex() {
-        ServiceMeta meta1 = new ServiceMeta();
-        meta1.setGroup("v1");
-        ServiceMeta meta2 = new ServiceMeta();
-        meta2.setGroup("v2");
-
-        ConsulObject co1 = new ConsulObject();
-        co1.setServiceMeta(meta1);
-        co1.setModifyIndex(10);
-
-        ConsulObject co2 = new ConsulObject();
-        co2.setServiceMeta(meta2);
-        co2.setModifyIndex(20);
-
-        assertEquals(10, consulNodeDiscovery.getModifyIndex("v1", List.of(co1, co2)));
-        assertEquals(20, consulNodeDiscovery.getModifyIndex("v2", List.of(co1, co2)));
-    }
-
-    @Test
     void getServiceMeta_emptyList_returnsNull() {
         assertNull(consulNodeDiscovery.getServiceMeta("v1", List.of()));
-    }
-
-    @Test
-    void getModifyIndex_emptyList_returnsMinusOne() {
-        assertEquals(-1, consulNodeDiscovery.getModifyIndex("v1", List.of()));
     }
 
     @SuppressWarnings("unchecked")

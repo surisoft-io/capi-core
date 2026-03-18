@@ -116,12 +116,6 @@ public class CAPIMain {
         return adminGateway;
     }
 
-    /*
-    // PrimaryRoute replaced by RestGateway — async Undertow proxy
-    private String buildPrimaryEndpoint(CamelContext camelContext) { ... }
-    private void addPrimaryRoute(...) { ... }
-    */
-
     private static void registerShutdownHook(@Nullable WebsocketGateway websocketGateway, @Nullable GrpcGateway grpcGateway, @Nullable McpGateway mcpGateway, @Nullable RestGateway restGateway, ScheduledExecutorService scheduler, AdminGateway adminGateway) {
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             log.info("Shutting down CAPI Gateway...");

@@ -325,8 +325,6 @@ public class ConsulNodeDiscovery {
         incomingService.setRoundRobinEnabled(incomingService.getMappingList().size() != 1);
         incomingService.setFailOverEnabled(incomingService.getMappingList().size() != 1);
 
-        incomingService.setModifyIndex(getModifyIndex(key, consulResponse));
-
         serviceUtils.validateServiceType(incomingService);
 
         updateServiceWithSpecificInstance(incomingService);
@@ -410,15 +408,6 @@ public class ConsulNodeDiscovery {
                 }
             }
         }
-    }
-
-    public int getModifyIndex(String key, List<ConsulObject> consulObject) {
-        for(ConsulObject entry : consulObject) {
-            if(Objects.equals(getServiceNodeGroup(entry), key)) {
-                return entry.getModifyIndex();
-            }
-        }
-        return -1;
     }
 
     public ServiceMeta getServiceMeta(String key, List<ConsulObject> consulObject) {

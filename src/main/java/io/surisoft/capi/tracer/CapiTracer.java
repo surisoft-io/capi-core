@@ -22,9 +22,7 @@ import java.util.Date;
 import java.util.Map;
 
 /**
- * OpenTelemetry tracing for RestGateway.
- * Mirrors CapiTracer's decorateWithCapi() but works with HttpServerExchange instead of Camel Exchange.
- * Will replace CapiTracer once Camel is fully removed.
+ * OpenTelemetry tracing for RestGateway, WebsocketGateway, McpGateway, GrpcGateway.
  */
 public class CapiTracer {
 
