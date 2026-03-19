@@ -20,7 +20,8 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
  * OPA policy evaluation using Wasm bundles (Chicory-based, in-process).
@@ -87,14 +88,9 @@ public class OpaWasmService {
      */
     public OpaResult evaluate(String opaRego, String value, boolean isAccessToken) {
         ConcurrentLinkedQueue<com.styra.opa.wasm.OpaPolicy> pool = policyPools.get(opaRego);
-        if (pool == null || pool.isEmpty()) {
-            log.trace("OPA Wasm not available for {}, falling back to HTTP", opaRego);
-            return fallbackOpaService != null ? fallbackOpaService.callOpa(opaRego, value, isAccessToken) : null;
-        }
-
-        com.styra.opa.wasm.OpaPolicy policy = pool.poll();
+        com.styra.opa.wasm.OpaPolicy policy = pool != null ? pool.poll() : null;
         if (policy == null) {
-            log.trace("OPA Wasm pool exhausted for {}, falling back to HTTP", opaRego);
+            log.trace("OPA Wasm not available for {}, falling back to HTTP", opaRego);
             return fallbackOpaService != null ? fallbackOpaService.callOpa(opaRego, value, isAccessToken) : null;
         }
 
@@ -103,23 +99,12 @@ public class OpaWasmService {
             log.trace("OPA Wasm evaluate for {}: input={}", opaRego, input);
             String resultJson = policy.evaluate(input);
             log.trace("OPA Wasm result for {}: {}", opaRego, resultJson);
+            pool.offer(policy);
             return parseResult(resultJson);
         } catch (Exception e) {
-            log.error("OPA Wasm evaluation failed for {}: {}, falling back to HTTP", opaRego, e.getMessage());
+            log.error("OPA Wasm evaluation failed for {}: {}, discarding policy instance", opaRego, e.getMessage());
             return fallbackOpaService != null ? fallbackOpaService.callOpa(opaRego, value, isAccessToken) : null;
-        } finally {
-            pool.offer(policy);
         }
-    }
-
-    public CompletableFuture<OpaResult> evaluateAsync(String opaRego, String value, boolean isAccessToken) {
-        ConcurrentLinkedQueue<com.styra.opa.wasm.OpaPolicy> pool = policyPools.get(opaRego);
-        if (pool == null || pool.isEmpty()) {
-            return fallbackOpaService != null
-                    ? fallbackOpaService.callOpaAsync(opaRego, value, isAccessToken)
-                    : CompletableFuture.completedFuture(null);
-        }
-        return CompletableFuture.supplyAsync(() -> evaluate(opaRego, value, isAccessToken));
     }
 
     public boolean isReady(String opaRego) {
