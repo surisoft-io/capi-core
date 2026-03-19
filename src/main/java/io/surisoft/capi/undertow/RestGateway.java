@@ -6,11 +6,13 @@ import io.surisoft.capi.oidc.WebsocketAuthorization;
 import io.surisoft.capi.processor.ThrottleProcessor;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
+import io.surisoft.capi.schema.OpaResult;
 import io.surisoft.capi.schema.ApiKeyEntry;
 import io.surisoft.capi.schema.ApiKeyStoreEntry;
 import io.surisoft.capi.schema.RestClient;
 import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.service.OpaService;
+import io.surisoft.capi.service.OpaWasmService;
 import io.surisoft.capi.tracer.CapiTracer;
 import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.HttpUtils;
@@ -53,6 +55,8 @@ public class RestGateway {
     private WebsocketAuthorization websocketAuthorization;
     @Nullable
     private OpaService opaService;
+    @Nullable
+    private OpaWasmService opaWasmService;
     @Nullable
     private ThrottleProcessor throttleProcessor;
     @Nullable
@@ -122,6 +126,10 @@ public class RestGateway {
 
     public void setMeterRegistry(MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
+    }
+
+    public void setOpaWasmService(OpaWasmService opaWasmService) {
+        this.opaWasmService = opaWasmService;
     }
 
     public void runProxy() {
@@ -257,7 +265,7 @@ public class RestGateway {
                 }
             }
 
-            // 3. OPA policy check (async — no thread blocked)
+            // 3. OPA policy check
             if (restClient.getOpaRego() != null && opaService != null) {
                 try {
                     String accessToken = httpUtils.processAuthorizationAccessToken(exchange);
@@ -265,41 +273,59 @@ public class RestGateway {
                         httpErrorHandler.sendError(exchange, 403, "No authorization header provided");
                         return;
                     }
-                    final RestClient fc = restClient;
-                    final String fcId = restClientId;
-                    exchange.dispatch(SameThreadExecutor.INSTANCE, () -> {
-                        opaService.callOpaAsync(fc.getOpaRego(), accessToken, true)
-                                .thenAccept(opaResult -> {
-                                    exchange.dispatch(SameThreadExecutor.INSTANCE, () -> {
-                                        try {
-                                            if (opaResult == null || !opaResult.isAllowed()) {
-                                                httpErrorHandler.sendError(exchange, 403, "Access denied by policy");
-                                                return;
-                                            }
-                                            // Throttle
-                                            if (fc.isThrottle() && throttleProcessor != null) {
-                                                Service svc = serviceCache.get(httpUtils.contextToRole(fcId));
-                                                if (svc != null && !throttleProcessor.canContinue(svc, null, false, -1, -1)) {
-                                                    httpErrorHandler.sendError(exchange, 429, "Too Many requests");
+
+                    // Prefer Wasm (in-process, microseconds) over HTTP (network round-trip)
+                    if (opaWasmService != null && opaWasmService.isReady(restClient.getOpaRego())) {
+                        // Verify JWT signature before trusting decoded claims
+                        try {
+                            httpUtils.authorizeRequest(accessToken);
+                        } catch (AuthorizationException e) {
+                            httpErrorHandler.sendError(exchange, 403, "Invalid token signature");
+                            return;
+                        }
+                        OpaResult opaResult = opaWasmService.evaluate(restClient.getOpaRego(), accessToken, true);
+                        if (opaResult == null || !opaResult.isAllowed()) {
+                            httpErrorHandler.sendError(exchange, 403, "Access denied by policy");
+                            return;
+                        }
+                        // Wasm passed — fall through to throttle check and proxy below
+                    } else {
+                        // Fallback: async HTTP call to OPA server
+                        final RestClient fc = restClient;
+                        final String fcId = restClientId;
+                        exchange.dispatch(SameThreadExecutor.INSTANCE, () -> {
+                            opaService.callOpaAsync(fc.getOpaRego(), accessToken, true)
+                                    .thenAccept(opaResult -> {
+                                        exchange.dispatch(SameThreadExecutor.INSTANCE, () -> {
+                                            try {
+                                                if (opaResult == null || !opaResult.isAllowed()) {
+                                                    httpErrorHandler.sendError(exchange, 403, "Access denied by policy");
                                                     return;
                                                 }
+                                                if (fc.isThrottle() && throttleProcessor != null) {
+                                                    Service svc = serviceCache.get(httpUtils.contextToRole(fcId));
+                                                    if (svc != null && !throttleProcessor.canContinue(svc, null, false, -1, -1)) {
+                                                        httpErrorHandler.sendError(exchange, 429, "Too Many requests");
+                                                        return;
+                                                    }
+                                                }
+                                                httpUtils.propagateAuthorization(exchange);
+                                                if (fc.isKeepGroup()) {
+                                                    exchange.getRequestHeaders().put(HttpString.tryFromString(Constants.CAPI_GROUP_HEADER), fc.getServiceId());
+                                                }
+                                                String fwdPath = normalizePathForForwarding(fc, exchange.getRequestPath());
+                                                exchange.setRequestURI(fwdPath);
+                                                exchange.setRelativePath(fwdPath);
+                                                proxyWithTracing(exchange, fc, exchange.getRequestPath());
+                                            } catch (Exception e) {
+                                                log.error("OPA proxy error: {}", e.getMessage(), e);
+                                                if (!exchange.isResponseStarted()) httpErrorHandler.sendError(exchange, 502, "Gateway error");
                                             }
-                                            httpUtils.propagateAuthorization(exchange);
-                                            if (fc.isKeepGroup()) {
-                                                exchange.getRequestHeaders().put(HttpString.tryFromString(Constants.CAPI_GROUP_HEADER), fc.getServiceId());
-                                            }
-                                            String fwdPath = normalizePathForForwarding(fc, exchange.getRequestPath());
-                                            exchange.setRequestURI(fwdPath);
-                                            exchange.setRelativePath(fwdPath);
-                                            proxyWithTracing(exchange, fc, exchange.getRequestPath());
-                                        } catch (Exception e) {
-                                            log.error("OPA proxy error: {}", e.getMessage(), e);
-                                            if (!exchange.isResponseStarted()) httpErrorHandler.sendError(exchange, 502, "Gateway error");
-                                        }
+                                        });
                                     });
-                                });
-                    });
-                    return;
+                        });
+                        return;
+                    }
                 } catch (AuthorizationException e) {
                     httpErrorHandler.sendError(exchange, 403, e.getMessage());
                     return;

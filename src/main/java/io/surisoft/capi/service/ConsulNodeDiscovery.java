@@ -43,6 +43,8 @@ public class ConsulNodeDiscovery {
     private String serviceMetaExtrasPrefix;
     private HttpUtils httpUtils;
     private OpaService opaService;
+    @Nullable
+    private OpaWasmService opaWasmService;
     private String capiRunningMode;
 
     private WebsocketUtils websocketUtils;
@@ -452,6 +454,9 @@ public class ConsulNodeDiscovery {
                         restClient.setSecured(incomingService.getServiceMeta().isSecured());
                         restClient.setSubscriptionGroup(incomingService.getServiceMeta().getSubscriptionGroup());
                         restClient.setOpaRego(incomingService.getServiceMeta().getOpaRego());
+                        if (incomingService.getServiceMeta().getOpaRego() != null && opaWasmService != null) {
+                            opaWasmService.registerPolicy(incomingService.getServiceMeta().getOpaRego());
+                        }
                         restClient.setApiKeyEnabled(incomingService.getServiceMeta().isApiKeyEnabled());
                         restClient.setThrottle(incomingService.getServiceMeta().isThrottle());
                         restClient.setThrottleGlobal(incomingService.getServiceMeta().isThrottleGlobal());
@@ -477,6 +482,10 @@ public class ConsulNodeDiscovery {
 
     public void setOpaService(OpaService opaService) {
         this.opaService = opaService;
+    }
+
+    public void setOpaWasmService(OpaWasmService opaWasmService) {
+        this.opaWasmService = opaWasmService;
     }
 
     public void setHttpUtils(HttpUtils httpUtils) {
