@@ -176,6 +176,19 @@ public class CAPIMain {
             }
         }, 60, 60, TimeUnit.SECONDS);
 
+        // OPA Wasm bundle polling (initial delay lets Consul discovery register policies first)
+        if (startup.getOpaWasmService() != null) {
+            int pollSeconds = capiConfiguration.getOpa().getWasmBundlePollIntervalSeconds();
+            long initialDelaySeconds = Math.max(5, (interval / 1000) + 2);
+            scheduler.scheduleAtFixedRate(() -> {
+                try {
+                    startup.getOpaWasmService().pollBundles();
+                } catch (Exception e) {
+                    log.error("OPA Wasm bundle poll error: {}", e.getMessage());
+                }
+            }, initialDelaySeconds, pollSeconds, TimeUnit.SECONDS);
+        }
+
         log.info("Schedulers started (consul interval: {}ms)", interval);
         return scheduler;
     }
@@ -202,6 +215,7 @@ public class CAPIMain {
                 }
             }
             if (startup.getOpaService() != null) gateway.setOpaService(startup.getOpaService());
+            if (startup.getOpaWasmService() != null) gateway.setOpaWasmService(startup.getOpaWasmService());
             if (startup.getThrottleProcessor() != null) gateway.setThrottleProcessor(startup.getThrottleProcessor());
             if (startup.getApiKeyCache() != null) gateway.setApiKeyCache(startup.getApiKeyCache());
             if (startup.getOpenTelemetryTracer() != null) {

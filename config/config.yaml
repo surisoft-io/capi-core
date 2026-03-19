@@ -50,6 +50,10 @@ capi:
   opa:
     enabled: false
     endpoint: http://localhost:8181
+    wasmEnabled: false
+    wasmBundleUrl:
+    wasmBundlePollIntervalSeconds: 60
+    wasmPoolSize: 10
   traces:
     enabled: false
     serviceName: capi

@@ -335,5 +335,28 @@ services:
       consul:
         condition: service_healthy
 
+  # --- OPA Wasm Bundle Server ---
+
+  opa-bundle-builder:
+    image: alpine:latest
+    container_name: demo-e2e-opa-bundle-builder
+    volumes:
+      - ./opa-bundles/policies:/policies:ro
+      - ./opa-bundles/build-bundles.sh:/build-bundles.sh:ro
+      - opa-bundle-data:/output
+    entrypoint: ["sh", "/build-bundles.sh"]
+    restart: "no"
+
+  opa-bundle-server:
+    image: nginx:alpine
+    container_name: demo-e2e-opa-bundle-server
+    volumes:
+      - ./opa-bundles/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - opa-bundle-data:/usr/share/nginx/html/bundles:ro
+    depends_on:
+      opa-bundle-builder:
+        condition: service_completed_successfully
+
 volumes:
   upload-data:
+  opa-bundle-data:
