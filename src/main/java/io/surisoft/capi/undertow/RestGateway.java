@@ -322,6 +322,15 @@ public class RestGateway {
                                                 if (!exchange.isResponseStarted()) httpErrorHandler.sendError(exchange, 502, "Gateway error");
                                             }
                                         });
+                                    })
+                                    .exceptionally(ex -> {
+                                        exchange.dispatch(SameThreadExecutor.INSTANCE, () -> {
+                                            log.error("OPA async call failed: {}", ex.getMessage(), ex);
+                                            if (!exchange.isResponseStarted()) {
+                                                httpErrorHandler.sendError(exchange, 502, "Policy evaluation failed");
+                                            }
+                                        });
+                                        return null;
                                     });
                         });
                         return;
