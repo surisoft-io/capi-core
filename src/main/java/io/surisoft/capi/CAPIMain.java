@@ -112,6 +112,9 @@ public class CAPIMain {
             adminGateway.setMcpSessionStore(startup.getMcpSessionStore());
         }
         adminGateway.setRestClients(startup.getRestClientMap());
+        if(startup.getConsulStore() != null) {
+            adminGateway.setConsulStore(startup.getConsulStore());
+        }
         adminGateway.start();
         return adminGateway;
     }
@@ -199,6 +202,7 @@ public class CAPIMain {
             String cookieName = capiConfiguration.getOauth2() != null && capiConfiguration.getOauth2().getCookieName() != null ? capiConfiguration.getOauth2().getCookieName() : "";
             RestGateway gateway = new RestGateway(
                     capiConfiguration.getRest().getPort(),
+                    capiConfiguration.getRest().getIoThreads(),
                     capiConfiguration.getRest().getContextPath(),
                     startup.getRestClientMap(),
                     startup.getHttpUtils(),
@@ -207,13 +211,6 @@ public class CAPIMain {
                     allowedHeaders,
                     cookieName
             );
-            if (startup.getWebsocketUtils() != null) {
-                try {
-                    gateway.setWebsocketAuthorization(startup.getWebsocketUtils().createWebsocketAuthorization());
-                } catch (Exception e) {
-                    log.warn("No OIDC configured for RestGateway: {}", e.getMessage());
-                }
-            }
             if (startup.getOpaService() != null) gateway.setOpaService(startup.getOpaService());
             if (startup.getOpaWasmService() != null) gateway.setOpaWasmService(startup.getOpaWasmService());
             if (startup.getThrottleProcessor() != null) gateway.setThrottleProcessor(startup.getThrottleProcessor());
@@ -246,7 +243,7 @@ public class CAPIMain {
                 && !capiConfiguration.getWebsocket().getContextPath().isEmpty()) {
             List<String> allowedHeaders = capiConfiguration.getAllowedHeaders() != null ? capiConfiguration.getAllowedHeaders() : new ArrayList<>();
             String cookieName = capiConfiguration.getOauth2() != null && capiConfiguration.getOauth2().getCookieName() != null ? capiConfiguration.getOauth2().getCookieName() : "";
-            websocketGateway = new WebsocketGateway(capiConfiguration.getWebsocket().getPort(), startup.getWebSocketClientMap(), startup.getWebsocketUtils(), startup.getUndertowSslContext(), allowedHeaders, cookieName);
+            websocketGateway = new WebsocketGateway(capiConfiguration.getWebsocket().getPort(), capiConfiguration.getWebsocket().getIoThreads(), startup.getWebSocketClientMap(), startup.getWebsocketUtils(), startup.getUndertowSslContext(), allowedHeaders, cookieName);
             websocketGateway.runProxy();
         }
         return websocketGateway;

@@ -22,6 +22,7 @@ public class WebsocketGateway {
     private static final Logger log = LoggerFactory.getLogger(WebsocketGateway.class);
     private static final Logger ACCESS_LOG = LoggerFactory.getLogger("capi.access");
     private final int port;
+    private final int ioThreads;
     private final Map<String, WebsocketClient> webSocketClients;
     private WebsocketAuthorization websocketAuthorization;
     private final WebsocketUtils websocketUtils;
@@ -33,6 +34,7 @@ public class WebsocketGateway {
     private Undertow server;
 
     public WebsocketGateway(int port,
+                            int ioThreads,
                             Map<String, WebsocketClient> webSocketClients,
                             WebsocketUtils websocketUtils,
                             SSLContext sslContext,
@@ -40,6 +42,7 @@ public class WebsocketGateway {
                             List<String> accessControlAllowHeaders,
                             String oauth2CookieName) {
         this.port = port;
+        this.ioThreads = ioThreads;
         this.webSocketClients = webSocketClients;
         this.websocketUtils = websocketUtils;
         this.sslContext = sslContext;
@@ -59,7 +62,8 @@ public class WebsocketGateway {
             log.warn(e.getMessage());
         }
 
-        Undertow.Builder builder = Undertow.builder();
+        Undertow.Builder builder = Undertow.builder()
+                .setIoThreads(ioThreads);
 
         if(sslContext != null) {
             builder.addHttpsListener(port, Constants.UNDERTOW_LISTENING_ADDRESS, sslContext);

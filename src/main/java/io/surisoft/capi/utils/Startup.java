@@ -168,6 +168,7 @@ public class Startup {
             consulStore = new ConsulStore(consulStoreCache, routeUtils, configuration.getConsulStore().getEndpoint(), configuration.getConsulStore().getToken(), configuration.getTrustStore().getPassword(), capiSslContextHolder, consulHttpClient);
             consulStore.setWebsocketUtils(websocketUtils);
             consulStore.setHttpUtils(httpUtils);
+            consulStore.setCapiTrustManager(capiTrustManager);
             consulStore.setServiceCache(serviceCache);
             consulStore.setRestClientMap(restClientMap);
             consulStore.setWebsocketClientMap(webSocketClientMap);

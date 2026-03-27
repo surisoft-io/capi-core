@@ -11,6 +11,7 @@ import io.surisoft.capi.schema.RestClient;
 import io.surisoft.capi.schema.WebsocketClient;
 import io.surisoft.capi.service.CapiTrustManager;
 import io.surisoft.capi.service.ConsulNodeDiscovery;
+import io.surisoft.capi.service.ConsulStore;
 import io.surisoft.capi.service.McpSessionStore;
 import io.surisoft.capi.service.McpToolRegistry;
 import io.surisoft.capi.utils.Constants;
@@ -42,6 +43,7 @@ public class AdminGateway implements AutoCloseable {
     private Map<String, RestClient> restClients;
     private McpToolRegistry mcpToolRegistry;
     private McpSessionStore mcpSessionStore;
+    private ConsulStore consulStore;
 
     public AdminGateway(int port, PrometheusMeterRegistry prometheusRegistry, CAPIConfiguration capiConfiguration, Cache<String, Service> serviceCache, SSLContext sslContext, CapiTrustManager capiTrustManager) {
         this.port = port;
@@ -226,19 +228,72 @@ public class AdminGateway implements AutoCloseable {
     }
 
     private void handleTruststore(HttpServerExchange exchange) {
+        String method = exchange.getRequestMethod().toString();
+        if ("PUT".equals(method)) {
+            handleTruststorePut(exchange);
+        } else {
+            handleTruststoreGet(exchange);
+        }
+    }
+
+    private void handleTruststoreGet(HttpServerExchange exchange) {
         exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
         try {
             if(capiConfiguration.getTrustStore().isEnabled() && capiTrustManager != null) {
                 Truststore truststore = new Truststore(true, capiTrustManager);
                 exchange.setStatusCode(StatusCodes.OK);
                 exchange.getResponseSender().send(objectMapper.writeValueAsString(truststore.getTruststore()));
-                return;
             } else {
+                exchange.setStatusCode(StatusCodes.NOT_FOUND);
+                exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.NOT_FOUND, "Trust Store not enabled")));
+            }
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void handleTruststorePut(HttpServerExchange exchange) {
+        exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+        try {
+            if (!capiConfiguration.getTrustStore().isEnabled()) {
                 exchange.setStatusCode(StatusCodes.NOT_FOUND);
                 exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.NOT_FOUND, "Trust Store not enabled")));
                 return;
             }
-        }catch (JsonProcessingException e) {
+            if (consulStore == null) {
+                exchange.setStatusCode(StatusCodes.NOT_FOUND);
+                exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.NOT_FOUND, "Consul KV Store not configured")));
+                return;
+            }
+            // Undertow requires dispatching to a worker thread to read the request body
+            exchange.dispatch(() -> {
+                try {
+                    exchange.startBlocking();
+                    String pem = new String(exchange.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                    if (pem.isBlank() || !pem.contains("BEGIN CERTIFICATE")) {
+                        exchange.setStatusCode(StatusCodes.BAD_REQUEST);
+                        exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.BAD_REQUEST, "Request body must be a PEM-encoded certificate")));
+                        return;
+                    }
+                    String error = consulStore.addCertificate(pem);
+                    if (error != null) {
+                        exchange.setStatusCode(StatusCodes.CONFLICT);
+                        exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.CONFLICT, error)));
+                    } else {
+                        exchange.setStatusCode(StatusCodes.OK);
+                        exchange.getResponseSender().send(objectMapper.writeValueAsString(Map.of("message", "Certificate added to trust store")));
+                    }
+                } catch (Exception e) {
+                    log.error("Error processing trust store PUT: {}", e.getMessage(), e);
+                    try {
+                        exchange.setStatusCode(StatusCodes.INTERNAL_SERVER_ERROR);
+                        exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.INTERNAL_SERVER_ERROR, e.getMessage())));
+                    } catch (JsonProcessingException ex) {
+                        throw new RuntimeException(ex);
+                    }
+                }
+            });
+        } catch (Exception e) {
             throw new RuntimeException(e);
         }
     }
@@ -281,6 +336,10 @@ public class AdminGateway implements AutoCloseable {
 
     public void setMcpSessionStore(McpSessionStore mcpSessionStore) {
         this.mcpSessionStore = mcpSessionStore;
+    }
+
+    public void setConsulStore(ConsulStore consulStore) {
+        this.consulStore = consulStore;
     }
 
     private void handleMcpInfo(HttpServerExchange exchange) {

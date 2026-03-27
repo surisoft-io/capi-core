@@ -14,15 +14,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.net.ssl.SSLContext;
-import javax.net.ssl.TrustManagerFactory;
 import java.io.ByteArrayInputStream;
-import java.io.IOException;
+import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.security.KeyStore;
+import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.util.Base64;
@@ -50,7 +50,8 @@ public class ConsulStore {
     @Nullable
     private Map<String, WebsocketClient> websocketClientMap;
     @Nullable
-    private Map<String, GrpcClient> grpcClientMap;
+    private Map<String, GrpcClient> grpcClientMap;@Nullable
+    private CapiTrustManager capiTrustManager;
     private int globalResponseTimeout = 120000;
     private volatile HttpClient httpClient;
 
@@ -99,6 +100,10 @@ public class ConsulStore {
 
     public void setGrpcClientMap(Map<String, GrpcClient> grpcClientMap) {
         this.grpcClientMap = grpcClientMap;
+    }
+
+    public void setCapiTrustManager(CapiTrustManager capiTrustManager) {
+        this.capiTrustManager = capiTrustManager;
     }
 
     public void setGlobalResponseTimeout(int globalResponseTimeout) {
@@ -162,7 +167,7 @@ public class ConsulStore {
 
     private void processTrustStore(ConsulKeyStoreEntry trustStoreConsulKeyStoreEntry) {
         try {
-            log.info("Processing trust store update from Consul KV (modifyIndex={})", trustStoreConsulKeyStoreEntry.getModifyIndex());
+            log.trace("Processing trust store update from Consul KV (modifyIndex={})", trustStoreConsulKeyStoreEntry.getModifyIndex());
             InputStream trustStoreInputStream = consulKeyValueToInputStream(trustStoreConsulKeyStoreEntry.getValue());
 
             KeyStore keyStore = KeyStore.getInstance("JKS");
@@ -177,15 +182,21 @@ public class ConsulStore {
             capiSslContextHolder.setSslContext(sslContext);
             log.info("SSLContext updated in CapiSslContextHolder");
 
+            if (capiTrustManager != null) {
+                InputStream reloadStream = consulKeyValueToInputStream(trustStoreConsulKeyStoreEntry.getValue());
+                capiTrustManager.reloadTrustManager(reloadStream, capiTrustStorePassword);
+                log.info("CapiTrustManager reloaded with updated trust store");
+            }
+
             if (websocketUtils != null) {
                 websocketUtils.refreshXnioSsl();
-                log.info("XnioSsl refreshed in WebsocketUtils");
+                log.debug("XnioSsl refreshed in WebsocketUtils");
                 rebuildRestClientHandlers();
                 rebuildWebsocketClientHandlers();
             }
             if (grpcUtils != null) {
                 grpcUtils.refreshXnioSsl();
-                log.info("XnioSsl refreshed in GrpcUtils");
+                log.debug("XnioSsl refreshed in GrpcUtils");
                 rebuildGrpcClientHandlers();
             }
         } catch (Exception e) {
@@ -206,7 +217,7 @@ public class ConsulStore {
             restClient.setHttpHandler(websocketUtils.createClientHttpHandler(tempClient, service, new HttpErrorHandler(httpUtils), globalResponseTimeout));
             count++;
         }
-        log.info("Rebuilt {} REST client handler(s) with new XnioSsl", count);
+        log.debug("Rebuilt {} REST client handler(s) with new XnioSsl", count);
     }
 
     private void rebuildWebsocketClientHandlers() {
@@ -220,7 +231,7 @@ public class ConsulStore {
             wsClient.setHttpHandler(websocketUtils.createClientHttpHandler(wsClient, service, null));
             count++;
         }
-        log.info("Rebuilt {} WebSocket client handler(s) with new XnioSsl", count);
+        log.debug("Rebuilt {} WebSocket client handler(s) with new XnioSsl", count);
     }
 
     private void rebuildGrpcClientHandlers() {
@@ -234,7 +245,73 @@ public class ConsulStore {
             grpcClient.setHttpHandler(grpcUtils.createClientHttpHandler(grpcClient, service));
             count++;
         }
-        log.info("Rebuilt {} gRPC client handler(s) with new XnioSsl", count);
+        log.debug("Rebuilt {} gRPC client handler(s) with new XnioSsl", count);
+    }
+
+    public synchronized String addCertificate(String pem) {
+        try {
+            // Parse PEM into X509Certificate
+            CertificateFactory cf = CertificateFactory.getInstance("X.509");
+            X509Certificate cert = (X509Certificate) cf.generateCertificate(
+                    new ByteArrayInputStream(pem.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+
+            // Load current trust store from Consul (or start empty)
+            KeyStore keyStore = KeyStore.getInstance("JKS");
+            ConsulKeyStoreEntry remote = getRemoteTrustStore();
+            if (remote != null) {
+                InputStream is = consulKeyValueToInputStream(remote.getValue());
+                keyStore.load(is, capiTrustStorePassword.toCharArray());
+            } else {
+                keyStore.load(null, capiTrustStorePassword.toCharArray());
+            }
+
+            // Use CN as alias, fallback to serial number
+            String alias = cert.getSubjectX500Principal().getName();
+            if (alias.contains("CN=")) {
+                alias = alias.substring(alias.indexOf("CN=") + 3);
+                if (alias.contains(",")) {
+                    alias = alias.substring(0, alias.indexOf(","));
+                }
+            }
+            alias = alias.toLowerCase().replaceAll("[^a-z0-9._-]", "_");
+
+            if (keyStore.containsAlias(alias)) {
+                return "Certificate with alias '" + alias + "' already exists in trust store";
+            }
+
+            keyStore.setCertificateEntry(alias, cert);
+
+            // Serialize KeyStore to JKS bytes → Base64 → push to Consul KV
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            keyStore.store(baos, capiTrustStorePassword.toCharArray());
+            String base64Jks = Base64.getEncoder().encodeToString(baos.toByteArray());
+
+            // Consul KV expects the value as the raw request body
+            HttpRequest putRequest = buildConsulPutRequest(base64Jks);
+            HttpResponse<String> response = httpClient.send(putRequest, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200 || !"true".equals(response.body())) {
+                return "Failed to push trust store to Consul KV, status: " + response.statusCode();
+            }
+
+            log.debug("Certificate '{}' added to trust store and pushed to Consul KV", alias);
+            // The periodic syncTrustStore() will pick up the new ModifyIndex and trigger the SSLContext refresh
+            return null; // success
+        } catch (Exception e) {
+            log.error("Failed to add certificate: {}", e.getMessage(), e);
+            return e.getMessage();
+        }
+    }
+
+    private HttpRequest buildConsulPutRequest(String base64Value) {
+        URI uri = URI.create(consulKvHost + Constants.CONSUL_KV_STORE_API + Constants.CONSUL_CAPI_TRUST_STORE_GROUP_KEY);
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(uri)
+                .timeout(Duration.ofMinutes(2))
+                .PUT(HttpRequest.BodyPublishers.ofString(base64Value));
+        if (consulKvToken != null && !consulKvToken.isEmpty()) {
+            builder.header(Constants.AUTHORIZATION_HEADER, Constants.BEARER + consulKvToken.replaceAll("(\r\n|\n)", ""));
+        }
+        return builder.build();
     }
 
     private HttpRequest buildServicesHttpRequest() {

@@ -2,7 +2,6 @@ package io.surisoft.capi.undertow;
 
 import io.surisoft.capi.exception.AuthorizationException;
 import io.surisoft.capi.exception.HttpErrorHandler;
-import io.surisoft.capi.oidc.WebsocketAuthorization;
 import io.surisoft.capi.processor.ThrottleProcessor;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
@@ -42,6 +41,7 @@ public class RestGateway {
     private static final Logger ACCESS_LOG = LoggerFactory.getLogger("capi.access");
 
     private final int port;
+    private final int ioThreads;
     private final String contextPath;
     private final Map<String, RestClient> restClientMap;
     private final HttpUtils httpUtils;
@@ -51,8 +51,6 @@ public class RestGateway {
     private final String oauth2CookieName;
     private final SSLContext sslContext;
 
-    @Nullable
-    private WebsocketAuthorization websocketAuthorization;
     @Nullable
     private OpaService opaService;
     @Nullable
@@ -70,10 +68,11 @@ public class RestGateway {
     @Nullable
     private MeterRegistry meterRegistry;
 
-    private HttpErrorHandler httpErrorHandler;
+    private final HttpErrorHandler httpErrorHandler;
     private Undertow server;
 
     public RestGateway(int port,
+                       int ioThreads,
                        String contextPath,
                        Map<String, RestClient> restClientMap,
                        HttpUtils httpUtils,
@@ -82,6 +81,7 @@ public class RestGateway {
                        List<String> accessControlAllowHeaders,
                        String oauth2CookieName) {
         this.port = port;
+        this.ioThreads = ioThreads;
         this.contextPath = contextPath;
         this.restClientMap = restClientMap;
         this.httpUtils = httpUtils;
@@ -96,44 +96,41 @@ public class RestGateway {
         httpErrorHandler = new HttpErrorHandler(httpUtils);
     }
 
-    public void setWebsocketAuthorization(WebsocketAuthorization websocketAuthorization) {
-        this.websocketAuthorization = websocketAuthorization;
-    }
-
-    public void setOpaService(OpaService opaService) {
+    public void setOpaService(@Nullable OpaService opaService) {
         this.opaService = opaService;
     }
 
-    public void setThrottleProcessor(ThrottleProcessor throttleProcessor) {
+    public void setThrottleProcessor(@Nullable ThrottleProcessor throttleProcessor) {
         this.throttleProcessor = throttleProcessor;
     }
 
-    public void setApiKeyCache(Cache<String, ApiKeyStoreEntry> apiKeyCache) {
+    public void setApiKeyCache(@Nullable Cache<String, ApiKeyStoreEntry> apiKeyCache) {
         this.apiKeyCache = apiKeyCache;
     }
 
-    public void setRestTracer(CapiTracer capiTracer) {
+    public void setRestTracer(@Nullable CapiTracer capiTracer) {
         this.capiTracer = capiTracer;
     }
 
-    public void setWebsocketUtils(WebsocketUtils websocketUtils) {
+    public void setWebsocketUtils(@Nullable WebsocketUtils websocketUtils) {
         this.websocketUtils = websocketUtils;
     }
 
-    public void setReverseProxyHost(String reverseProxyHost) {
+    public void setReverseProxyHost(@Nullable String reverseProxyHost) {
         this.reverseProxyHost = reverseProxyHost;
     }
 
-    public void setMeterRegistry(MeterRegistry meterRegistry) {
+    public void setMeterRegistry(@Nullable MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
     }
 
-    public void setOpaWasmService(OpaWasmService opaWasmService) {
+    public void setOpaWasmService(@Nullable OpaWasmService opaWasmService) {
         this.opaWasmService = opaWasmService;
     }
 
     public void runProxy() {
-        Undertow.Builder builder = Undertow.builder();
+        Undertow.Builder builder = Undertow.builder()
+                .setIoThreads(ioThreads);
 
         if (sslContext != null) {
             builder.addHttpsListener(port, Constants.UNDERTOW_LISTENING_ADDRESS, sslContext);
@@ -144,7 +141,7 @@ public class RestGateway {
         builder.setHandler(this::handleRequest);
         server = builder.build();
         server.start();
-        log.info("REST Gateway started on port {}", port);
+        log.info("REST Gateway started on port {} (ioThreads={})", port, ioThreads);
     }
 
     public void stop() {
@@ -163,6 +160,19 @@ public class RestGateway {
             if (exchange.getRequestHeaders().contains(Constants.BLUECOAT_HEADER)) {
                 exchange.getRequestHeaders().remove(Constants.BLUECOAT_HEADER);
             }
+
+            // Access log — fires after the full proxy round-trip completes
+            exchange.addExchangeCompleteListener((ex, nextListener) -> {
+                long durationMs = (System.nanoTime() - startNanos) / 1_000_000;
+                String originalIp = resolveClientIp(ex);
+                ACCESS_LOG.info("{} {} {} {}ms {}",
+                        ex.getRequestMethod(),
+                        ex.getRequestPath(),
+                        ex.getStatusCode(),
+                        durationMs,
+                        originalIp);
+                nextListener.proceed();
+            });
 
             // Add CORS headers to all responses (not just OPTIONS)
             addCorsHeaders(exchange);
@@ -218,10 +228,11 @@ public class RestGateway {
                 });
             }
 
-            // Reverse proxy headers
+            // Reverse proxy headers (set as attachments so CAPIProxyHandler applies them on the outbound request)
             if (reverseProxyHost != null) {
-                exchange.getRequestHeaders().put(HttpString.tryFromString(Constants.X_FORWARDED_HOST), reverseProxyHost);
-                exchange.getRequestHeaders().put(HttpString.tryFromString(Constants.X_FORWARDED_PREFIX), (contextPath != null ? contextPath : "") + restClient.getServiceId());
+                String prefix = (contextPath != null ? contextPath : "") + restClient.getServiceId();
+                exchange.putAttachment(CAPIProxyHandler.REVERSE_PROXY_HOST, reverseProxyHost);
+                exchange.putAttachment(CAPIProxyHandler.REVERSE_PROXY_PREFIX, prefix);
             }
 
             // Set attachments early for error handler (before auth checks may reject)
@@ -248,16 +259,22 @@ public class RestGateway {
             }
 
             // 1. API Key check
+            boolean apiKeyAuthenticated = false;
             if (restClient.isApiKeyEnabled()) {
                 String apiKeyResult = checkApiKey(exchange, restClient);
                 if (apiKeyResult != null) {
                     httpErrorHandler.sendError(exchange, 403, apiKeyResult);
                     return;
                 }
+                // checkApiKey returns null for two reasons:
+                // (a) API key was valid — Authorization header removed (line 468)
+                // (b) Bearer token detected — fell through for OAuth2 to handle
+                // If the header was removed, the API key path succeeded.
+                apiKeyAuthenticated = !exchange.getRequestHeaders().contains(Constants.AUTHORIZATION_HEADER);
             }
 
             // 2. OAuth2 / Subscription check
-            if (restClient.isSecured() && !restClient.isApiKeyEnabled()) {
+            if (restClient.isSecured() && !apiKeyAuthenticated) {
                 String authResult = checkAuthorization(exchange, restClient);
                 if (authResult != null) {
                     httpErrorHandler.sendError(exchange, 403, authResult);
@@ -313,7 +330,7 @@ public class RestGateway {
                                                 if (fc.isKeepGroup()) {
                                                     exchange.getRequestHeaders().put(HttpString.tryFromString(Constants.CAPI_GROUP_HEADER), fc.getServiceId());
                                                 }
-                                                String fwdPath = normalizePathForForwarding(fc, exchange.getRequestPath());
+                                                String fwdPath = normalizePathForForwarding(fc, exchange.getRequestURI());
                                                 exchange.setRequestURI(fwdPath);
                                                 exchange.setRelativePath(fwdPath);
                                                 proxyWithTracing(exchange, fc, exchange.getRequestPath());
@@ -357,7 +374,7 @@ public class RestGateway {
             if (restClient.isKeepGroup()) {
                 exchange.getRequestHeaders().put(HttpString.tryFromString(Constants.CAPI_GROUP_HEADER), restClient.getServiceId());
             }
-            String forwardPath = normalizePathForForwarding(restClient, requestPath);
+            String forwardPath = normalizePathForForwarding(restClient, exchange.getRequestURI());
             exchange.setRequestURI(forwardPath);
             exchange.setRelativePath(forwardPath);
             proxyWithTracing(exchange, restClient, requestPath);
@@ -367,15 +384,6 @@ public class RestGateway {
             if (!exchange.isResponseStarted()) {
                 httpErrorHandler.sendError(exchange, 502, "Gateway error");
             }
-        } finally {
-            long durationMs = (System.nanoTime() - startNanos) / 1_000_000;
-            String originalIp = resolveClientIp(exchange);
-            ACCESS_LOG.info("{} {} {} {}ms {}",
-                    exchange.getRequestMethod(),
-                    exchange.getRequestPath(),
-                    exchange.getStatusCode(),
-                    durationMs,
-                    originalIp);
         }
     }
 
@@ -485,7 +493,6 @@ public class RestGateway {
         }
     }
 
-
     private String checkOpenApi(HttpServerExchange exchange, RestClient restClient, String forwardPath) {
         OpenAPI openAPI = restClient.getOpenAPI();
         String callingMethod = exchange.getRequestMethod().toString().toLowerCase();
@@ -580,5 +587,4 @@ public class RestGateway {
         java.net.InetAddress addr = exchange.getSourceAddress().getAddress();
         return addr != null ? addr.getHostAddress() : "unknown";
     }
-
 }

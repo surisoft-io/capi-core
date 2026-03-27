@@ -65,7 +65,7 @@ class WebsocketGatewayTest {
     @Test
     void constructor_initializesFields() {
         WebsocketGateway gateway = new WebsocketGateway(
-                8080, webSocketClients, websocketUtils, sslContext,
+                8080, 2, webSocketClients, websocketUtils, sslContext,
                 accessControlAllowHeaders, "oauth2-cookie"
         );
         assertNotNull(gateway);
@@ -74,7 +74,7 @@ class WebsocketGatewayTest {
     @Test
     void constructor_withNullSslContext_initializesFields() {
         WebsocketGateway gateway = new WebsocketGateway(
-                8080, webSocketClients, websocketUtils, null,
+                8080, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, "oauth2-cookie"
         );
         assertNotNull(gateway);
@@ -83,7 +83,7 @@ class WebsocketGatewayTest {
     @Test
     void constructor_withEmptyHeaders_initializesFields() {
         WebsocketGateway gateway = new WebsocketGateway(
-                8080, webSocketClients, websocketUtils, null,
+                8080, 2, webSocketClients, websocketUtils, null,
                 Collections.emptyList(), null
         );
         assertNotNull(gateway);
@@ -92,7 +92,7 @@ class WebsocketGatewayTest {
     @Test
     void constructor_withNullOauth2CookieName_initializesFields() {
         WebsocketGateway gateway = new WebsocketGateway(
-                8080, webSocketClients, websocketUtils, sslContext,
+                8080, 2, webSocketClients, websocketUtils, sslContext,
                 accessControlAllowHeaders, null
         );
         assertNotNull(gateway);
@@ -101,7 +101,7 @@ class WebsocketGatewayTest {
     @Test
     void constructor_withEmptyOauth2CookieName_initializesFields() {
         WebsocketGateway gateway = new WebsocketGateway(
-                8080, webSocketClients, websocketUtils, sslContext,
+                8080, 2, webSocketClients, websocketUtils, sslContext,
                 accessControlAllowHeaders, ""
         );
         assertNotNull(gateway);
@@ -110,7 +110,7 @@ class WebsocketGatewayTest {
     @Test
     void stop_whenServerIsNull_doesNotThrow() {
         WebsocketGateway gateway = new WebsocketGateway(
-                8080, webSocketClients, websocketUtils, null,
+                8080, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         // server is null because runProxy() was never called
@@ -120,7 +120,7 @@ class WebsocketGatewayTest {
     @Test
     void stop_whenServerIsNull_withSsl_doesNotThrow() {
         WebsocketGateway gateway = new WebsocketGateway(
-                8080, webSocketClients, websocketUtils, sslContext,
+                8080, 2, webSocketClients, websocketUtils, sslContext,
                 accessControlAllowHeaders, "cookie"
         );
         assertDoesNotThrow(gateway::stop);
@@ -134,7 +134,7 @@ class WebsocketGatewayTest {
         webSocketClients.put("/test/ws", client);
 
         WebsocketGateway gateway = new WebsocketGateway(
-                8080, webSocketClients, websocketUtils, null,
+                8080, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         assertNotNull(gateway);
@@ -143,11 +143,11 @@ class WebsocketGatewayTest {
     @Test
     void constructor_differentPorts() {
         WebsocketGateway gateway1 = new WebsocketGateway(
-                8081, webSocketClients, websocketUtils, null,
+                8081, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         WebsocketGateway gateway2 = new WebsocketGateway(
-                9090, webSocketClients, websocketUtils, null,
+                9090, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         assertNotNull(gateway1);
@@ -240,7 +240,7 @@ class WebsocketGatewayTest {
     void constructor_managedHeaders_includesAccessControlAllowHeaders() throws Exception {
         List<String> headers = List.of("Authorization", "Content-Type", "X-Custom");
         WebsocketGateway gateway = new WebsocketGateway(
-                8080, webSocketClients, websocketUtils, null,
+                8080, 2, webSocketClients, websocketUtils, null,
                 headers, null
         );
 
@@ -259,7 +259,7 @@ class WebsocketGatewayTest {
     @Test
     void constructor_managedHeaders_includesCredentialsAndMethods() throws Exception {
         WebsocketGateway gateway = new WebsocketGateway(
-                8080, webSocketClients, websocketUtils, null,
+                8080, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
 
@@ -307,7 +307,7 @@ class WebsocketGatewayTest {
         when(websocketUtils.createWebsocketAuthorization()).thenThrow(new CapiUndertowException("no oidc"));
 
         runningGateway = new WebsocketGateway(
-                port, webSocketClients, websocketUtils, null,
+                port, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         runningGateway.runProxy();
@@ -329,7 +329,7 @@ class WebsocketGatewayTest {
         when(websocketUtils.getWebclientId("/unknown/path")).thenReturn("unknown-client");
 
         runningGateway = new WebsocketGateway(
-                port, webSocketClients, websocketUtils, null,
+                port, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         runningGateway.runProxy();
@@ -367,7 +367,7 @@ class WebsocketGatewayTest {
         webSocketClients.put(clientKey, wsClient);
 
         runningGateway = new WebsocketGateway(
-                port, webSocketClients, websocketUtils, null,
+                port, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         runningGateway.runProxy();
@@ -402,7 +402,7 @@ class WebsocketGatewayTest {
         webSocketClients.put(clientKey, wsClient);
 
         runningGateway = new WebsocketGateway(
-                port, webSocketClients, websocketUtils, null,
+                port, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         runningGateway.runProxy();
@@ -423,7 +423,7 @@ class WebsocketGatewayTest {
         when(websocketUtils.createWebsocketAuthorization()).thenThrow(new CapiUndertowException("no oidc provider"));
 
         runningGateway = new WebsocketGateway(
-                port, webSocketClients, websocketUtils, null,
+                port, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         // Should not throw even though createWebsocketAuthorization fails
@@ -445,7 +445,7 @@ class WebsocketGatewayTest {
         when(websocketUtils.createWebsocketAuthorization()).thenThrow(new CapiUndertowException("no oidc"));
 
         runningGateway = new WebsocketGateway(
-                port, webSocketClients, websocketUtils, null,
+                port, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         runningGateway.runProxy();
@@ -488,7 +488,7 @@ class WebsocketGatewayTest {
         webSocketClients.put(clientKey, wsClient);
 
         runningGateway = new WebsocketGateway(
-                port, webSocketClients, websocketUtils, null,
+                port, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, "oauth2-cookie"
         );
         runningGateway.runProxy();
@@ -516,7 +516,7 @@ class WebsocketGatewayTest {
         when(websocketUtils.createWebsocketAuthorization()).thenThrow(new CapiUndertowException("no oidc"));
 
         runningGateway = new WebsocketGateway(
-                port, webSocketClients, websocketUtils, null,
+                port, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         runningGateway.runProxy();
@@ -539,7 +539,7 @@ class WebsocketGatewayTest {
         when(websocketUtils.createWebsocketAuthorization()).thenThrow(new CapiUndertowException("no oidc"));
 
         runningGateway = new WebsocketGateway(
-                port, webSocketClients, websocketUtils, null,
+                port, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         runningGateway.runProxy();
@@ -584,7 +584,7 @@ class WebsocketGatewayTest {
 
         // null oauth2CookieName - so the localAccessControlAllowHeaders branch is skipped
         runningGateway = new WebsocketGateway(
-                port, webSocketClients, websocketUtils, null,
+                port, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         runningGateway.runProxy();
@@ -608,7 +608,7 @@ class WebsocketGatewayTest {
         when(websocketUtils.getWebclientId("/some/unknown/path")).thenReturn("missing-client");
 
         runningGateway = new WebsocketGateway(
-                port, webSocketClients, websocketUtils, null,
+                port, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         runningGateway.runProxy();

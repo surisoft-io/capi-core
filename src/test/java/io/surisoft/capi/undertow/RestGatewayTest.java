@@ -74,7 +74,7 @@ class RestGatewayTest {
     }
 
     private RestGateway createGateway(int port) {
-        RestGateway gw = new RestGateway(port, "/api", restClientMap, httpUtils, serviceCache, null, allowedHeaders, "");
+        RestGateway gw = new RestGateway(port, 2, "/api", restClientMap, httpUtils, serviceCache, null, allowedHeaders, "");
         gw.setWebsocketUtils(websocketUtils);
         return gw;
     }
@@ -309,12 +309,11 @@ class RestGatewayTest {
         rc.setServiceId("/my-service/v1");
         rc.setSecured(false);
         rc.setHttpHandler(exchange -> {
-            String xfh = exchange.getRequestHeaders().contains(Constants.X_FORWARDED_HOST)
-                    ? exchange.getRequestHeaders().get(Constants.X_FORWARDED_HOST).getFirst() : "none";
-            String xfp = exchange.getRequestHeaders().contains(Constants.X_FORWARDED_PREFIX)
-                    ? exchange.getRequestHeaders().get(Constants.X_FORWARDED_PREFIX).getFirst() : "none";
+            // RestGateway stores reverse-proxy info as attachments; CAPIProxyHandler turns them into headers.
+            String xfh = exchange.getAttachment(CAPIProxyHandler.REVERSE_PROXY_HOST);
+            String xfp = exchange.getAttachment(CAPIProxyHandler.REVERSE_PROXY_PREFIX);
             exchange.setStatusCode(200);
-            exchange.getResponseSender().send("{\"host\":\"" + xfh + "\",\"prefix\":\"" + xfp + "\"}");
+            exchange.getResponseSender().send("{\"host\":\"" + (xfh != null ? xfh : "none") + "\",\"prefix\":\"" + (xfp != null ? xfp : "none") + "\"}");
         });
         restClientMap.put("/my-service/v1", rc);
         runningGateway = createGateway(port);
