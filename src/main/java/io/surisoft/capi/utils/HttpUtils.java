@@ -119,6 +119,11 @@ public class HttpUtils {
         if (httpServerExchange.getRequestHeaders().contains(Constants.AUTHORIZATION_REQUEST_PARAMETER)) {
             return httpServerExchange.getRequestHeaders().get(Constants.AUTHORIZATION_REQUEST_PARAMETER).getFirst();
         }
+        // Try query parameter (e.g. ?access_token=...)
+        java.util.Deque<String> queryToken = httpServerExchange.getQueryParameters().get(Constants.AUTHORIZATION_REQUEST_PARAMETER);
+        if (queryToken != null && !queryToken.isEmpty()) {
+            return queryToken.getFirst();
+        }
         // Try cookie-based authorization
         if (authorizationCookieName != null && httpServerExchange.getRequestHeaders().contains(Constants.COOKIE_HEADER)) {
             String authorizationName = httpServerExchange.getRequestHeaders().contains(authorizationCookieName)
@@ -134,6 +139,13 @@ public class HttpUtils {
 
     public void propagateAuthorization(HttpServerExchange exchange) {
         try {
+            // Leave non-Bearer schemes (e.g. Basic) untouched — just forward as-is
+            String existing = exchange.getRequestHeaders().contains(Constants.AUTHORIZATION_HEADER)
+                    ? exchange.getRequestHeaders().get(Constants.AUTHORIZATION_HEADER).getFirst()
+                    : null;
+            if (existing != null && !existing.startsWith(Constants.BEARER)) {
+                return;
+            }
             String accessToken = processAuthorizationAccessToken(exchange);
             if (accessToken != null) {
                 exchange.getRequestHeaders().put(

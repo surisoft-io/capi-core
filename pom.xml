@@ -6,7 +6,7 @@
 
     <groupId>io.surisoft</groupId>
     <artifactId>capi-core</artifactId>
-    <version>1.418.0</version>
+    <version>2.00</version>
 
     <properties>
         <maven.compiler.source>23</maven.compiler.source>
@@ -23,6 +23,7 @@
         <logback.version>1.5.32</logback.version>
         <logstash.logback.version>9.0</logstash.logback.version>
         <jboss.threads.version>3.9.2</jboss.threads.version>
+        <jboss.logging.version>3.6.1.Final</jboss.logging.version>
         <snakeyaml.version>2.5</snakeyaml.version>
         <cache2k.version>2.6.1.Final</cache2k.version>
         <swagger.parser.version>2.1.39</swagger.parser.version>
@@ -63,6 +64,11 @@
             <groupId>org.apache.httpcomponents.core5</groupId>
             <artifactId>httpcore5</artifactId>
             <version>5.3.4</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jboss.logging</groupId>
+            <artifactId>jboss-logging</artifactId>
+            <version>${jboss.logging.version}</version>
         </dependency>
         <dependency>
             <groupId>org.jboss.threads</groupId>

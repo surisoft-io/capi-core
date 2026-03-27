@@ -228,6 +228,7 @@ public class CAPIConfiguration {
         private int port;
         private String listeningAddress;
         private String contextPath;
+        private int ioThreads = Math.max(2, Runtime.getRuntime().availableProcessors());
         private int connectionRequestTimeout;
         private int requestTimeout;
         private int responseTimeout;
@@ -277,6 +278,12 @@ public class CAPIConfiguration {
         public void setResponseTimeout(int responseTimeout) {
             this.responseTimeout = responseTimeout;
         }
+        public int getIoThreads() {
+            return ioThreads;
+        }
+        public void setIoThreads(int ioThreads) {
+            this.ioThreads = ioThreads;
+        }
         public int getProxyPoolSize() {
             return proxyPoolSize;
         }
@@ -297,6 +304,7 @@ public class CAPIConfiguration {
         private int port;
         private String listeningAddress;
         private String contextPath;
+        private int ioThreads = Math.max(2, Runtime.getRuntime().availableProcessors() * 2);
 
         public boolean isEnabled() {
             return enabled;
@@ -321,6 +329,12 @@ public class CAPIConfiguration {
         }
         public void setContextPath(String contextPath) {
             this.contextPath = contextPath;
+        }
+        public int getIoThreads() {
+            return ioThreads;
+        }
+        public void setIoThreads(int ioThreads) {
+            this.ioThreads = ioThreads;
         }
     }
 

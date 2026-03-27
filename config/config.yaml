@@ -1,5 +1,5 @@
 capi:
-  version: 1.0.0
+  version: 2.0
   instanceName: default
   strictToInstanceName: false
   publicEndpoint: http://localhost:8380/api/
@@ -7,10 +7,11 @@ capi:
   adminPort: 8381
   reverseProxyHost:
   rest:
-    enabled: true
+    enabled: false
     port: 8380
     listeningAddress: 0.0.0.0
     contextPath: /api
+    ioThreads: 4
     connectionRequestTimeout: 5000
     requestTimeout: 5000
     responseTimeout: 120000
@@ -19,6 +20,7 @@ capi:
     port: 8382
     listeningAddress: 0.0.0.0
     contextPath: /capi/*
+    ioThreads: 8
   grpc:
     enabled: false
     port: 8384
@@ -32,7 +34,7 @@ capi:
     path:
     encoded:
     password:
-  consulCatalogDiscoverInterval: 60000
+  consulCatalogDiscoverInterval: 10000
   consulHosts:
     - endpoint: http://localhost:8500
       token:
@@ -41,12 +43,12 @@ capi:
     endpoint: http://localhost:8500
     token:
   apiKeyStore:
-    enabled: true
+    enabled: false
   oauth2:
     enabled: false
     cookieName:
     keys:
-      - http://localost/jwks.json
+      - http://localhost:8080/realms/capi/protocol/openid-connect/certs
   opa:
     enabled: false
     endpoint: http://localhost:8181

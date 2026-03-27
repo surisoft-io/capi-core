@@ -6,7 +6,6 @@ import io.undertow.server.handlers.proxy.ProxyConnection;
 import io.undertow.server.handlers.proxy.LoadBalancingProxyClient;
 import io.undertow.util.AttachmentKey;
 import io.undertow.util.HttpString;
-import org.xnio.IoFuture;
 
 import java.util.concurrent.TimeUnit;
 
