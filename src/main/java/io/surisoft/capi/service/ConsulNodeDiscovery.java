@@ -3,12 +3,9 @@ package io.surisoft.capi.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.surisoft.capi.configuration.CAPIConfiguration;
-import io.surisoft.capi.configuration.CapiSslContextHolder;
 import io.surisoft.capi.processor.ServiceCapiInstanceMapper;
-import io.surisoft.capi.processor.ThrottleProcessor;
 import io.surisoft.capi.schema.*;
 import io.surisoft.capi.utils.*;
-import io.surisoft.capi.schema.GrpcClient;
 import jakarta.annotation.Nullable;
 import org.cache2k.Cache;
 import org.cache2k.CacheEntry;
@@ -33,42 +30,34 @@ public class ConsulNodeDiscovery {
     private static volatile boolean connectedToConsul = false;
     private static final Logger log = LoggerFactory.getLogger(ConsulNodeDiscovery.class);
     private final HttpClient httpClient;
-    //private CapiSslContextHolder capiSslContextHolder;
-    private List<CAPIConfiguration.HostConfig> consulHosts;
+    private final List<CAPIConfiguration.HostConfig> consulHosts;
     private String capiInstanceName;
     private boolean strictToInstanceName;
     private final ServiceUtils serviceUtils;
     private final Cache<String, Service> serviceCache;
-    private final RouteUtils routeUtils;
     private String serviceMetaExtrasPrefix;
     private HttpUtils httpUtils;
-    private OpaService opaService;
     @Nullable
     private OpaWasmService opaWasmService;
     private String capiRunningMode;
 
-    private WebsocketUtils websocketUtils;
+    private final WebsocketUtils websocketUtils;
     private GrpcUtils grpcUtils;
 
     private Map<String, WebsocketClient> websocketClientMap;
     private Map<String, GrpcClient> grpcClientMap;
     private Map<String, RestClient> restClientMap;
 
-    private String reverseProxyHost;
-    private String capiContext;
     private int globalResponseTimeout = 120000;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public ConsulNodeDiscovery(//@Nullable CapiSslContextHolder capiSslContextHolder,
-                               List<CAPIConfiguration.HostConfig> consulHosts,
+    public ConsulNodeDiscovery(List<CAPIConfiguration.HostConfig> consulHosts,
                                ServiceUtils serviceUtils, Cache<String, Service> serviceCache,
-                               RouteUtils routeUtils, WebsocketUtils websocketUtils, HttpClient httpClient) {
-        //this.capiSslContextHolder = capiSslContextHolder;
+                               WebsocketUtils websocketUtils, HttpClient httpClient) {
         this.consulHosts = consulHosts;
         this.serviceUtils = serviceUtils;
         this.serviceCache = serviceCache;
-        this.routeUtils = routeUtils;
         this.websocketUtils = websocketUtils;
         this.httpClient = httpClient;
     }
@@ -78,12 +67,8 @@ public class ConsulNodeDiscovery {
             Map<String, List<ConsulObject>> serviceListObjects = getAllServices();
             lookForRemovedServices(serviceListObjects);
             processServices(serviceListObjects);
-        } catch (InterruptedException e) {
+        } catch (InterruptedException | IOException e) {
             log.error(ErrorMessage.ERROR_CONNECTING_TO_CONSUL);
-            //throw new RuntimeException(e);
-        } catch (IOException e) {
-            log.error(ErrorMessage.ERROR_CONNECTING_TO_CONSUL);
-            //throw new RuntimeException(e);
         }
     }
 
@@ -478,11 +463,7 @@ public class ConsulNodeDiscovery {
         }
     }
 
-    public void setOpaService(OpaService opaService) {
-        this.opaService = opaService;
-    }
-
-    public void setOpaWasmService(OpaWasmService opaWasmService) {
+    public void setOpaWasmService(@org.jspecify.annotations.Nullable OpaWasmService opaWasmService) {
         this.opaWasmService = opaWasmService;
     }
 
@@ -500,18 +481,6 @@ public class ConsulNodeDiscovery {
 
     public static boolean isConnectedToConsul() {
         return connectedToConsul;
-    }
-
-    //public void setThrottleProcessor(ThrottleProcessor throttleProcessor) {
-    //    this.throttleProcessor = throttleProcessor;
-    //}
-
-    public void setReverseProxyHost(String reverseProxyHost) {
-        this.reverseProxyHost = reverseProxyHost;
-    }
-
-    public void setCapiContext(String capiContext) {
-        this.capiContext = capiContext;
     }
 
     public void setGlobalResponseTimeout(int globalResponseTimeout) {

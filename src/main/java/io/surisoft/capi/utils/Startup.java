@@ -112,9 +112,7 @@ public class Startup {
         startServiceUtils();
         startOpaService();
         startConsulNodeDiscoveryService();
-        if(configuration.isCorsEnabled()) {
-            //bindCapCorsFilterStrategy(camelContext);
-        }
+
         if(configuration.getConsulStore().isEnabled()) {
             startConsulStore();
         }
@@ -200,21 +198,12 @@ public class Startup {
 
     private void startConsulNodeDiscoveryService() {
         consulNodeDiscovery = new ConsulNodeDiscovery(//capiSslContextHolder,
-                configuration.getConsulHosts(), serviceUtils, serviceCache, routeUtils, websocketUtils, consulHttpClient);
+                configuration.getConsulHosts(), serviceUtils, serviceCache, websocketUtils, consulHttpClient);
         consulNodeDiscovery.setHttpUtils(httpUtils);
-        //consulNodeDiscovery.setThrottleProcessor(throttleProcessor);
-        consulNodeDiscovery.setOpaService(opaService);
         if (opaWasmService != null) {
             consulNodeDiscovery.setOpaWasmService(opaWasmService);
         }
         consulNodeDiscovery.setCapiRunningMode(configuration.getRunningMode());
-        if(configuration.getRest().getContextPath() != null && !configuration.getRest().getContextPath().isEmpty()) {
-            consulNodeDiscovery.setCapiContext(configuration.getRest().getContextPath());
-        }
-
-        if(configuration.getReverseProxyHost() != null && !configuration.getReverseProxyHost().isEmpty()) {
-            consulNodeDiscovery.setReverseProxyHost(configuration.getReverseProxyHost());
-        }
 
         if(configuration.getInstanceName() != null) {
             consulNodeDiscovery.setCapiInstanceNamespace(configuration.getInstanceName());
