@@ -32,8 +32,8 @@ public class ConsulNodeDiscovery {
 
     private static volatile boolean connectedToConsul = false;
     private static final Logger log = LoggerFactory.getLogger(ConsulNodeDiscovery.class);
-    private HttpClient httpClient;
-    private CapiSslContextHolder capiSslContextHolder;
+    private final HttpClient httpClient;
+    //private CapiSslContextHolder capiSslContextHolder;
     private List<CAPIConfiguration.HostConfig> consulHosts;
     private String capiInstanceName;
     private boolean strictToInstanceName;
@@ -54,19 +54,17 @@ public class ConsulNodeDiscovery {
     private Map<String, GrpcClient> grpcClientMap;
     private Map<String, RestClient> restClientMap;
 
-    private ThrottleProcessor throttleProcessor;
-
     private String reverseProxyHost;
     private String capiContext;
     private int globalResponseTimeout = 120000;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public ConsulNodeDiscovery(@Nullable CapiSslContextHolder capiSslContextHolder,
+    public ConsulNodeDiscovery(//@Nullable CapiSslContextHolder capiSslContextHolder,
                                List<CAPIConfiguration.HostConfig> consulHosts,
                                ServiceUtils serviceUtils, Cache<String, Service> serviceCache,
                                RouteUtils routeUtils, WebsocketUtils websocketUtils, HttpClient httpClient) {
-        this.capiSslContextHolder = capiSslContextHolder;
+        //this.capiSslContextHolder = capiSslContextHolder;
         this.consulHosts = consulHosts;
         this.serviceUtils = serviceUtils;
         this.serviceCache = serviceCache;
@@ -504,9 +502,9 @@ public class ConsulNodeDiscovery {
         return connectedToConsul;
     }
 
-    public void setThrottleProcessor(ThrottleProcessor throttleProcessor) {
-        this.throttleProcessor = throttleProcessor;
-    }
+    //public void setThrottleProcessor(ThrottleProcessor throttleProcessor) {
+    //    this.throttleProcessor = throttleProcessor;
+    //}
 
     public void setReverseProxyHost(String reverseProxyHost) {
         this.reverseProxyHost = reverseProxyHost;

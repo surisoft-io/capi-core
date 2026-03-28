@@ -199,9 +199,10 @@ public class Startup {
     }
 
     private void startConsulNodeDiscoveryService() {
-        consulNodeDiscovery = new ConsulNodeDiscovery(capiSslContextHolder, configuration.getConsulHosts(), serviceUtils, serviceCache, routeUtils, websocketUtils, consulHttpClient);
+        consulNodeDiscovery = new ConsulNodeDiscovery(//capiSslContextHolder,
+                configuration.getConsulHosts(), serviceUtils, serviceCache, routeUtils, websocketUtils, consulHttpClient);
         consulNodeDiscovery.setHttpUtils(httpUtils);
-        consulNodeDiscovery.setThrottleProcessor(throttleProcessor);
+        //consulNodeDiscovery.setThrottleProcessor(throttleProcessor);
         consulNodeDiscovery.setOpaService(opaService);
         if (opaWasmService != null) {
             consulNodeDiscovery.setOpaWasmService(opaWasmService);
