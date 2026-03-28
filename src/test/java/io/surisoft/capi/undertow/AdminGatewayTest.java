@@ -578,6 +578,7 @@ class AdminGatewayTest {
         when(capiTrustManager.getKeyStore()).thenReturn(keyStore);
 
         HttpServerExchange exchange = mock(HttpServerExchange.class);
+        when(exchange.getRequestMethod()).thenReturn(new HttpString("GET"));
         HeaderMap headerMap = new HeaderMap();
         when(exchange.getResponseHeaders()).thenReturn(headerMap);
         Sender sender = mock(Sender.class);
@@ -598,6 +599,7 @@ class AdminGatewayTest {
         when(capiConfiguration.getTrustStore()).thenReturn(trustStoreConfig);
 
         HttpServerExchange exchange = mock(HttpServerExchange.class);
+        when(exchange.getRequestMethod()).thenReturn(new HttpString("GET"));
         HeaderMap headerMap = new HeaderMap();
         when(exchange.getResponseHeaders()).thenReturn(headerMap);
         Sender sender = mock(Sender.class);
@@ -620,6 +622,7 @@ class AdminGatewayTest {
         AdminGateway gatewayNoTrustManager = new AdminGateway(9092, prometheusRegistry, capiConfiguration, serviceCache, null, null);
 
         HttpServerExchange exchange = mock(HttpServerExchange.class);
+        when(exchange.getRequestMethod()).thenReturn(new HttpString("GET"));
         HeaderMap headerMap = new HeaderMap();
         when(exchange.getResponseHeaders()).thenReturn(headerMap);
         Sender sender = mock(Sender.class);

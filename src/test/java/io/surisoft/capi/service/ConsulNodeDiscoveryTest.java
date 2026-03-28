@@ -55,7 +55,7 @@ class ConsulNodeDiscoveryTest {
         consulHosts = List.of(hostConfig);
 
         consulNodeDiscovery = new ConsulNodeDiscovery(
-                null, consulHosts, serviceUtils, serviceCache, routeUtils, websocketUtils, httpClient
+                consulHosts, serviceUtils, serviceCache, routeUtils, websocketUtils, httpClient
         );
         consulNodeDiscovery.setCapiInstanceNamespace("default");
         consulNodeDiscovery.setCapiRunningMode("full");
@@ -112,7 +112,6 @@ class ConsulNodeDiscoveryTest {
             consulNodeDiscovery.setHttpUtils(null);
             consulNodeDiscovery.setCapiRunningMode("full");
             consulNodeDiscovery.setWebsocketClientMap(new HashMap<>());
-            consulNodeDiscovery.setThrottleProcessor(null);
             consulNodeDiscovery.setReverseProxyHost("host.example.com");
             consulNodeDiscovery.setCapiContext("/capi");
             consulNodeDiscovery.setStrictToInstanceName(true);
@@ -215,7 +214,7 @@ class ConsulNodeDiscoveryTest {
         // no token set
 
         consulNodeDiscovery = new ConsulNodeDiscovery(
-                null, List.of(hostConfig), serviceUtils, serviceCache, routeUtils, websocketUtils, httpClient
+                List.of(hostConfig), serviceUtils, serviceCache, routeUtils, websocketUtils, httpClient
         );
         consulNodeDiscovery.setCapiInstanceNamespace("default");
         consulNodeDiscovery.setCapiRunningMode("full");
@@ -575,7 +574,7 @@ class ConsulNodeDiscoveryTest {
         host2.setToken("token2");
 
         consulNodeDiscovery = new ConsulNodeDiscovery(
-                null, List.of(host1, host2), serviceUtils, serviceCache, routeUtils, websocketUtils, httpClient
+                List.of(host1, host2), serviceUtils, serviceCache, routeUtils, websocketUtils, httpClient
         );
         consulNodeDiscovery.setCapiInstanceNamespace("default");
         consulNodeDiscovery.setCapiRunningMode("full");
