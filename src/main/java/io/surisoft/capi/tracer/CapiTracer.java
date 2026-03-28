@@ -55,7 +55,7 @@ public class CapiTracer {
                 .setAttribute("http.url", exchange.getRequestPath())
                 .setAttribute("http.target", serviceId)
                 .setAttribute("component", "capi-rest-gateway")
-                .setAttribute(Constants.CAMEL_SERVER_ENDPOINT_URL, exchange.getRequestPath())
+                .setAttribute(Constants.SERVER_ENDPOINT_URL, exchange.getRequestPath())
                 .setAttribute("capi-instance", capiInstanceName)
                 .startSpan();
 
@@ -81,7 +81,6 @@ public class CapiTracer {
                 span.setStatus(StatusCode.ERROR, "HTTP " + ex.getStatusCode());
             }
 
-            // Update span name to serviceId (like Camel's decorateWithCapi)
             span.updateName(serviceId);
             span.end();
             nextListener.proceed();
@@ -101,7 +100,7 @@ public class CapiTracer {
                 .setAttribute("http.url", exchange.getRequestPath())
                 .setAttribute("http.target", serviceId)
                 .setAttribute("component", "capi-gateway")
-                .setAttribute(Constants.CAMEL_SERVER_ENDPOINT_URL, exchange.getRequestPath())
+                .setAttribute(Constants.SERVER_ENDPOINT_URL, exchange.getRequestPath())
                 .setAttribute("capi-instance", capiInstanceName)
                 .startSpan();
 
