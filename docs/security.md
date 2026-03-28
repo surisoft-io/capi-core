@@ -131,11 +131,24 @@ allow {
 
 This policy allows all GET requests but restricts POST to users with the `admin` role.
 
+### OPA Wasm vs OPA HTTP
+
+CAPI supports two OPA evaluation modes:
+
+| Mode | How it works | Threading impact |
+|---|---|---|
+| **OPA Wasm** (recommended) | Rego policies compiled to WebAssembly and evaluated in-process | Runs on the I/O thread — sub-millisecond, no network call, no thread dispatch |
+| **OPA HTTP** (fallback) | Sends request context to an external OPA server via HTTP | Requires async dispatch off the I/O thread — adds latency and a thread hop |
+
+OPA Wasm is strongly recommended for production deployments. It keeps the entire request path (from connection accept to proxy handoff) on the XNIO I/O thread with zero blocking I/O, matching the threading model of all other pre-proxy checks (JWT validation, API key lookup, throttle counters). OPA HTTP introduces the only external network dependency in the pre-proxy pipeline, which adds a failure mode (OPA server down, network timeout, connection pool exhaustion) that does not exist with Wasm.
+
+To use OPA Wasm, compile your Rego policies to `.wasm` bundles and serve them via an OPA bundle server. Services declare their Wasm policy via the `opa-rego` metadata key as usual — CAPI automatically uses Wasm evaluation when a compiled policy is available.
+
 ### Authorization Flow
 
 1. Client sends a request with a Bearer token
 2. CAPI validates the JWT (OAuth2)
-3. CAPI sends the request context to OPA
+3. CAPI sends the request context to OPA (Wasm in-process or HTTP to external server)
 4. OPA evaluates the Rego policy and returns `{ "result": { "allow": true/false } }`
 5. If allowed, the request is proxied
 6. If denied, CAPI returns `403 Forbidden`
