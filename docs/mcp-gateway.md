@@ -236,6 +236,20 @@ capi:
 
 All fields have sensible defaults. When `enabled: false` (the default), no MCP listener is started.
 
+### Threading Model
+
+The MCP Gateway uses a different threading model than the REST and WebSocket gateways. While RestGateway and WebsocketGateway run entirely on Undertow's XNIO I/O threads (non-blocking async), the MCP Gateway uses **worker threads with blocking I/O** for tool calls:
+
+| Gateway | Thread model | Blocking I/O |
+|---|---|---|
+| RestGateway | I/O thread (non-blocking) | None — async NIO proxy |
+| WebsocketGateway | I/O thread (non-blocking) | None — NIO frame callbacks |
+| McpGateway | Worker thread (blocking) | `httpClient.send()` + SSE stream iteration |
+
+Each active MCP streaming call (SSE) holds a worker thread for its **entire duration**. This means the XNIO worker pool must be sized against the expected number of concurrent MCP sessions, not just CPU count. If your deployment expects N concurrent MCP SSE streams, ensure the worker pool has at least N threads available — otherwise streams will queue waiting for a free worker.
+
+For non-streaming MCP tool calls (standard JSON request/response), the worker thread is held only for the duration of the backend HTTP call.
+
 ### Admin Endpoints
 
 When the MCP Gateway is enabled, the Admin API (default port 8381) exposes:
