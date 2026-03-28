@@ -55,11 +55,10 @@ class ConsulNodeDiscoveryTest {
         consulHosts = List.of(hostConfig);
 
         consulNodeDiscovery = new ConsulNodeDiscovery(
-                consulHosts, serviceUtils, serviceCache, routeUtils, websocketUtils, httpClient
+                consulHosts, serviceUtils, serviceCache, websocketUtils, httpClient
         );
         consulNodeDiscovery.setCapiInstanceNamespace("default");
         consulNodeDiscovery.setCapiRunningMode("full");
-        consulNodeDiscovery.setCapiContext("/capi");
         consulNodeDiscovery.setStrictToInstanceName(false);
     }
 
@@ -108,12 +107,9 @@ class ConsulNodeDiscoveryTest {
     @Test
     void setters_doNotThrow() {
         assertDoesNotThrow(() -> {
-            consulNodeDiscovery.setOpaService(null);
             consulNodeDiscovery.setHttpUtils(null);
             consulNodeDiscovery.setCapiRunningMode("full");
             consulNodeDiscovery.setWebsocketClientMap(new HashMap<>());
-            consulNodeDiscovery.setReverseProxyHost("host.example.com");
-            consulNodeDiscovery.setCapiContext("/capi");
             consulNodeDiscovery.setStrictToInstanceName(true);
             consulNodeDiscovery.setCapiInstanceNamespace("default");
             consulNodeDiscovery.setServiceMetaExtrasPrefix("extra-");
@@ -214,11 +210,10 @@ class ConsulNodeDiscoveryTest {
         // no token set
 
         consulNodeDiscovery = new ConsulNodeDiscovery(
-                List.of(hostConfig), serviceUtils, serviceCache, routeUtils, websocketUtils, httpClient
+                List.of(hostConfig), serviceUtils, serviceCache, websocketUtils, httpClient
         );
         consulNodeDiscovery.setCapiInstanceNamespace("default");
         consulNodeDiscovery.setCapiRunningMode("full");
-        consulNodeDiscovery.setCapiContext("/capi");
 
         when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
                 .thenThrow(new IOException("Connection refused"));
@@ -574,11 +569,10 @@ class ConsulNodeDiscoveryTest {
         host2.setToken("token2");
 
         consulNodeDiscovery = new ConsulNodeDiscovery(
-                List.of(host1, host2), serviceUtils, serviceCache, routeUtils, websocketUtils, httpClient
+                List.of(host1, host2), serviceUtils, serviceCache, websocketUtils, httpClient
         );
         consulNodeDiscovery.setCapiInstanceNamespace("default");
         consulNodeDiscovery.setCapiRunningMode("full");
-        consulNodeDiscovery.setCapiContext("/capi");
         consulNodeDiscovery.setStrictToInstanceName(false);
 
         HttpResponse<String> servicesResponse1 = mock(HttpResponse.class);
