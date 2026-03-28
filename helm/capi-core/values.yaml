@@ -26,12 +26,16 @@ capi:
     connectionRequestTimeout: 5000
     requestTimeout: 5000
     responseTimeout: 120000
+    proxyPoolSize: 200
+    proxyMaxPoolSize: 500
+    ioThreads: 4
 
   websocket:
     enabled: false
     port: 8382
     listeningAddress: 0.0.0.0
-    contextPath: /api/*
+    contextPath: /capi/*
+    ioThreads: 8
 
   grpc:
     enabled: false
@@ -59,7 +63,7 @@ capi:
     # Base64-encoded truststore file — stored in a Secret and mounted at /capi/certs/truststore.jks
     datastoreBase64: ""
 
-  consulCatalogDiscoverInterval: 60000
+  consulCatalogDiscoverInterval: 10000
   consulHosts:
     - endpoint: http://consul:8500
       token: ""
@@ -77,6 +81,10 @@ capi:
   opa:
     enabled: false
     endpoint: http://opa:8181
+    wasmEnabled: false
+    wasmBundleUrl: ""
+    wasmBundlePollIntervalSeconds: 60
+    wasmPoolSize: 10
 
   traces:
     enabled: false
