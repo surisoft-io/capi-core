@@ -20,7 +20,6 @@ public class Service implements Serializable {
     private boolean forwardPrefix;
     private String registeredBy;
     private transient OpenAPI openAPI;
-    private int modifyIndex;
     private ServiceCapiInstances serviceCapiInstances;
 
     public String getName() {
@@ -109,14 +108,6 @@ public class Service implements Serializable {
 
     public void setOpenAPI(OpenAPI openAPI) {
         this.openAPI = openAPI;
-    }
-
-    public int getModifyIndex() {
-        return modifyIndex;
-    }
-
-    public void setModifyIndex(int modifyIndex) {
-        this.modifyIndex = modifyIndex;
     }
 
     public ServiceCapiInstances getServiceCapiInstances() {

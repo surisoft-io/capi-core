@@ -7,9 +7,11 @@ import io.surisoft.capi.configuration.CAPIConfiguration;
 import io.surisoft.capi.metrics.*;
 import io.surisoft.capi.schema.McpTool;
 import io.surisoft.capi.schema.Service;
+import io.surisoft.capi.schema.RestClient;
 import io.surisoft.capi.schema.WebsocketClient;
 import io.surisoft.capi.service.CapiTrustManager;
 import io.surisoft.capi.service.ConsulNodeDiscovery;
+import io.surisoft.capi.service.ConsulStore;
 import io.surisoft.capi.service.McpSessionStore;
 import io.surisoft.capi.service.McpToolRegistry;
 import io.surisoft.capi.utils.Constants;
@@ -18,8 +20,6 @@ import io.undertow.server.HttpServerExchange;
 import io.undertow.server.handlers.PathHandler;
 import io.undertow.util.Headers;
 import io.undertow.util.StatusCodes;
-import org.apache.camel.CamelContext;
-import org.apache.camel.util.json.JsonObject;
 import org.cache2k.Cache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,21 +34,21 @@ public class AdminGateway implements AutoCloseable {
     private final int port;
     private final PrometheusMeterRegistry prometheusRegistry;
     private final CAPIConfiguration capiConfiguration;
-    private final CamelContext camelContext;
     private Undertow server;
     private final Cache<String, Service> serviceCache;
     private final SSLContext sslContext;
     ObjectMapper objectMapper = new ObjectMapper();
     private final CapiTrustManager capiTrustManager;
     private Map<String, WebsocketClient> websocketClients;
+    private Map<String, RestClient> restClients;
     private McpToolRegistry mcpToolRegistry;
     private McpSessionStore mcpSessionStore;
+    private ConsulStore consulStore;
 
-    public AdminGateway(int port, PrometheusMeterRegistry prometheusRegistry, CAPIConfiguration capiConfiguration, CamelContext camelContext, Cache<String, Service> serviceCache, SSLContext sslContext, CapiTrustManager capiTrustManager) {
+    public AdminGateway(int port, PrometheusMeterRegistry prometheusRegistry, CAPIConfiguration capiConfiguration, Cache<String, Service> serviceCache, SSLContext sslContext, CapiTrustManager capiTrustManager) {
         this.port = port;
         this.prometheusRegistry = prometheusRegistry;
         this.capiConfiguration = capiConfiguration;
-        this.camelContext = camelContext;
         this.serviceCache = serviceCache;
         this.sslContext = sslContext;
         this.capiTrustManager = capiTrustManager;
@@ -141,7 +141,7 @@ public class AdminGateway implements AutoCloseable {
 
     private void handleCapiInfo(HttpServerExchange exchange) {
         try {
-            Info info = new Info(capiConfiguration, camelContext);
+            Info info = new Info(capiConfiguration, restClients != null ? restClients.size() : 0);
             exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
             exchange.setStatusCode(StatusCodes.OK);
             exchange.getResponseSender().send(objectMapper.writeValueAsString(info.getInfo()));
@@ -160,8 +160,7 @@ public class AdminGateway implements AutoCloseable {
                 return;
             }
 
-            Routes routes = new Routes(camelContext, serviceCache);
-            Service service = routes.getCachedService(serviceId);
+            Service service = serviceCache.get(serviceId);
             if(service == null) {
                 exchange.setStatusCode(StatusCodes.NOT_FOUND);
                 exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.NOT_FOUND, "Service not found")));
@@ -176,12 +175,26 @@ public class AdminGateway implements AutoCloseable {
     }
 
     private void handleRoutesInfo(HttpServerExchange exchange) {
+        exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
         try {
-            Routes routes = new Routes(camelContext, serviceCache);
-            exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
-            exchange.setStatusCode(StatusCodes.OK);
-            exchange.getResponseSender().send(objectMapper.writeValueAsString(routes.getAllRoutesInfo()));
-        }catch (JsonProcessingException e) {
+            if (restClients != null && !restClients.isEmpty()) {
+                List<Map<String, Object>> routeInfoList = new ArrayList<>();
+                for (Map.Entry<String, RestClient> entry : restClients.entrySet()) {
+                    Map<String, Object> routeInfo = new LinkedHashMap<>();
+                    routeInfo.put("id", entry.getKey().startsWith("/") ? entry.getKey().substring(1).replace("/", ":") : entry.getKey());
+                    routeInfo.put("status", "Started");
+                    routeInfo.put("endpoints", entry.getValue().getMappingList().stream()
+                            .map(m -> m.getHostname() + ":" + m.getPort())
+                            .collect(Collectors.toList()));
+                    routeInfoList.add(routeInfo);
+                }
+                exchange.setStatusCode(StatusCodes.OK);
+                exchange.getResponseSender().send(objectMapper.writeValueAsString(routeInfoList));
+            } else {
+                exchange.setStatusCode(StatusCodes.OK);
+                exchange.getResponseSender().send("[]");
+            }
+        } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
         }
     }
@@ -202,7 +215,7 @@ public class AdminGateway implements AutoCloseable {
                 exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.NOT_FOUND, "Service not found")));
                 return;
             }
-            JsonObject openApiObject = openAPIDefinition.getCacheOpenApiDefinition(service, objectMapper, serviceId);
+            Object openApiObject = openAPIDefinition.getCacheOpenApiDefinition(service, objectMapper, serviceId);
             if(openApiObject == null) {
                 exchange.setStatusCode(StatusCodes.NOT_FOUND);
                 exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.NOT_FOUND, "Open API not found for given Service")));
@@ -215,19 +228,72 @@ public class AdminGateway implements AutoCloseable {
     }
 
     private void handleTruststore(HttpServerExchange exchange) {
+        String method = exchange.getRequestMethod().toString();
+        if ("PUT".equals(method)) {
+            handleTruststorePut(exchange);
+        } else {
+            handleTruststoreGet(exchange);
+        }
+    }
+
+    private void handleTruststoreGet(HttpServerExchange exchange) {
         exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
         try {
             if(capiConfiguration.getTrustStore().isEnabled() && capiTrustManager != null) {
                 Truststore truststore = new Truststore(true, capiTrustManager);
                 exchange.setStatusCode(StatusCodes.OK);
                 exchange.getResponseSender().send(objectMapper.writeValueAsString(truststore.getTruststore()));
-                return;
             } else {
+                exchange.setStatusCode(StatusCodes.NOT_FOUND);
+                exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.NOT_FOUND, "Trust Store not enabled")));
+            }
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void handleTruststorePut(HttpServerExchange exchange) {
+        exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+        try {
+            if (!capiConfiguration.getTrustStore().isEnabled()) {
                 exchange.setStatusCode(StatusCodes.NOT_FOUND);
                 exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.NOT_FOUND, "Trust Store not enabled")));
                 return;
             }
-        }catch (JsonProcessingException e) {
+            if (consulStore == null) {
+                exchange.setStatusCode(StatusCodes.NOT_FOUND);
+                exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.NOT_FOUND, "Consul KV Store not configured")));
+                return;
+            }
+            // Undertow requires dispatching to a worker thread to read the request body
+            exchange.dispatch(() -> {
+                try {
+                    exchange.startBlocking();
+                    String pem = new String(exchange.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                    if (pem.isBlank() || !pem.contains("BEGIN CERTIFICATE")) {
+                        exchange.setStatusCode(StatusCodes.BAD_REQUEST);
+                        exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.BAD_REQUEST, "Request body must be a PEM-encoded certificate")));
+                        return;
+                    }
+                    String error = consulStore.addCertificate(pem);
+                    if (error != null) {
+                        exchange.setStatusCode(StatusCodes.CONFLICT);
+                        exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.CONFLICT, error)));
+                    } else {
+                        exchange.setStatusCode(StatusCodes.OK);
+                        exchange.getResponseSender().send(objectMapper.writeValueAsString(Map.of("message", "Certificate added to trust store")));
+                    }
+                } catch (Exception e) {
+                    log.error("Error processing trust store PUT: {}", e.getMessage(), e);
+                    try {
+                        exchange.setStatusCode(StatusCodes.INTERNAL_SERVER_ERROR);
+                        exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.INTERNAL_SERVER_ERROR, e.getMessage())));
+                    } catch (JsonProcessingException ex) {
+                        throw new RuntimeException(ex);
+                    }
+                }
+            });
+        } catch (Exception e) {
             throw new RuntimeException(e);
         }
     }
@@ -249,15 +315,19 @@ public class AdminGateway implements AutoCloseable {
         }
     }
 
-    public JsonObject buildError(int statusCode, String message) {
-        JsonObject jsonObject = new JsonObject();
-        jsonObject.put(Constants.ERROR_MESSAGE, message);
-        jsonObject.put(Constants.ERROR_CODE, statusCode);
-        return jsonObject;
+    public Map<String, Object> buildError(int statusCode, String message) {
+        Map<String, Object> error = new LinkedHashMap<>();
+        error.put(Constants.ERROR_MESSAGE, message);
+        error.put(Constants.ERROR_CODE, statusCode);
+        return error;
     }
 
     public void setWebsocketClients(Map<String, WebsocketClient> websocketClients) {
         this.websocketClients = websocketClients;
+    }
+
+    public void setRestClients(Map<String, RestClient> restClients) {
+        this.restClients = restClients;
     }
 
     public void setMcpToolRegistry(McpToolRegistry mcpToolRegistry) {
@@ -266,6 +336,10 @@ public class AdminGateway implements AutoCloseable {
 
     public void setMcpSessionStore(McpSessionStore mcpSessionStore) {
         this.mcpSessionStore = mcpSessionStore;
+    }
+
+    public void setConsulStore(ConsulStore consulStore) {
+        this.consulStore = consulStore;
     }
 
     private void handleMcpInfo(HttpServerExchange exchange) {

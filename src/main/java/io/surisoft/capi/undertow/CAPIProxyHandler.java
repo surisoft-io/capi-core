@@ -1,5 +1,7 @@
 package io.surisoft.capi.undertow;
 
+import io.surisoft.capi.exception.HttpErrorHandler;
+import io.surisoft.capi.utils.Constants;
 import io.undertow.UndertowLogger;
 import io.undertow.UndertowMessages;
 import io.undertow.attribute.ExchangeAttribute;
@@ -32,6 +34,7 @@ import java.security.cert.Certificate;
 import java.security.cert.CertificateEncodingException;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -44,6 +47,50 @@ public final class CAPIProxyHandler implements HttpHandler {
     private static final AttachmentKey<ProxyConnection> CONNECTION = AttachmentKey.create(ProxyConnection.class);
     private static final AttachmentKey<HttpServerExchange> EXCHANGE = AttachmentKey.create(HttpServerExchange.class);
     private static final AttachmentKey<XnioExecutor.Key> TIMEOUT_KEY = AttachmentKey.create(XnioExecutor.Key.class);
+    public static final AttachmentKey<String> REVERSE_PROXY_HOST = AttachmentKey.create(String.class);
+    public static final AttachmentKey<String> REVERSE_PROXY_PREFIX = AttachmentKey.create(String.class);
+
+    /**
+     * Headers filtered before proxying to the backend, similar to Camel's DefaultHeaderFilterStrategy.
+     * Hop-by-hop headers (RFC 7230 §6.1) and X-Forwarded-* headers that CAPIProxyHandler sets explicitly.
+     */
+    private static final Set<HttpString> FILTERED_HEADERS = Set.of(
+            // Hop-by-hop (RFC 7230 §6.1)
+            Headers.CONNECTION,
+            Headers.KEEP_ALIVE,
+            Headers.PROXY_AUTHENTICATE,
+            Headers.PROXY_AUTHORIZATION,
+            Headers.TE,
+            Headers.TRAILER,
+            Headers.TRANSFER_ENCODING,
+            Headers.UPGRADE,
+            // X-Forwarded-* — set explicitly by ProxyAction below
+            Headers.X_FORWARDED_FOR,
+            Headers.X_FORWARDED_PROTO,
+            Headers.X_FORWARDED_HOST,
+            Headers.X_FORWARDED_PORT,
+            Headers.X_FORWARDED_SERVER,
+            HttpString.tryFromString(Constants.X_FORWARDED_PREFIX),
+            // Expect is handled separately by HttpContinue
+            Headers.EXPECT
+    );
+
+    /**
+     * CAPI-internal headers stripped from backend responses to prevent leaking to clients.
+     * Separate from FILTERED_HEADERS because these must pass through on the request path
+     * (e.g. Authorization must reach the backend).
+     */
+    private static final Set<HttpString> FILTERED_RESPONSE_HEADERS = Set.of(
+            Headers.AUTHORIZATION,
+            HttpString.tryFromString(Constants.CAPI_GROUP_HEADER),
+            HttpString.tryFromString(Constants.CAPI_SHOULD_THROTTLE),
+            HttpString.tryFromString(Constants.CAPI_THROTTLE_DURATION_MILLI),
+            HttpString.tryFromString(Constants.CAPI_META_THROTTLE_DURATION),
+            HttpString.tryFromString(Constants.CAPI_META_THROTTLE_TOTAL_CALLS_ALLOWED),
+            HttpString.tryFromString(Constants.CAPI_META_THROTTLE_CURRENT_CALL_NUMBER),
+            HttpString.tryFromString(Constants.CAPI_META_THROTTLE_CONSUMER_KEY)
+    );
+
     private final CAPILoadBalancerProxyClient proxyClient;
     private final int maxRequestTime;
 
@@ -54,14 +101,16 @@ public final class CAPIProxyHandler implements HttpHandler {
     private final HttpHandler next;
     private final int maxConnectionRetries;
     private final Predicate idempotentRequestPredicate;
+    private final HttpErrorHandler errorHandler;
 
-    public CAPIProxyHandler(Builder builder) {
+    public CAPIProxyHandler(Builder builder, HttpErrorHandler httpErrorHandler) {
         this.proxyClient = builder.proxyClient;
         this.maxRequestTime = builder.maxRequestTime;
         this.next = builder.next;
         this.maxConnectionRetries = builder.maxConnectionRetries;
         this.idempotentRequestPredicate = builder.idempotentRequestPredicate;
         requestHeaders.putAll(builder.requestHeaders);
+        this.errorHandler = httpErrorHandler;
     }
 
     public void handleRequest(final HttpServerExchange exchange) throws Exception {
@@ -75,8 +124,7 @@ public final class CAPIProxyHandler implements HttpHandler {
         if(exchange.isResponseStarted()) {
             //we can't proxy a request that has already started, this is basically a server configuration error
             UndertowLogger.REQUEST_LOGGER.cannotProxyStartedRequest(exchange);
-            exchange.setStatusCode(StatusCodes.INTERNAL_SERVER_ERROR);
-            exchange.endExchange();
+            sendProxyError(exchange, StatusCodes.INTERNAL_SERVER_ERROR, "Proxy configuration error");
             return;
         }
         final long timeout = maxRequestTime > 0 ? System.currentTimeMillis() + maxRequestTime : 0;
@@ -102,14 +150,15 @@ public final class CAPIProxyHandler implements HttpHandler {
         HeaderValues values;
         while (f != -1L) {
             values = from.fiCurrent(f);
-            if(!to.contains(values.getHeaderName())) {
-                if (values.getHeaderName().toString().equals("HTTP2-Settings")) {
+            HttpString headerName = values.getHeaderName();
+            if(!to.contains(headerName) && !FILTERED_HEADERS.contains(headerName)) {
+                if (headerName.toString().equals("HTTP2-Settings")) {
                     final OptionMap options = exchange.getConnection().getUndertowOptions();
                     final ByteBufferPool bufferPool = exchange.getConnection().getByteBufferPool();
                     to.put(new HttpString("HTTP2-Settings"), createSettingsFrame(options, bufferPool));
                 } else {
                     //don't over write existing headers, normally the map will be empty, if it is not we assume it is not for a reason
-                    to.putAll(values.getHeaderName(), values);
+                    to.putAll(headerName, values);
                 }
             }
             f = from.fiNextNonEmpty(f);
@@ -196,8 +245,14 @@ public final class CAPIProxyHandler implements HttpHandler {
             if (exchange.isResponseStarted()) {
                 IoUtils.safeClose(exchange.getConnection());
             } else {
-                exchange.setStatusCode(StatusCodes.SERVICE_UNAVAILABLE);
-                exchange.endExchange();
+                Throwable connectionError = exchange.getAttachment(CAPILoadBalancerProxyClient.CONNECTION_ERROR_KEY);
+                String message;
+                if (connectionError != null && isSslException(connectionError)) {
+                    message = Constants.ERROR_SERVICE_CERTIFICATE;
+                } else {
+                    message = Constants.ERROR_NO_SERVER_AVAILABLE;
+                }
+                CAPIProxyHandler.this.sendProxyError(exchange, StatusCodes.SERVICE_UNAVAILABLE, message);
             }
         }
 
@@ -214,8 +269,7 @@ public final class CAPIProxyHandler implements HttpHandler {
             if (exchange.isResponseStarted()) {
                 IoUtils.safeClose(exchange.getConnection());
             } else {
-                exchange.setStatusCode(StatusCodes.GATEWAY_TIME_OUT);
-                exchange.endExchange();
+                CAPIProxyHandler.this.sendProxyError(exchange, StatusCodes.GATEWAY_TIME_OUT, Constants.ERROR_REMOTE_SERVER_TIMEOUT);
             }
         }
 
@@ -303,18 +357,11 @@ public final class CAPIProxyHandler implements HttpHandler {
 
                 request.putAttachment(ProxiedRequestAttachments.REMOTE_HOST, remoteHost);
 
-                if (request.getRequestHeaders().contains(Headers.X_FORWARDED_FOR)) {
-                    // We have an existing header so we shall simply append the host to the existing list
-                    final String current = request.getRequestHeaders().getFirst(Headers.X_FORWARDED_FOR);
-                    if (current == null || current.isEmpty()) {
-                        // It was empty so just add it
-                        request.getRequestHeaders().put(Headers.X_FORWARDED_FOR, remoteHost);
-                    } else {
-                        // Add the new entry and reset the existing header
-                        request.getRequestHeaders().put(Headers.X_FORWARDED_FOR, current + "," + remoteHost);
-                    }
+                // X-Forwarded-For: append client IP to chain
+                String existing = request.getRequestHeaders().getFirst(Headers.X_FORWARDED_FOR);
+                if (existing != null && !existing.isEmpty()) {
+                    request.getRequestHeaders().put(Headers.X_FORWARDED_FOR, existing + "," + remoteHost);
                 } else {
-                    // No existing header or not allowed to reuse the header so set it here
                     request.getRequestHeaders().put(Headers.X_FORWARDED_FOR, remoteHost);
                 }
 
@@ -324,48 +371,29 @@ public final class CAPIProxyHandler implements HttpHandler {
                     request.getRequestHeaders().put(Headers.X_DISABLE_PUSH, "true");
                 }
 
-                // Set the protocol header and attachment
-                if (exchange.getRequestHeaders().contains(Headers.X_FORWARDED_PROTO)) {
-                    final String proto = exchange.getRequestHeaders().getFirst(Headers.X_FORWARDED_PROTO);
-                    request.putAttachment(ProxiedRequestAttachments.IS_SSL, proto.equals("https"));
-                } else {
-                    final String proto = exchange.getRequestScheme().equals("https") ? "https" : "http";
-                    //request.getRequestHeaders().put(Headers.X_FORWARDED_PROTO, proto);
-                    request.getRequestHeaders().put(Headers.X_FORWARDED_PROTO, "https");
-                    request.putAttachment(ProxiedRequestAttachments.IS_SSL, proto.equals("https"));
-                }
+                // X-Forwarded-Proto
+                final String proto = exchange.getRequestScheme().equals("https") ? "https" : "http";
+                request.getRequestHeaders().put(Headers.X_FORWARDED_PROTO, proto);
+                request.putAttachment(ProxiedRequestAttachments.IS_SSL, proto.equals("https"));
 
-                // Set the server name
-                if (exchange.getRequestHeaders().contains(Headers.X_FORWARDED_SERVER)) {
-                    final String hostName = exchange.getRequestHeaders().getFirst(Headers.X_FORWARDED_SERVER);
-                    request.putAttachment(ProxiedRequestAttachments.SERVER_NAME, hostName);
+                // X-Forwarded-Host and X-Forwarded-Prefix (reverse proxy attachments take priority)
+                String rpHost = exchange.getAttachment(REVERSE_PROXY_HOST);
+                if (rpHost != null) {
+                    request.getRequestHeaders().put(Headers.X_FORWARDED_HOST, rpHost);
                 } else {
-                    final String hostName = exchange.getHostName();
-                    request.getRequestHeaders().put(Headers.X_FORWARDED_SERVER, hostName);
-                    request.putAttachment(ProxiedRequestAttachments.SERVER_NAME, hostName);
-                }
-                if (!exchange.getRequestHeaders().contains(Headers.X_FORWARDED_HOST)) {
                     final String hostName = exchange.getHostName();
                     if (hostName != null) {
                         request.getRequestHeaders().put(Headers.X_FORWARDED_HOST, NetworkUtils.formatPossibleIpv6Address(hostName));
                     }
                 }
-
-                // Set the port
-                if (exchange.getRequestHeaders().contains(Headers.X_FORWARDED_PORT)) {
-                    try {
-                        int port = Integer.parseInt(exchange.getRequestHeaders().getFirst(Headers.X_FORWARDED_PORT));
-                        request.putAttachment(ProxiedRequestAttachments.SERVER_PORT, port);
-                    } catch (NumberFormatException e) {
-                        int port = exchange.getConnection().getLocalAddress(InetSocketAddress.class).getPort();
-                        request.getRequestHeaders().put(Headers.X_FORWARDED_PORT, port);
-                        request.putAttachment(ProxiedRequestAttachments.SERVER_PORT, port);
-                    }
-                } else {
-                    int port = exchange.getHostPort();
-                    request.getRequestHeaders().put(Headers.X_FORWARDED_PORT, port);
-                    request.putAttachment(ProxiedRequestAttachments.SERVER_PORT, port);
+                String rpPrefix = exchange.getAttachment(REVERSE_PROXY_PREFIX);
+                if (rpPrefix != null) {
+                    request.getRequestHeaders().put(HttpString.tryFromString(Constants.X_FORWARDED_PREFIX), rpPrefix);
                 }
+
+                // Internal attachments (no headers sent to backend)
+                request.putAttachment(ProxiedRequestAttachments.SERVER_NAME, exchange.getHostName());
+                request.putAttachment(ProxiedRequestAttachments.SERVER_PORT, exchange.getHostPort());
 
                 SSLSessionInfo sslSessionInfo = exchange.getConnection().getSslSessionInfo();
                 if (sslSessionInfo != null) {
@@ -509,11 +537,13 @@ public final class CAPIProxyHandler implements HttpHandler {
         }
 
     static void handleFailure(HttpServerExchange exchange, ProxyClientHandler proxyClientHandler, Predicate idempotentRequestPredicate, IOException e) {
+        // Store the actual exception so error handler can determine the cause (SSL, timeout, etc.)
+        exchange.putAttachment(CAPILoadBalancerProxyClient.CONNECTION_ERROR_KEY, e);
         UndertowLogger.PROXY_REQUEST_LOGGER.proxyRequestFailed(exchange.getRequestURI(), e);
         if(exchange.isResponseStarted()) {
             IoUtils.safeClose(exchange.getConnection());
         } else if(idempotentRequestPredicate.resolve(exchange) && proxyClientHandler != null) {
-            proxyClientHandler.failed(exchange); //this will attempt a retry if configured to do so
+            proxyClientHandler.failed(exchange);
         } else {
             exchange.setStatusCode(StatusCodes.SERVICE_UNAVAILABLE);
             exchange.endExchange();
@@ -544,6 +574,15 @@ public final class CAPIProxyHandler implements HttpHandler {
             final HeaderMap outboundResponseHeaders = exchange.getResponseHeaders();
             exchange.setStatusCode(response.getResponseCode());
             copyHeaders(exchange, outboundResponseHeaders, inboundResponseHeaders);
+
+            // Strip reverse-proxy headers — only meant for CAPI→backend, not for the client
+            outboundResponseHeaders.remove(Constants.X_FORWARDED_HOST);
+            outboundResponseHeaders.remove(Constants.X_FORWARDED_PREFIX);
+
+            // Strip CAPI-internal headers if echoed back by the backend
+            for (HttpString header : FILTERED_RESPONSE_HEADERS) {
+                outboundResponseHeaders.remove(header);
+            }
 
             //https://www.rfc-editor.org/rfc/rfc9113#name-compressing-the-cookie-head
             //NOTE: this will be required if this is passed into app
@@ -670,6 +709,31 @@ public final class CAPIProxyHandler implements HttpHandler {
             }
         }
 
+    private static boolean isSslException(Throwable t) {
+        while (t != null) {
+            if (t instanceof javax.net.ssl.SSLException || t instanceof javax.net.ssl.SSLHandshakeException) {
+                return true;
+            }
+            // ClosedChannelException from SslConduit indicates SSL handshake failure
+            for (StackTraceElement element : t.getStackTrace()) {
+                if (element.getClassName().contains("SslConduit")) {
+                    return true;
+                }
+            }
+            t = t.getCause();
+        }
+        return false;
+    }
+
+    void sendProxyError(HttpServerExchange exchange, int statusCode, String message) {
+        if (errorHandler != null && !exchange.isResponseStarted()) {
+            errorHandler.sendError(exchange, statusCode, message);
+        } else {
+            exchange.setStatusCode(statusCode);
+            exchange.endExchange();
+        }
+    }
+
     public static Builder builder() {
         return new Builder();
     }
@@ -682,6 +746,7 @@ public final class CAPIProxyHandler implements HttpHandler {
         private HttpHandler next = ResponseCodeHandler.HANDLE_404;
         private final int maxConnectionRetries = DEFAULT_MAX_RETRY_ATTEMPTS;
         private final Predicate idempotentRequestPredicate = IdempotentPredicate.INSTANCE;
+        private HttpErrorHandler httpErrorHandler;
 
         Builder() {}
 
@@ -703,8 +768,13 @@ public final class CAPIProxyHandler implements HttpHandler {
             return this;
         }
 
+        public Builder setHttpErrorHandler(HttpErrorHandler httpErrorHandler) {
+            this.httpErrorHandler = httpErrorHandler;
+            return this;
+        }
+
         public CAPIProxyHandler build() {
-            return new CAPIProxyHandler(this);
+            return new CAPIProxyHandler(this, httpErrorHandler);
         }
     }
 }

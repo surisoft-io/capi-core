@@ -3,10 +3,14 @@ package io.surisoft.capi.utils;
 import com.nimbusds.jose.proc.SecurityContext;
 import com.nimbusds.jwt.proc.DefaultJWTProcessor;
 import io.surisoft.capi.configuration.CAPIConfiguration;
+import io.surisoft.capi.configuration.CapiSslContextHolder;
 import io.surisoft.capi.exception.CapiUndertowException;
 import io.surisoft.capi.oidc.WebsocketAuthorization;
 import io.surisoft.capi.schema.*;
 import io.undertow.server.HttpHandler;
+import io.undertow.server.HttpServerExchange;
+import io.undertow.util.HeaderMap;
+import io.undertow.util.HttpString;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -35,9 +39,6 @@ class WebsocketUtilsTest {
         websocketUtils = new WebsocketUtils(
                 websocketConfig,
                 List.of(jwtProcessor),
-                false,
-                null,
-                null,
                 null
         );
     }
@@ -55,7 +56,7 @@ class WebsocketUtilsTest {
     void normalizeBaseContextName_withMultipleSlashes() {
         CAPIConfiguration.Websocket config = new CAPIConfiguration.Websocket();
         config.setContextPath("/ws/sub/*");
-        WebsocketUtils utils = new WebsocketUtils(config, List.of(jwtProcessor), false, null, null, null);
+        WebsocketUtils utils = new WebsocketUtils(config, List.of(jwtProcessor), null);
         assertEquals("wssub", utils.normalizeBaseContextName());
     }
 
@@ -144,7 +145,7 @@ class WebsocketUtilsTest {
     @Test
     void createWebsocketAuthorization_withoutProcessor_throwsException() {
         WebsocketUtils utilsNoProcessor = new WebsocketUtils(
-                websocketConfig, null, false, null, null, null
+                websocketConfig, null, null
         );
         assertThrows(CapiUndertowException.class, utilsNoProcessor::createWebsocketAuthorization);
     }
@@ -168,7 +169,7 @@ class WebsocketUtilsTest {
         ServiceMeta meta = new ServiceMeta();
         service.setServiceMeta(meta);
 
-        HttpHandler handler = websocketUtils.createClientHttpHandler(client, service);
+        HttpHandler handler = websocketUtils.createClientHttpHandler(client, service, null);
         assertNotNull(handler);
     }
 
@@ -188,7 +189,7 @@ class WebsocketUtilsTest {
         meta.setScheme("https");
         service.setServiceMeta(meta);
 
-        HttpHandler handler = websocketUtils.createClientHttpHandler(client, service);
+        HttpHandler handler = websocketUtils.createClientHttpHandler(client, service, null);
         assertNotNull(handler);
     }
 
@@ -299,5 +300,148 @@ class WebsocketUtilsTest {
     @Test
     void getXnioSsl_whenNotEnabled_returnsNull() {
         assertNull(websocketUtils.getXnioSsl());
+    }
+
+    // ---------------------------------------------------------------
+    // handleOptionsRequest
+    // ---------------------------------------------------------------
+
+    @Test
+    void handleOptionsRequest_setsStatusCodeAndHeaders() {
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        HeaderMap requestHeaders = new HeaderMap();
+        requestHeaders.put(HttpString.tryFromString("Origin"), "http://example.com");
+        HeaderMap responseHeaders = new HeaderMap();
+
+        when(exchange.getRequestHeaders()).thenReturn(requestHeaders);
+        when(exchange.getResponseHeaders()).thenReturn(responseHeaders);
+        when(exchange.setStatusCode(204)).thenReturn(exchange);
+
+        List<String> allowedHeaders = new ArrayList<>(List.of("Authorization", "Content-Type"));
+        Map<String, String> managedHeaders = new HashMap<>(Constants.CAPI_CORS_MANAGED_HEADERS);
+
+        websocketUtils.handleOptionsRequest(exchange, allowedHeaders, managedHeaders, null);
+
+        verify(exchange).setStatusCode(204);
+        verify(exchange).endExchange();
+        // Should have set Access-Control-Allow-Origin
+        assertTrue(responseHeaders.contains("Access-Control-Allow-Origin"));
+        assertEquals("http://example.com", responseHeaders.get("Access-Control-Allow-Origin").getFirst());
+        // Should have set Access-Control-Max-Age
+        assertTrue(responseHeaders.contains("Access-Control-Max-Age"));
+    }
+
+    @Test
+    void handleOptionsRequest_addsCookieNameToAllowHeaders() {
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        HeaderMap requestHeaders = new HeaderMap();
+        HeaderMap responseHeaders = new HeaderMap();
+        when(exchange.getRequestHeaders()).thenReturn(requestHeaders);
+        when(exchange.getResponseHeaders()).thenReturn(responseHeaders);
+        when(exchange.setStatusCode(204)).thenReturn(exchange);
+
+        List<String> allowedHeaders = new ArrayList<>(List.of("Authorization"));
+        Map<String, String> managedHeaders = new HashMap<>();
+        managedHeaders.put(Constants.ACCESS_CONTROL_ALLOW_HEADERS, "Authorization");
+
+        websocketUtils.handleOptionsRequest(exchange, allowedHeaders, managedHeaders, "my-auth-cookie");
+
+        verify(exchange).setStatusCode(204);
+        // The cookie name should be added to the headers list
+        String allowHeaders = responseHeaders.contains(Constants.ACCESS_CONTROL_ALLOW_HEADERS)
+                ? responseHeaders.get(Constants.ACCESS_CONTROL_ALLOW_HEADERS).getFirst()
+                : "";
+        assertTrue(allowHeaders.contains("my-auth-cookie"));
+    }
+
+    @Test
+    void handleOptionsRequest_doesNotDuplicateCookieName() {
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        HeaderMap requestHeaders = new HeaderMap();
+        HeaderMap responseHeaders = new HeaderMap();
+        when(exchange.getRequestHeaders()).thenReturn(requestHeaders);
+        when(exchange.getResponseHeaders()).thenReturn(responseHeaders);
+        when(exchange.setStatusCode(204)).thenReturn(exchange);
+
+        List<String> allowedHeaders = new ArrayList<>(List.of("Authorization", "my-cookie"));
+        Map<String, String> managedHeaders = new HashMap<>();
+        managedHeaders.put(Constants.ACCESS_CONTROL_ALLOW_HEADERS, "Authorization,my-cookie");
+
+        websocketUtils.handleOptionsRequest(exchange, allowedHeaders, managedHeaders, "my-cookie");
+
+        verify(exchange).setStatusCode(204);
+    }
+
+    @Test
+    void handleOptionsRequest_withoutOrigin_doesNotSetAllowOrigin() {
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        HeaderMap requestHeaders = new HeaderMap();
+        // No Origin header
+        HeaderMap responseHeaders = new HeaderMap();
+        when(exchange.getRequestHeaders()).thenReturn(requestHeaders);
+        when(exchange.getResponseHeaders()).thenReturn(responseHeaders);
+        when(exchange.setStatusCode(204)).thenReturn(exchange);
+
+        websocketUtils.handleOptionsRequest(exchange, List.of("Authorization"), new HashMap<>(), null);
+
+        verify(exchange).setStatusCode(204);
+        assertFalse(responseHeaders.contains("Access-Control-Allow-Origin"));
+    }
+
+    @Test
+    void handleOptionsRequest_invalidOrigin_doesNotSetAllowOrigin() {
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        HeaderMap requestHeaders = new HeaderMap();
+        requestHeaders.put(HttpString.tryFromString("Origin"), "not-a-valid-url");
+        HeaderMap responseHeaders = new HeaderMap();
+        when(exchange.getRequestHeaders()).thenReturn(requestHeaders);
+        when(exchange.getResponseHeaders()).thenReturn(responseHeaders);
+        when(exchange.setStatusCode(204)).thenReturn(exchange);
+
+        websocketUtils.handleOptionsRequest(exchange, List.of("Authorization"), new HashMap<>(), null);
+
+        verify(exchange).setStatusCode(204);
+        assertFalse(responseHeaders.contains("Access-Control-Allow-Origin"));
+    }
+
+    // ---------------------------------------------------------------
+    // refreshXnioSsl
+    // ---------------------------------------------------------------
+
+    @Test
+    void refreshXnioSsl_withoutSslContextHolder_doesNotThrow() {
+        // websocketUtils constructed with null capiSslContextHolder
+        assertDoesNotThrow(() -> websocketUtils.refreshXnioSsl());
+        assertNull(websocketUtils.getXnioSsl());
+    }
+
+    @Test
+    void refreshXnioSsl_withSslContext_createsXnioSsl() throws Exception {
+        javax.net.ssl.SSLContext sslContext = javax.net.ssl.SSLContext.getDefault();
+        CapiSslContextHolder holder = new CapiSslContextHolder(sslContext);
+
+        WebsocketUtils utilsWithSsl = new WebsocketUtils(websocketConfig, List.of(jwtProcessor), holder);
+
+        assertDoesNotThrow(() -> utilsWithSsl.refreshXnioSsl());
+        assertNotNull(utilsWithSsl.getXnioSsl());
+    }
+
+    @Test
+    void refreshXnioSsl_withNullSslContextInHolder_doesNotUpdateXnioSsl() {
+        CapiSslContextHolder holder = new CapiSslContextHolder(null);
+        WebsocketUtils utilsWithNullCtx = new WebsocketUtils(websocketConfig, List.of(jwtProcessor), holder);
+
+        assertDoesNotThrow(() -> utilsWithNullCtx.refreshXnioSsl());
+        assertNull(utilsWithNullCtx.getXnioSsl());
+    }
+
+    @Test
+    void constructorWithSslContext_createsXnioSsl() throws Exception {
+        javax.net.ssl.SSLContext sslContext = javax.net.ssl.SSLContext.getDefault();
+        CapiSslContextHolder holder = new CapiSslContextHolder(sslContext);
+
+        WebsocketUtils utilsWithSsl = new WebsocketUtils(websocketConfig, List.of(jwtProcessor), holder);
+
+        assertNotNull(utilsWithSsl.getXnioSsl());
     }
 }

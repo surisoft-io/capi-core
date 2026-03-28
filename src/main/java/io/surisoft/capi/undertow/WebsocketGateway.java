@@ -8,7 +8,6 @@ import io.surisoft.capi.utils.ErrorMessage;
 import io.surisoft.capi.utils.WebsocketUtils;
 import io.undertow.Undertow;
 import io.undertow.server.HttpServerExchange;
-import io.undertow.util.HeaderValues;
 import io.undertow.util.HttpString;
 import jakarta.servlet.http.HttpServletResponse;
 import org.apache.commons.lang3.StringUtils;
@@ -16,10 +15,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.net.ssl.SSLContext;
-import java.net.MalformedURLException;
-import java.net.URISyntaxException;
-import java.net.URL;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -27,6 +22,7 @@ public class WebsocketGateway {
     private static final Logger log = LoggerFactory.getLogger(WebsocketGateway.class);
     private static final Logger ACCESS_LOG = LoggerFactory.getLogger("capi.access");
     private final int port;
+    private final int ioThreads;
     private final Map<String, WebsocketClient> webSocketClients;
     private WebsocketAuthorization websocketAuthorization;
     private final WebsocketUtils websocketUtils;
@@ -38,6 +34,7 @@ public class WebsocketGateway {
     private Undertow server;
 
     public WebsocketGateway(int port,
+                            int ioThreads,
                             Map<String, WebsocketClient> webSocketClients,
                             WebsocketUtils websocketUtils,
                             SSLContext sslContext,
@@ -45,6 +42,7 @@ public class WebsocketGateway {
                             List<String> accessControlAllowHeaders,
                             String oauth2CookieName) {
         this.port = port;
+        this.ioThreads = ioThreads;
         this.webSocketClients = webSocketClients;
         this.websocketUtils = websocketUtils;
         this.sslContext = sslContext;
@@ -64,7 +62,8 @@ public class WebsocketGateway {
             log.warn(e.getMessage());
         }
 
-        Undertow.Builder builder = Undertow.builder();
+        Undertow.Builder builder = Undertow.builder()
+                .setIoThreads(ioThreads);
 
         if(sslContext != null) {
             builder.addHttpsListener(port, Constants.UNDERTOW_LISTENING_ADDRESS, sslContext);
@@ -90,21 +89,7 @@ public class WebsocketGateway {
                             if(webClientId != null && webSocketClients.containsKey(webClientId)) { //webSocketClients.containsKey(webClientId)
                                 WebsocketClient websocketClient = webSocketClients.get(webClientId);
                                 if(httpServerExchange.getRequestMethod().equals(HttpString.tryFromString(Constants.OPTIONS_METHODS_VALUE))) {
-                                    List<String> localAccessControlAllowHeaders = new ArrayList<>(accessControlAllowHeaders);
-                                    if(oauth2CookieName != null && !oauth2CookieName.isEmpty()) {
-                                        localAccessControlAllowHeaders.add(oauth2CookieName);
-                                    }
-                                    httpServerExchange.getResponseHeaders().put(HttpString.tryFromString("Access-Control-Max-Age"), Constants.ACCESS_CONTROL_MAX_AGE_VALUE);
-                                    HeaderValues originHeader = httpServerExchange.getRequestHeaders().get("Origin");
-                                    processOrigin(httpServerExchange, originHeader.get(0));
-                                    managedHeaders.forEach((k, v) -> {
-                                        if(k.equals(Constants.ACCESS_CONTROL_ALLOW_HEADERS)) {
-                                            v = StringUtils.join(localAccessControlAllowHeaders, ",");
-                                        }
-                                        httpServerExchange.getResponseHeaders().put(HttpString.tryFromString(k), v);
-                                    });
-                                    httpServerExchange.setStatusCode(HttpServletResponse.SC_ACCEPTED);
-                                    httpServerExchange.endExchange();
+                                    websocketUtils.handleOptionsRequest(httpServerExchange, accessControlAllowHeaders, managedHeaders, oauth2CookieName);
                                 } else {
                                     if (httpServerExchange.getProtocol().equals(Constants.PROTOCOL_HTTP)) {
                                         if (websocketAuthorization != null) {
@@ -168,18 +153,4 @@ public class WebsocketGateway {
         }
     }
 
-    private void processOrigin(HttpServerExchange request, String origin) {
-        if(isValidOrigin(origin)) {
-            request.getResponseHeaders().put(HttpString.tryFromString(Constants.ACCESS_CONTROL_ALLOW_ORIGIN), origin.replaceAll("(\r\n|\n)", ""));
-        }
-    }
-
-    private boolean isValidOrigin(String origin) {
-        try {
-            new URL(origin).toURI();
-            return true;
-        } catch (MalformedURLException | URISyntaxException e) {
-            return false;
-        }
-    }
 }
