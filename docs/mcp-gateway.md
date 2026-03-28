@@ -52,7 +52,7 @@ CAPI exposes a single `/mcp` endpoint. All MCP interactions are JSON-RPC 2.0 mes
 |---|---|
 | `initialize` | Create an MCP session. Returns server capabilities and a `Mcp-Session-Id` header. |
 | `tools/list` | Returns the aggregated tool catalog from all MCP-enabled Consul services. |
-| `tools/call` | Invokes a tool. CAPI resolves the tool name to a Camel route and executes it. |
+| `tools/call` | Invokes a tool. CAPI resolves the tool name to a backend service and forwards the request. |
 | `ping` | Health check. Returns a JSON-RPC success response. |
 
 ### Response Format
@@ -102,7 +102,7 @@ OPA policies remain centralized and declarative. MCP does not introduce a new au
 
 ### Definition
 
-In CAPI, an MCP tool is a logical abstraction mapped to a Camel route. Tools are not implemented by services directly and do not require services to be MCP-aware.
+In CAPI, an MCP tool is a logical abstraction mapped to a backend service via Undertow's HTTP proxy. Tools are not implemented by services directly and do not require services to be MCP-aware.
 
 ### Discovery and Aggregation
 
@@ -118,12 +118,12 @@ Routing is tool-centric, not client-centric:
 MCP Client -> JSON-RPC tools/call {name: "orders.get", arguments: {...}}
   -> CAPI parses JSON-RPC method + tool name
   -> Consul lookup: which service exposes "orders.get"?
-  -> Invoke existing Camel route for that service
+  -> Forward request to the backend service via Undertow proxy
   -> Wrap service response in JSON-RPC result format
   -> Return to MCP client
 ```
 
-The requested tool name determines the Camel route. MCP client identity influences policy and behavior, not routing.
+The requested tool name determines the backend service. MCP client identity influences policy and behavior, not routing.
 
 ### Tool Schema
 
@@ -165,7 +165,7 @@ Streaming behavior is enabled only when:
 1. The tool declares streaming capability (`mcp-streaming`)
 2. The client explicitly requests streaming (e.g. `Accept: text/event-stream`)
 
-Camel routes never manage SSE connections directly; Undertow owns the SSE lifecycle.
+Undertow manages the SSE connection lifecycle; tools are stateless request handlers.
 
 ## Scope
 
@@ -219,7 +219,7 @@ Implemented
 
 ### Dedicated Port
 
-The MCP Gateway runs on a dedicated Undertow server on port **8383** (configurable), following the same standalone-server pattern used by AdminGateway and WebsocketGateway. This keeps MCP traffic isolated from Camel's REST port.
+The MCP Gateway runs on a dedicated Undertow server on port **8383** (configurable), following the same standalone-server pattern used by AdminGateway and WebsocketGateway. This keeps MCP traffic isolated from the REST gateway port.
 
 ### Configuration
 

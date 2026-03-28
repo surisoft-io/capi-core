@@ -19,7 +19,10 @@ Returns links to all available admin endpoints:
     "routes": { "href": "http://localhost:8381/info/routes" },
     "openapi": { "href": "http://localhost:8381/info/openapi/{serviceId}" },
     "truststore": { "href": "http://localhost:8381/info/truststore" },
-    "wsroutes": { "href": "http://localhost:8381/info/wsroutes" }
+    "wsroutes": { "href": "http://localhost:8381/info/wsroutes" },
+    "mcp": { "href": "http://localhost:8381/info/mcp" },
+    "mcp-tools": { "href": "http://localhost:8381/info/mcp/tools" },
+    "mcp-sessions": { "href": "http://localhost:8381/info/mcp/sessions" }
   }
 }
 ```
@@ -50,7 +53,7 @@ curl http://localhost:8381/info/metrics
 
 Returns Prometheus-formatted metrics (`text/plain`). Configure your Prometheus scrape target to point at this endpoint.
 
-CAPI tracks per-route request counters and standard JVM/Camel metrics.
+CAPI tracks per-route request counters and standard JVM metrics.
 
 ### CAPI Instance Info
 
@@ -62,7 +65,6 @@ Returns instance configuration and runtime information:
 - CAPI version
 - Instance name
 - Uptime
-- Camel version
 - Number of active routes
 - OAuth2 configuration (enabled, JWKS endpoints)
 - Consul hosts

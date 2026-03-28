@@ -29,7 +29,7 @@ capi:
     enabled: false
     port: 8382
     listeningAddress: 0.0.0.0
-    contextPath: /api/*
+    contextPath: /capi/*
 
   grpc:
     enabled: false
