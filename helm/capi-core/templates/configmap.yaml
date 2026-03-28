@@ -23,11 +23,15 @@ data:
         connectionRequestTimeout: {{ .Values.capi.rest.connectionRequestTimeout }}
         requestTimeout: {{ .Values.capi.rest.requestTimeout }}
         responseTimeout: {{ .Values.capi.rest.responseTimeout }}
+        proxyPoolSize: {{ .Values.capi.rest.proxyPoolSize }}
+        proxyMaxPoolSize: {{ .Values.capi.rest.proxyMaxPoolSize }}
+        ioThreads: {{ .Values.capi.rest.ioThreads }}
       websocket:
         enabled: {{ .Values.capi.websocket.enabled }}
         port: {{ .Values.capi.websocket.port }}
         listeningAddress: {{ .Values.capi.websocket.listeningAddress }}
         contextPath: {{ .Values.capi.websocket.contextPath }}
+        ioThreads: {{ .Values.capi.websocket.ioThreads }}
       grpc:
         enabled: {{ .Values.capi.grpc.enabled }}
         port: {{ .Values.capi.grpc.port }}
@@ -74,6 +78,10 @@ data:
       opa:
         enabled: {{ .Values.capi.opa.enabled }}
         endpoint: {{ .Values.capi.opa.endpoint }}
+        wasmEnabled: {{ .Values.capi.opa.wasmEnabled }}
+        wasmBundleUrl: {{ .Values.capi.opa.wasmBundleUrl | quote }}
+        wasmBundlePollIntervalSeconds: {{ .Values.capi.opa.wasmBundlePollIntervalSeconds }}
+        wasmPoolSize: {{ .Values.capi.opa.wasmPoolSize }}
       traces:
         enabled: {{ .Values.capi.traces.enabled }}
         serviceName: {{ .Values.capi.traces.serviceName }}
