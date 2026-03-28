@@ -3,9 +3,6 @@ package io.surisoft.capi.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.surisoft.capi.schema.*;
 import io.surisoft.capi.utils.*;
-import org.apache.camel.CamelContext;
-import org.apache.camel.Route;
-import org.apache.camel.spi.RouteController;
 import org.cache2k.Cache;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,9 +27,6 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 @org.mockito.junit.jupiter.MockitoSettings(strictness = org.mockito.quality.Strictness.LENIENT)
 class ConsulNodeDiscoveryTest {
-
-    @Mock
-    private CamelContext camelContext;
 
     @Mock
     private HttpClient httpClient;
@@ -61,11 +55,10 @@ class ConsulNodeDiscoveryTest {
         consulHosts = List.of(hostConfig);
 
         consulNodeDiscovery = new ConsulNodeDiscovery(
-                camelContext, null, consulHosts, serviceUtils, serviceCache, routeUtils, websocketUtils, httpClient
+                consulHosts, serviceUtils, serviceCache, websocketUtils, httpClient
         );
         consulNodeDiscovery.setCapiInstanceNamespace("default");
         consulNodeDiscovery.setCapiRunningMode("full");
-        consulNodeDiscovery.setCapiContext("/capi");
         consulNodeDiscovery.setStrictToInstanceName(false);
     }
 
@@ -104,41 +97,6 @@ class ConsulNodeDiscoveryTest {
     }
 
     @Test
-    void getModifyIndex_returnsIndexForMatchingGroup() {
-        ServiceMeta meta = new ServiceMeta();
-        meta.setGroup("v1");
-
-        ConsulObject co = new ConsulObject();
-        co.setServiceMeta(meta);
-        co.setModifyIndex(42);
-
-        int result = consulNodeDiscovery.getModifyIndex("v1", List.of(co));
-        assertEquals(42, result);
-    }
-
-    @Test
-    void getModifyIndex_returnsMinusOneWhenNoMatch() {
-        ServiceMeta meta = new ServiceMeta();
-        meta.setGroup("v1");
-
-        ConsulObject co = new ConsulObject();
-        co.setServiceMeta(meta);
-        co.setModifyIndex(42);
-
-        int result = consulNodeDiscovery.getModifyIndex("v2", List.of(co));
-        assertEquals(-1, result);
-    }
-
-    @Test
-    void getModifyIndex_returnsMinusOneForNullGroup() {
-        ConsulObject co = new ConsulObject();
-        co.setServiceMeta(new ServiceMeta());
-
-        int result = consulNodeDiscovery.getModifyIndex("v1", List.of(co));
-        assertEquals(-1, result);
-    }
-
-    @Test
     void isConnectedToConsul_returnsBooleanValue() {
         // Just verify the static method is accessible and returns a value
         // Initially static field might be false or true depending on previous test runs
@@ -149,15 +107,9 @@ class ConsulNodeDiscoveryTest {
     @Test
     void setters_doNotThrow() {
         assertDoesNotThrow(() -> {
-            consulNodeDiscovery.setOpaService(null);
             consulNodeDiscovery.setHttpUtils(null);
             consulNodeDiscovery.setCapiRunningMode("full");
             consulNodeDiscovery.setWebsocketClientMap(new HashMap<>());
-            consulNodeDiscovery.setMetricsProcessor(null);
-            consulNodeDiscovery.setThrottleProcessor(null);
-            consulNodeDiscovery.setContentTypeValidator(null);
-            consulNodeDiscovery.setReverseProxyHost("host.example.com");
-            consulNodeDiscovery.setCapiContext("/capi");
             consulNodeDiscovery.setStrictToInstanceName(true);
             consulNodeDiscovery.setCapiInstanceNamespace("default");
             consulNodeDiscovery.setServiceMetaExtrasPrefix("extra-");
@@ -246,32 +198,8 @@ class ConsulNodeDiscoveryTest {
     }
 
     @Test
-    void getModifyIndex_multipleConsulObjects_returnsCorrectIndex() {
-        ServiceMeta meta1 = new ServiceMeta();
-        meta1.setGroup("v1");
-        ServiceMeta meta2 = new ServiceMeta();
-        meta2.setGroup("v2");
-
-        ConsulObject co1 = new ConsulObject();
-        co1.setServiceMeta(meta1);
-        co1.setModifyIndex(10);
-
-        ConsulObject co2 = new ConsulObject();
-        co2.setServiceMeta(meta2);
-        co2.setModifyIndex(20);
-
-        assertEquals(10, consulNodeDiscovery.getModifyIndex("v1", List.of(co1, co2)));
-        assertEquals(20, consulNodeDiscovery.getModifyIndex("v2", List.of(co1, co2)));
-    }
-
-    @Test
     void getServiceMeta_emptyList_returnsNull() {
         assertNull(consulNodeDiscovery.getServiceMeta("v1", List.of()));
-    }
-
-    @Test
-    void getModifyIndex_emptyList_returnsMinusOne() {
-        assertEquals(-1, consulNodeDiscovery.getModifyIndex("v1", List.of()));
     }
 
     @SuppressWarnings("unchecked")
@@ -282,11 +210,10 @@ class ConsulNodeDiscoveryTest {
         // no token set
 
         consulNodeDiscovery = new ConsulNodeDiscovery(
-                camelContext, null, List.of(hostConfig), serviceUtils, serviceCache, routeUtils, websocketUtils, httpClient
+                List.of(hostConfig), serviceUtils, serviceCache, websocketUtils, httpClient
         );
         consulNodeDiscovery.setCapiInstanceNamespace("default");
         consulNodeDiscovery.setCapiRunningMode("full");
-        consulNodeDiscovery.setCapiContext("/capi");
 
         when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
                 .thenThrow(new IOException("Connection refused"));
@@ -384,10 +311,7 @@ class ConsulNodeDiscoveryTest {
         when(serviceUtils.updateExistingService(any(Service.class), any(Service.class), eq(serviceCache))).thenReturn(true);
         when(serviceUtils.checkIfOpenApiIsEnabled(any(Service.class), any(HttpClient.class))).thenReturn(true);
 
-        RouteController routeController = mock(RouteController.class);
-        when(camelContext.getRouteController()).thenReturn(routeController);
         when(routeUtils.getAllRouteIdForAGivenService(any(Service.class))).thenReturn(List.of("my-service:v1:GET"));
-        when(camelContext.getRoute("my-service:v1:GET")).thenReturn(null);
 
         consulNodeDiscovery.processInfo();
 
@@ -432,10 +356,7 @@ class ConsulNodeDiscoveryTest {
         when(serviceUtils.consulObjectToMapping(any(ConsulObject.class))).thenReturn(mapping);
         when(serviceUtils.checkIfOpenApiIsEnabled(any(Service.class), any(HttpClient.class))).thenReturn(true);
 
-        RouteController routeController = mock(RouteController.class);
-        when(camelContext.getRouteController()).thenReturn(routeController);
         when(routeUtils.getAllRouteIdForAGivenService(any(Service.class))).thenReturn(List.of("v1:my-service:GET"));
-        when(camelContext.getRoute("v1:my-service:GET")).thenReturn(null);
 
         consulNodeDiscovery.processInfo();
 
@@ -648,11 +569,10 @@ class ConsulNodeDiscoveryTest {
         host2.setToken("token2");
 
         consulNodeDiscovery = new ConsulNodeDiscovery(
-                camelContext, null, List.of(host1, host2), serviceUtils, serviceCache, routeUtils, websocketUtils, httpClient
+                List.of(host1, host2), serviceUtils, serviceCache, websocketUtils, httpClient
         );
         consulNodeDiscovery.setCapiInstanceNamespace("default");
         consulNodeDiscovery.setCapiRunningMode("full");
-        consulNodeDiscovery.setCapiContext("/capi");
         consulNodeDiscovery.setStrictToInstanceName(false);
 
         HttpResponse<String> servicesResponse1 = mock(HttpResponse.class);
@@ -708,10 +628,7 @@ class ConsulNodeDiscoveryTest {
         when(serviceUtils.consulObjectToMapping(any(ConsulObject.class))).thenReturn(mapping1).thenReturn(mapping2);
         when(serviceUtils.checkIfOpenApiIsEnabled(any(Service.class), any(HttpClient.class))).thenReturn(true);
 
-        RouteController routeController = mock(RouteController.class);
-        when(camelContext.getRouteController()).thenReturn(routeController);
         when(routeUtils.getAllRouteIdForAGivenService(any(Service.class))).thenReturn(List.of("my-service:v1:GET"));
-        when(camelContext.getRoute(anyString())).thenReturn(null);
 
         consulNodeDiscovery.processInfo();
 
@@ -853,16 +770,12 @@ class ConsulNodeDiscoveryTest {
         when(serviceUtils.consulObjectToMapping(any(ConsulObject.class))).thenReturn(mapping);
         when(serviceUtils.checkIfOpenApiIsEnabled(any(Service.class), any(HttpClient.class))).thenReturn(true);
 
-        RouteController routeController = mock(RouteController.class);
-        when(camelContext.getRouteController()).thenReturn(routeController);
         when(routeUtils.getAllRouteIdForAGivenService(any(Service.class))).thenReturn(List.of("my-service:v1:GET"));
-        Route existingRoute = mock(Route.class);
-        when(camelContext.getRoute("my-service:v1:GET")).thenReturn(existingRoute);
 
         consulNodeDiscovery.processInfo();
 
-        // Route already exists, so addRoutes should not be called
-        verify(camelContext, never()).addRoutes(any());
+        // Service should still be cached
+        verify(serviceCache, atLeastOnce()).put(anyString(), any(Service.class));
     }
 
     @SuppressWarnings("unchecked")
@@ -908,10 +821,7 @@ class ConsulNodeDiscoveryTest {
         when(serviceUtils.consulObjectToMapping(any(ConsulObject.class))).thenReturn(mapping);
         when(serviceUtils.checkIfOpenApiIsEnabled(any(Service.class), any(HttpClient.class))).thenReturn(true);
 
-        RouteController routeController = mock(RouteController.class);
-        when(camelContext.getRouteController()).thenReturn(routeController);
         when(routeUtils.getAllRouteIdForAGivenService(any(Service.class))).thenReturn(List.of("my-service:v1:GET"));
-        when(camelContext.getRoute(anyString())).thenReturn(null);
 
         consulNodeDiscovery.processInfo();
 
@@ -1002,10 +912,7 @@ class ConsulNodeDiscoveryTest {
         when(serviceUtils.consulObjectToMapping(any(ConsulObject.class))).thenReturn(mapping);
         when(serviceUtils.checkIfOpenApiIsEnabled(any(Service.class), any(HttpClient.class))).thenReturn(true);
 
-        RouteController routeController = mock(RouteController.class);
-        when(camelContext.getRouteController()).thenReturn(routeController);
         when(routeUtils.getAllRouteIdForAGivenService(any(Service.class))).thenReturn(List.of("my-service:v1:GET"));
-        when(camelContext.getRoute(anyString())).thenReturn(null);
 
         consulNodeDiscovery.processInfo();
 

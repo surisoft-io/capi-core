@@ -36,7 +36,7 @@ services:
       - "8181:8181"
     volumes:
       - ./opa-policy:/policies:ro
-    command: run --server /policies
+    command: run --server --addr 0.0.0.0:8181 /policies
 
   # --- Observability ---
 
@@ -183,6 +183,15 @@ services:
       - ./services:/app:ro
     command: sh -c "pip install --quiet flask && python sse_service.py"
 
+  upload-service:
+    image: python:3-alpine
+    container_name: demo-e2e-upload
+    working_dir: /app
+    volumes:
+      - ./services:/app:ro
+      - upload-data:/uploads
+    command: python upload_service.py
+
   # --- MCP Backend Services ---
 
   weather-service:
@@ -325,3 +334,29 @@ services:
     depends_on:
       consul:
         condition: service_healthy
+
+  # --- OPA Wasm Bundle Server ---
+
+  opa-bundle-builder:
+    image: alpine:latest
+    container_name: demo-e2e-opa-bundle-builder
+    volumes:
+      - ./opa-bundles/policies:/policies:ro
+      - ./opa-bundles/build-bundles.sh:/build-bundles.sh:ro
+      - opa-bundle-data:/output
+    entrypoint: ["sh", "/build-bundles.sh"]
+    restart: "no"
+
+  opa-bundle-server:
+    image: nginx:alpine
+    container_name: demo-e2e-opa-bundle-server
+    volumes:
+      - ./opa-bundles/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - opa-bundle-data:/usr/share/nginx/html/bundles:ro
+    depends_on:
+      opa-bundle-builder:
+        condition: service_completed_successfully
+
+volumes:
+  upload-data:
+  opa-bundle-data:

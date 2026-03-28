@@ -27,6 +27,8 @@ register() {
         \"root-context\": \"/${NAME}\",
         \"scheme\": \"http\",
         \"type\": \"rest\",
+        \"ex_business-unit\": \"TestUnit\",
+        \"ex_owner\": \"Tester\",
         \"capi-instance\": \"default\"${META}
       }
     }"
@@ -285,8 +287,32 @@ curl -sf -X PUT "$CONSUL/v1/agent/service/register" \
     }
   }'
 
+# ============================================================
+# FILE UPLOAD SERVICE (1) — Open, multipart/form-data
+# ============================================================
 echo ""
-echo "All 42 services registered!"
+echo "=== File Upload Service (1) ==="
+
+echo "  Registering upload-service..."
+curl -sf -X PUT "$CONSUL/v1/agent/service/register" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ID": "upload-service-1",
+    "Name": "upload-service",
+    "Port": 8080,
+    "Address": "upload-service",
+    "Meta": {
+      "group": "v1",
+      "root-context": "/",
+      "scheme": "http",
+      "type": "rest",
+      "capi-instance": "default",
+      "secured": "false"
+    }
+  }'
+
+echo ""
+echo "All 43 services registered!"
 echo "  Open:               5 (health, config, search, events, webhook)"
 echo "  OPA-protected:     10 (allow_all=3, manager_or_admin=2, admin_only=3, owner_only=2)"
 echo "  Subscription-group: 10 (notifications=2, recommendations=1, messaging=4, partner=3)"
@@ -294,6 +320,7 @@ echo "  API-key + throttle:  5 (inventory, shipping, returns, export, sync)"
 echo "  Global throttle:     5 (metrics, reporting, dashboard, alerts, cache)"
 echo "  WebSocket:           1 (websocket-service)"
 echo "  SSE:                 1 (sse-service)"
+echo "  File Upload:         1 (upload-service — multipart/form-data)"
 echo "  MCP REST:            3 (weather, inventory, translate)"
 echo "  MCP Server:          1 (math-mcp — auto-discovered tools)"
 echo "  gRPC:                1 (greeter — HTTP/2 via x-capi-service header)"

@@ -42,13 +42,14 @@ const KC_REALM       = __ENV.KC_REALM       || 'e2e-demo';
 // Custom metrics
 // ---------------------------------------------------------------------------
 
-const errorRate     = new Rate('errors');
-const latencyOpen   = new Trend('latency_open', true);
-const latencyOpa    = new Trend('latency_opa', true);
-const latencySub    = new Trend('latency_subscription', true);
-const latencyApiKey = new Trend('latency_apikey', true);
-const latencyMcp    = new Trend('latency_mcp', true);
-const latencyGrpc   = new Trend('latency_grpc', true);
+const errorRate      = new Rate('errors');
+const latencyOpen    = new Trend('latency_open', true);
+const latencyOpa     = new Trend('latency_opa', true);
+const latencySub     = new Trend('latency_subscription', true);
+const latencyApiKey  = new Trend('latency_apikey', true);
+const latencyMcp     = new Trend('latency_mcp', true);
+const latencyGrpc    = new Trend('latency_grpc', true);
+const latencyUpload  = new Trend('latency_upload', true);
 
 // ---------------------------------------------------------------------------
 // Load profile
@@ -202,6 +203,21 @@ function testMcp() {
   check(callRes, { 'mcp: 200': (r) => r.status === 200 });
 }
 
+function testUpload() {
+  // Generate a random payload (size configurable via UPLOAD_SIZE_KB, default 100KB)
+  const sizeKb = parseInt(__ENV.UPLOAD_SIZE_KB || '100');
+  const data = new ArrayBuffer(sizeKb * 1024);
+  const view = new Uint8Array(data);
+  for (let i = 0; i < view.length; i++) view[i] = Math.floor(Math.random() * 256);
+
+  const res = http.post(`${BASE}/api/upload-service/v1`, {
+    file: http.file(data, `k6-test-${Date.now()}.bin`, 'application/octet-stream'),
+  });
+  latencyUpload.add(res.timings.duration);
+  errorRate.add(res.status !== 200);
+  check(res, { 'upload: 200': (r) => r.status === 200 });
+}
+
 function testGrpc() {
   const res = http.post(`${BASE}/bff/grpc`, JSON.stringify({
     service: 'greeter/dev',
@@ -224,15 +240,17 @@ const scenarios = {
   apikey:       testApiKey,
   mcp:          testMcp,
   grpc:         testGrpc,
+  upload:       testUpload,
 };
 
 const scenarioWeights = [
-  { fn: testOpen,         weight: 30 },
-  { fn: testOpa,          weight: 25 },
-  { fn: testSubscription, weight: 20 },
+  { fn: testOpen,         weight: 28 },
+  { fn: testOpa,          weight: 23 },
+  { fn: testSubscription, weight: 18 },
   { fn: testApiKey,       weight: 10 },
   { fn: testMcp,          weight: 10 },
   { fn: testGrpc,         weight: 5 },
+  { fn: testUpload,       weight: 6 },
 ];
 
 export default function () {

@@ -228,6 +228,7 @@ public class CAPIConfiguration {
         private int port;
         private String listeningAddress;
         private String contextPath;
+        private int ioThreads = Math.max(2, Runtime.getRuntime().availableProcessors());
         private int connectionRequestTimeout;
         private int requestTimeout;
         private int responseTimeout;
@@ -277,6 +278,12 @@ public class CAPIConfiguration {
         public void setResponseTimeout(int responseTimeout) {
             this.responseTimeout = responseTimeout;
         }
+        public int getIoThreads() {
+            return ioThreads;
+        }
+        public void setIoThreads(int ioThreads) {
+            this.ioThreads = ioThreads;
+        }
         public int getProxyPoolSize() {
             return proxyPoolSize;
         }
@@ -297,6 +304,7 @@ public class CAPIConfiguration {
         private int port;
         private String listeningAddress;
         private String contextPath;
+        private int ioThreads = Math.max(2, Runtime.getRuntime().availableProcessors() * 2);
 
         public boolean isEnabled() {
             return enabled;
@@ -321,6 +329,12 @@ public class CAPIConfiguration {
         }
         public void setContextPath(String contextPath) {
             this.contextPath = contextPath;
+        }
+        public int getIoThreads() {
+            return ioThreads;
+        }
+        public void setIoThreads(int ioThreads) {
+            this.ioThreads = ioThreads;
         }
     }
 
@@ -352,17 +366,23 @@ public class CAPIConfiguration {
     public static class Opa {
         private boolean enabled;
         private String endpoint;
+        private boolean wasmEnabled;
+        private String wasmBundleUrl;
+        private int wasmBundlePollIntervalSeconds = 60;
+        private int wasmPoolSize = 10;
 
-        public boolean isEnabled() {
-            return enabled;
-        }
-        public void setEnabled(boolean enabled) {
-            this.enabled = enabled;
-        }
-        public String getEndpoint() {
-            return endpoint;
-        }
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public String getEndpoint() { return endpoint; }
         public void setEndpoint(String endpoint) { this.endpoint = endpoint; }
+        public boolean isWasmEnabled() { return wasmEnabled; }
+        public void setWasmEnabled(boolean wasmEnabled) { this.wasmEnabled = wasmEnabled; }
+        public String getWasmBundleUrl() { return wasmBundleUrl; }
+        public void setWasmBundleUrl(String wasmBundleUrl) { this.wasmBundleUrl = wasmBundleUrl; }
+        public int getWasmBundlePollIntervalSeconds() { return wasmBundlePollIntervalSeconds; }
+        public void setWasmBundlePollIntervalSeconds(int v) { this.wasmBundlePollIntervalSeconds = v; }
+        public int getWasmPoolSize() { return wasmPoolSize; }
+        public void setWasmPoolSize(int wasmPoolSize) { this.wasmPoolSize = wasmPoolSize; }
     }
 
     public static class LoggingTraces {

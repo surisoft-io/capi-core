@@ -120,4 +120,77 @@ class OpaServiceTest {
 
         assertNull(result);
     }
+
+    // === callOpaAsync tests ===
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void callOpaAsync_successfulResponse_returnsOpaResult() throws Exception {
+        String responseBody = "{\"result\": true}";
+
+        HttpResponse<String> asyncResponse = mock(HttpResponse.class);
+        when(asyncResponse.statusCode()).thenReturn(200);
+        when(asyncResponse.body()).thenReturn(responseBody);
+
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(java.util.concurrent.CompletableFuture.completedFuture(asyncResponse));
+
+        java.util.concurrent.CompletableFuture<OpaResult> future = opaService.callOpaAsync("my/policy", "token-val", true);
+        OpaResult result = future.get();
+
+        assertNotNull(result);
+        assertTrue(result.isAllowed());
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void callOpaAsync_non200Response_returnsNull() throws Exception {
+        HttpResponse<String> asyncResponse = mock(HttpResponse.class);
+        when(asyncResponse.statusCode()).thenReturn(500);
+
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(java.util.concurrent.CompletableFuture.completedFuture(asyncResponse));
+
+        java.util.concurrent.CompletableFuture<OpaResult> future = opaService.callOpaAsync("my/policy", "token-val", true);
+        OpaResult result = future.get();
+
+        assertNull(result);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void callOpaAsync_withConsumerKey_returnsResult() throws Exception {
+        String responseBody = "{\"result\": false}";
+
+        HttpResponse<String> asyncResponse = mock(HttpResponse.class);
+        when(asyncResponse.statusCode()).thenReturn(200);
+        when(asyncResponse.body()).thenReturn(responseBody);
+
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(java.util.concurrent.CompletableFuture.completedFuture(asyncResponse));
+
+        java.util.concurrent.CompletableFuture<OpaResult> future = opaService.callOpaAsync("my/policy", "consumer-key", false);
+        OpaResult result = future.get();
+
+        assertNotNull(result);
+        assertFalse(result.isAllowed());
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void callOpaAsync_exception_returnsNull() throws Exception {
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(java.util.concurrent.CompletableFuture.failedFuture(new java.io.IOException("Connection refused")));
+
+        java.util.concurrent.CompletableFuture<OpaResult> future = opaService.callOpaAsync("my/policy", "token-val", true);
+        OpaResult result = future.get();
+
+        assertNull(result);
+    }
+
+    @Test
+    void callOpa_invalidRego_throwsIllegalArgumentException() {
+        assertThrows(IllegalArgumentException.class, () ->
+                opaService.callOpa("../evil/path", "token", true));
+    }
 }

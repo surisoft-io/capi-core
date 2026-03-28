@@ -8,18 +8,15 @@ import io.micrometer.core.instrument.binder.jvm.JvmMemoryMetrics;
 import io.micrometer.core.instrument.binder.jvm.JvmThreadMetrics;
 import io.micrometer.core.instrument.binder.system.ProcessorMetrics;
 import io.micrometer.core.instrument.composite.CompositeMeterRegistry;
+import io.micrometer.core.instrument.distribution.DistributionStatisticConfig;
 import io.micrometer.core.instrument.util.HierarchicalNameMapper;
+import io.micrometer.jmx.JmxConfig;
 import io.micrometer.jmx.JmxMeterRegistry;
 import io.micrometer.prometheusmetrics.PrometheusConfig;
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import io.surisoft.capi.utils.Constants;
-import org.apache.camel.component.micrometer.CamelJmxConfig;
-import org.apache.camel.component.micrometer.DistributionStatisticConfigFilter;
 
 import java.time.Duration;
-
-import static org.apache.camel.component.micrometer.messagehistory.MicrometerMessageHistoryNamingStrategy.MESSAGE_HISTORIES;
-import static org.apache.camel.component.micrometer.routepolicy.MicrometerRoutePolicyNamingStrategy.ROUTE_POLICIES;
 
 public class MetricsConfiguration {
 
@@ -27,26 +24,23 @@ public class MetricsConfiguration {
         PrometheusMeterRegistry prometheus =
                 new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
 
-        DistributionStatisticConfigFilter timerMeterFilter = new DistributionStatisticConfigFilter()
-                .andAppliesTo(ROUTE_POLICIES)
-                .orAppliesTo(MESSAGE_HISTORIES)
-                .setPublishPercentileHistogram(true)
-                .setMinimumExpectedDuration(Duration.ofMillis(1L))
-                .setMaximumExpectedDuration(Duration.ofMillis(150L));
-
-
-        DistributionStatisticConfigFilter summaryMeterFilter = new DistributionStatisticConfigFilter()
-                .setPublishPercentileHistogram(true)
-                .setMinimumExpectedValue(1L)
-                .setMaximumExpectedValue(100L);
-
         CompositeMeterRegistry compositeMeterRegistry = new CompositeMeterRegistry();
-        compositeMeterRegistry.config().commonTags(Tags.of("application", Constants.APPLICATION_NAME))
-                .meterFilter(timerMeterFilter)
-                .meterFilter(summaryMeterFilter).namingConvention().tagKey(Constants.APPLICATION_NAME);
+        compositeMeterRegistry.config()
+                .commonTags(Tags.of("application", Constants.APPLICATION_NAME))
+                .meterFilter(new io.micrometer.core.instrument.config.MeterFilter() {
+                    @Override
+                    public DistributionStatisticConfig configure(io.micrometer.core.instrument.Meter.Id id, DistributionStatisticConfig config) {
+                        return DistributionStatisticConfig.builder()
+                                .percentilesHistogram(true)
+                                .minimumExpectedValue(Duration.ofMillis(1).toNanos() * 1.0)
+                                .maximumExpectedValue(Duration.ofMillis(150).toNanos() * 1.0)
+                                .build()
+                                .merge(config);
+                    }
+                });
 
         compositeMeterRegistry.add(new JmxMeterRegistry(
-                CamelJmxConfig.DEFAULT,
+                JmxConfig.DEFAULT,
                 Clock.SYSTEM,
                 HierarchicalNameMapper.DEFAULT));
 
@@ -58,11 +52,6 @@ public class MetricsConfiguration {
         }
         new JvmThreadMetrics().bindTo(prometheus);
         new ProcessorMetrics().bindTo(prometheus);
-
-        // Note: jvm_threads_live_threads (from JvmThreadMetrics above) only counts
-        // platform threads — Java's ThreadMXBean and getAllStackTraces() exclude
-        // virtual threads by design. There is no standard JVM API to count active
-        // virtual threads.
 
         compositeMeterRegistry.add(prometheus);
         return compositeMeterRegistry;
@@ -78,5 +67,4 @@ public class MetricsConfiguration {
                                 new IllegalStateException("Prometheus registry not found")
                         );
     }
-
 }

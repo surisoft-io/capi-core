@@ -2,17 +2,19 @@ package io.surisoft.capi.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.surisoft.capi.schema.OpaResult;
-import org.apache.camel.util.json.JsonObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.concurrent.CompletableFuture;
 import java.util.regex.Pattern;
 
 import static java.time.temporal.ChronoUnit.SECONDS;
@@ -44,6 +46,29 @@ public class OpaService {
         return null;
     }
 
+    public CompletableFuture<OpaResult> callOpaAsync(String opaRego, String value, boolean isAccessToken) {
+        try {
+            return httpClient.sendAsync(buildHttpRequest(opaRego, value, isAccessToken), HttpResponse.BodyHandlers.ofString())
+                    .thenApply(response -> {
+                        if (response.statusCode() == 200) {
+                            try {
+                                return objectMapper.readValue(response.body(), OpaResult.class);
+                            } catch (IOException e) {
+                                log.error("OPA response parse error: {}", e.getMessage());
+                            }
+                        }
+                        return null;
+                    })
+                    .exceptionally(e -> {
+                        log.error("OPA async call failed: {}", e.getMessage());
+                        return null;
+                    });
+        } catch (URISyntaxException e) {
+            log.error("OPA URI error: {}", e.getMessage());
+            return CompletableFuture.completedFuture(null);
+        }
+    }
+
     private HttpRequest buildHttpRequest(String opaRego, String value, boolean isAccessToken) throws URISyntaxException {
         if(opaRego == null || !VALID_OPA_REGO.matcher(opaRego).matches()) {
             throw new IllegalArgumentException("Invalid OPA rego path");
@@ -57,14 +82,18 @@ public class OpaService {
     }
 
     private String buildRequestBody(String value, boolean isAccessToken) {
-        JsonObject tokenObject = new JsonObject();
-        if(isAccessToken) {
-            tokenObject.put("token", value);
-        } else {
-            tokenObject.put("consumerKey", value);
+        try {
+            Map<String, Object> tokenObject = new LinkedHashMap<>();
+            if (isAccessToken) {
+                tokenObject.put("token", value);
+            } else {
+                tokenObject.put("consumerKey", value);
+            }
+            Map<String, Object> inputObject = new LinkedHashMap<>();
+            inputObject.put("input", tokenObject);
+            return objectMapper.writeValueAsString(inputObject);
+        } catch (IOException e) {
+            return "{\"input\":{}}";
         }
-        JsonObject inputObject = new JsonObject();
-        inputObject.put("input", tokenObject);
-        return inputObject.toJson();
     }
 }

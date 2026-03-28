@@ -50,6 +50,10 @@ capi:
   opa:
     enabled: true
     endpoint: http://opa:8181
+    wasmEnabled: true
+    wasmBundleUrl: http://opa-bundle-server:8080/bundles/
+    wasmBundlePollIntervalSeconds: 30
+    wasmPoolSize: 10
   traces:
     enabled: true
     serviceName: capi

@@ -65,7 +65,7 @@ class WebsocketGatewayTest {
     @Test
     void constructor_initializesFields() {
         WebsocketGateway gateway = new WebsocketGateway(
-                8080, webSocketClients, websocketUtils, sslContext,
+                8080, 2, webSocketClients, websocketUtils, sslContext,
                 accessControlAllowHeaders, "oauth2-cookie"
         );
         assertNotNull(gateway);
@@ -74,7 +74,7 @@ class WebsocketGatewayTest {
     @Test
     void constructor_withNullSslContext_initializesFields() {
         WebsocketGateway gateway = new WebsocketGateway(
-                8080, webSocketClients, websocketUtils, null,
+                8080, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, "oauth2-cookie"
         );
         assertNotNull(gateway);
@@ -83,7 +83,7 @@ class WebsocketGatewayTest {
     @Test
     void constructor_withEmptyHeaders_initializesFields() {
         WebsocketGateway gateway = new WebsocketGateway(
-                8080, webSocketClients, websocketUtils, null,
+                8080, 2, webSocketClients, websocketUtils, null,
                 Collections.emptyList(), null
         );
         assertNotNull(gateway);
@@ -92,7 +92,7 @@ class WebsocketGatewayTest {
     @Test
     void constructor_withNullOauth2CookieName_initializesFields() {
         WebsocketGateway gateway = new WebsocketGateway(
-                8080, webSocketClients, websocketUtils, sslContext,
+                8080, 2, webSocketClients, websocketUtils, sslContext,
                 accessControlAllowHeaders, null
         );
         assertNotNull(gateway);
@@ -101,7 +101,7 @@ class WebsocketGatewayTest {
     @Test
     void constructor_withEmptyOauth2CookieName_initializesFields() {
         WebsocketGateway gateway = new WebsocketGateway(
-                8080, webSocketClients, websocketUtils, sslContext,
+                8080, 2, webSocketClients, websocketUtils, sslContext,
                 accessControlAllowHeaders, ""
         );
         assertNotNull(gateway);
@@ -110,7 +110,7 @@ class WebsocketGatewayTest {
     @Test
     void stop_whenServerIsNull_doesNotThrow() {
         WebsocketGateway gateway = new WebsocketGateway(
-                8080, webSocketClients, websocketUtils, null,
+                8080, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         // server is null because runProxy() was never called
@@ -120,7 +120,7 @@ class WebsocketGatewayTest {
     @Test
     void stop_whenServerIsNull_withSsl_doesNotThrow() {
         WebsocketGateway gateway = new WebsocketGateway(
-                8080, webSocketClients, websocketUtils, sslContext,
+                8080, 2, webSocketClients, websocketUtils, sslContext,
                 accessControlAllowHeaders, "cookie"
         );
         assertDoesNotThrow(gateway::stop);
@@ -134,7 +134,7 @@ class WebsocketGatewayTest {
         webSocketClients.put("/test/ws", client);
 
         WebsocketGateway gateway = new WebsocketGateway(
-                8080, webSocketClients, websocketUtils, null,
+                8080, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         assertNotNull(gateway);
@@ -143,11 +143,11 @@ class WebsocketGatewayTest {
     @Test
     void constructor_differentPorts() {
         WebsocketGateway gateway1 = new WebsocketGateway(
-                8081, webSocketClients, websocketUtils, null,
+                8081, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         WebsocketGateway gateway2 = new WebsocketGateway(
-                9090, webSocketClients, websocketUtils, null,
+                9090, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         assertNotNull(gateway1);
@@ -158,18 +158,17 @@ class WebsocketGatewayTest {
 
     @Test
     void processOrigin_validOrigin_setsResponseHeader() throws Exception {
-        WebsocketGateway gateway = new WebsocketGateway(
-                8080, webSocketClients, websocketUtils, null,
-                accessControlAllowHeaders, null
-        );
+        io.surisoft.capi.configuration.CAPIConfiguration.Websocket wsConfig = new io.surisoft.capi.configuration.CAPIConfiguration.Websocket();
+        wsConfig.setContextPath("/ws/*");
+        WebsocketUtils realUtils = new WebsocketUtils(wsConfig, null, null);
 
         HttpServerExchange exchange = mock(HttpServerExchange.class);
         HeaderMap responseHeaders = new HeaderMap();
         when(exchange.getResponseHeaders()).thenReturn(responseHeaders);
 
-        Method processOrigin = WebsocketGateway.class.getDeclaredMethod("processOrigin", HttpServerExchange.class, String.class);
+        Method processOrigin = WebsocketUtils.class.getDeclaredMethod("processOrigin", HttpServerExchange.class, String.class);
         processOrigin.setAccessible(true);
-        processOrigin.invoke(gateway, exchange, "http://example.com");
+        processOrigin.invoke(realUtils, exchange, "http://example.com");
 
         String value = responseHeaders.getFirst(HttpString.tryFromString(Constants.ACCESS_CONTROL_ALLOW_ORIGIN));
         assertEquals("http://example.com", value);
@@ -177,62 +176,58 @@ class WebsocketGatewayTest {
 
     @Test
     void processOrigin_invalidOrigin_doesNotSetHeader() throws Exception {
-        WebsocketGateway gateway = new WebsocketGateway(
-                8080, webSocketClients, websocketUtils, null,
-                accessControlAllowHeaders, null
-        );
+        io.surisoft.capi.configuration.CAPIConfiguration.Websocket wsConfig = new io.surisoft.capi.configuration.CAPIConfiguration.Websocket();
+        wsConfig.setContextPath("/ws/*");
+        WebsocketUtils realUtils = new WebsocketUtils(wsConfig, null, null);
 
         HttpServerExchange exchange = mock(HttpServerExchange.class);
         HeaderMap responseHeaders = new HeaderMap();
         when(exchange.getResponseHeaders()).thenReturn(responseHeaders);
 
-        Method processOrigin = WebsocketGateway.class.getDeclaredMethod("processOrigin", HttpServerExchange.class, String.class);
+        Method processOrigin = WebsocketUtils.class.getDeclaredMethod("processOrigin", HttpServerExchange.class, String.class);
         processOrigin.setAccessible(true);
-        processOrigin.invoke(gateway, exchange, "not a url");
+        processOrigin.invoke(realUtils, exchange, "not a url");
 
         assertNull(responseHeaders.getFirst(HttpString.tryFromString(Constants.ACCESS_CONTROL_ALLOW_ORIGIN)));
     }
 
     @Test
     void isValidOrigin_validUrl_returnsTrue() throws Exception {
-        WebsocketGateway gateway = new WebsocketGateway(
-                8080, webSocketClients, websocketUtils, null,
-                accessControlAllowHeaders, null
-        );
+        io.surisoft.capi.configuration.CAPIConfiguration.Websocket wsConfig = new io.surisoft.capi.configuration.CAPIConfiguration.Websocket();
+        wsConfig.setContextPath("/ws/*");
+        WebsocketUtils realUtils = new WebsocketUtils(wsConfig, null, null);
 
-        Method isValidOrigin = WebsocketGateway.class.getDeclaredMethod("isValidOrigin", String.class);
+        Method isValidOrigin = WebsocketUtils.class.getDeclaredMethod("isValidOrigin", String.class);
         isValidOrigin.setAccessible(true);
-        assertTrue((Boolean) isValidOrigin.invoke(gateway, "http://example.com"));
-        assertTrue((Boolean) isValidOrigin.invoke(gateway, "https://example.com:8080/path"));
+        assertTrue((Boolean) isValidOrigin.invoke(realUtils, "http://example.com"));
+        assertTrue((Boolean) isValidOrigin.invoke(realUtils, "https://example.com:8080/path"));
     }
 
     @Test
     void isValidOrigin_invalidUrl_returnsFalse() throws Exception {
-        WebsocketGateway gateway = new WebsocketGateway(
-                8080, webSocketClients, websocketUtils, null,
-                accessControlAllowHeaders, null
-        );
+        io.surisoft.capi.configuration.CAPIConfiguration.Websocket wsConfig = new io.surisoft.capi.configuration.CAPIConfiguration.Websocket();
+        wsConfig.setContextPath("/ws/*");
+        WebsocketUtils realUtils = new WebsocketUtils(wsConfig, null, null);
 
-        Method isValidOrigin = WebsocketGateway.class.getDeclaredMethod("isValidOrigin", String.class);
+        Method isValidOrigin = WebsocketUtils.class.getDeclaredMethod("isValidOrigin", String.class);
         isValidOrigin.setAccessible(true);
-        assertFalse((Boolean) isValidOrigin.invoke(gateway, "not-a-url"));
-        assertFalse((Boolean) isValidOrigin.invoke(gateway, ""));
+        assertFalse((Boolean) isValidOrigin.invoke(realUtils, "not-a-url"));
+        assertFalse((Boolean) isValidOrigin.invoke(realUtils, ""));
     }
 
     @Test
     void processOrigin_originWithNewlines_sanitizes() throws Exception {
-        WebsocketGateway gateway = new WebsocketGateway(
-                8080, webSocketClients, websocketUtils, null,
-                accessControlAllowHeaders, null
-        );
+        io.surisoft.capi.configuration.CAPIConfiguration.Websocket wsConfig = new io.surisoft.capi.configuration.CAPIConfiguration.Websocket();
+        wsConfig.setContextPath("/ws/*");
+        WebsocketUtils realUtils = new WebsocketUtils(wsConfig, null, null);
 
         HttpServerExchange exchange = mock(HttpServerExchange.class);
         HeaderMap responseHeaders = new HeaderMap();
         when(exchange.getResponseHeaders()).thenReturn(responseHeaders);
 
-        Method processOrigin = WebsocketGateway.class.getDeclaredMethod("processOrigin", HttpServerExchange.class, String.class);
+        Method processOrigin = WebsocketUtils.class.getDeclaredMethod("processOrigin", HttpServerExchange.class, String.class);
         processOrigin.setAccessible(true);
-        processOrigin.invoke(gateway, exchange, "http://example.com\n");
+        processOrigin.invoke(realUtils, exchange, "http://example.com\n");
 
         // The newline should be stripped from the header value
         String value = responseHeaders.getFirst(HttpString.tryFromString(Constants.ACCESS_CONTROL_ALLOW_ORIGIN));
@@ -245,7 +240,7 @@ class WebsocketGatewayTest {
     void constructor_managedHeaders_includesAccessControlAllowHeaders() throws Exception {
         List<String> headers = List.of("Authorization", "Content-Type", "X-Custom");
         WebsocketGateway gateway = new WebsocketGateway(
-                8080, webSocketClients, websocketUtils, null,
+                8080, 2, webSocketClients, websocketUtils, null,
                 headers, null
         );
 
@@ -264,7 +259,7 @@ class WebsocketGatewayTest {
     @Test
     void constructor_managedHeaders_includesCredentialsAndMethods() throws Exception {
         WebsocketGateway gateway = new WebsocketGateway(
-                8080, webSocketClients, websocketUtils, null,
+                8080, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
 
@@ -280,26 +275,24 @@ class WebsocketGatewayTest {
 
     @Test
     void isValidOrigin_httpsUrl_returnsTrue() throws Exception {
-        WebsocketGateway gateway = new WebsocketGateway(
-                8080, webSocketClients, websocketUtils, null,
-                accessControlAllowHeaders, null
-        );
+        io.surisoft.capi.configuration.CAPIConfiguration.Websocket wsConfig = new io.surisoft.capi.configuration.CAPIConfiguration.Websocket();
+        wsConfig.setContextPath("/ws/*");
+        WebsocketUtils realUtils = new WebsocketUtils(wsConfig, null, null);
 
-        Method isValidOrigin = WebsocketGateway.class.getDeclaredMethod("isValidOrigin", String.class);
+        Method isValidOrigin = WebsocketUtils.class.getDeclaredMethod("isValidOrigin", String.class);
         isValidOrigin.setAccessible(true);
-        assertTrue((Boolean) isValidOrigin.invoke(gateway, "https://secure.example.com"));
+        assertTrue((Boolean) isValidOrigin.invoke(realUtils, "https://secure.example.com"));
     }
 
     @Test
     void isValidOrigin_malformedUrl_returnsFalse() throws Exception {
-        WebsocketGateway gateway = new WebsocketGateway(
-                8080, webSocketClients, websocketUtils, null,
-                accessControlAllowHeaders, null
-        );
+        io.surisoft.capi.configuration.CAPIConfiguration.Websocket wsConfig = new io.surisoft.capi.configuration.CAPIConfiguration.Websocket();
+        wsConfig.setContextPath("/ws/*");
+        WebsocketUtils realUtils = new WebsocketUtils(wsConfig, null, null);
 
-        Method isValidOrigin = WebsocketGateway.class.getDeclaredMethod("isValidOrigin", String.class);
+        Method isValidOrigin = WebsocketUtils.class.getDeclaredMethod("isValidOrigin", String.class);
         isValidOrigin.setAccessible(true);
-        assertFalse((Boolean) isValidOrigin.invoke(gateway, "://bad"));
+        assertFalse((Boolean) isValidOrigin.invoke(realUtils, "://bad"));
     }
 
     // === Integration tests: start real Undertow server and send HTTP requests ===
@@ -314,7 +307,7 @@ class WebsocketGatewayTest {
         when(websocketUtils.createWebsocketAuthorization()).thenThrow(new CapiUndertowException("no oidc"));
 
         runningGateway = new WebsocketGateway(
-                port, webSocketClients, websocketUtils, null,
+                port, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         runningGateway.runProxy();
@@ -336,7 +329,7 @@ class WebsocketGatewayTest {
         when(websocketUtils.getWebclientId("/unknown/path")).thenReturn("unknown-client");
 
         runningGateway = new WebsocketGateway(
-                port, webSocketClients, websocketUtils, null,
+                port, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         runningGateway.runProxy();
@@ -374,7 +367,7 @@ class WebsocketGatewayTest {
         webSocketClients.put(clientKey, wsClient);
 
         runningGateway = new WebsocketGateway(
-                port, webSocketClients, websocketUtils, null,
+                port, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         runningGateway.runProxy();
@@ -409,7 +402,7 @@ class WebsocketGatewayTest {
         webSocketClients.put(clientKey, wsClient);
 
         runningGateway = new WebsocketGateway(
-                port, webSocketClients, websocketUtils, null,
+                port, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         runningGateway.runProxy();
@@ -430,7 +423,7 @@ class WebsocketGatewayTest {
         when(websocketUtils.createWebsocketAuthorization()).thenThrow(new CapiUndertowException("no oidc provider"));
 
         runningGateway = new WebsocketGateway(
-                port, webSocketClients, websocketUtils, null,
+                port, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         // Should not throw even though createWebsocketAuthorization fails
@@ -452,7 +445,7 @@ class WebsocketGatewayTest {
         when(websocketUtils.createWebsocketAuthorization()).thenThrow(new CapiUndertowException("no oidc"));
 
         runningGateway = new WebsocketGateway(
-                port, webSocketClients, websocketUtils, null,
+                port, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         runningGateway.runProxy();
@@ -474,6 +467,11 @@ class WebsocketGatewayTest {
     void runProxy_optionsRequest_knownPath_returnsCorsHeaders() throws Exception {
         int port = pickPort();
         when(websocketUtils.createWebsocketAuthorization()).thenThrow(new CapiUndertowException("no oidc"));
+        io.surisoft.capi.configuration.CAPIConfiguration.Websocket wsConfig = new io.surisoft.capi.configuration.CAPIConfiguration.Websocket();
+        wsConfig.setContextPath("/ws/*");
+        WebsocketUtils realUtils = new WebsocketUtils(wsConfig, null, null);
+        doAnswer(inv -> { realUtils.handleOptionsRequest(inv.getArgument(0), inv.getArgument(1), inv.getArgument(2), inv.getArgument(3)); return null; })
+                .when(websocketUtils).handleOptionsRequest(any(), any(), any(), any());
 
         String clientKey = "/test/ws";
         String requestPath = "/capi/test/ws/stream";
@@ -490,7 +488,7 @@ class WebsocketGatewayTest {
         webSocketClients.put(clientKey, wsClient);
 
         runningGateway = new WebsocketGateway(
-                port, webSocketClients, websocketUtils, null,
+                port, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, "oauth2-cookie"
         );
         runningGateway.runProxy();
@@ -503,7 +501,7 @@ class WebsocketGatewayTest {
                 .build();
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
-        assertEquals(202, response.statusCode());
+        assertEquals(204, response.statusCode());
         // Verify CORS headers are present
         assertTrue(response.headers().firstValue("Access-Control-Allow-Credentials").isPresent());
         assertTrue(response.headers().firstValue("Access-Control-Allow-Methods").isPresent());
@@ -518,7 +516,7 @@ class WebsocketGatewayTest {
         when(websocketUtils.createWebsocketAuthorization()).thenThrow(new CapiUndertowException("no oidc"));
 
         runningGateway = new WebsocketGateway(
-                port, webSocketClients, websocketUtils, null,
+                port, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         runningGateway.runProxy();
@@ -541,7 +539,7 @@ class WebsocketGatewayTest {
         when(websocketUtils.createWebsocketAuthorization()).thenThrow(new CapiUndertowException("no oidc"));
 
         runningGateway = new WebsocketGateway(
-                port, webSocketClients, websocketUtils, null,
+                port, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         runningGateway.runProxy();
@@ -564,6 +562,11 @@ class WebsocketGatewayTest {
     void runProxy_optionsRequest_withoutOauth2Cookie_returnsCors() throws Exception {
         int port = pickPort();
         when(websocketUtils.createWebsocketAuthorization()).thenThrow(new CapiUndertowException("no oidc"));
+        io.surisoft.capi.configuration.CAPIConfiguration.Websocket wsConfig = new io.surisoft.capi.configuration.CAPIConfiguration.Websocket();
+        wsConfig.setContextPath("/ws/*");
+        WebsocketUtils realUtils = new WebsocketUtils(wsConfig, null, null);
+        doAnswer(inv -> { realUtils.handleOptionsRequest(inv.getArgument(0), inv.getArgument(1), inv.getArgument(2), inv.getArgument(3)); return null; })
+                .when(websocketUtils).handleOptionsRequest(any(), any(), any(), any());
 
         String clientKey = "/test/ws";
         String requestPath = "/capi/test/ws/stream";
@@ -581,7 +584,7 @@ class WebsocketGatewayTest {
 
         // null oauth2CookieName - so the localAccessControlAllowHeaders branch is skipped
         runningGateway = new WebsocketGateway(
-                port, webSocketClients, websocketUtils, null,
+                port, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         runningGateway.runProxy();
@@ -594,7 +597,7 @@ class WebsocketGatewayTest {
                 .build();
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
-        assertEquals(202, response.statusCode());
+        assertEquals(204, response.statusCode());
         assertTrue(response.headers().firstValue("Access-Control-Allow-Credentials").isPresent());
     }
 
@@ -605,7 +608,7 @@ class WebsocketGatewayTest {
         when(websocketUtils.getWebclientId("/some/unknown/path")).thenReturn("missing-client");
 
         runningGateway = new WebsocketGateway(
-                port, webSocketClients, websocketUtils, null,
+                port, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
         runningGateway.runProxy();

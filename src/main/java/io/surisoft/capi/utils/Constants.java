@@ -69,12 +69,8 @@ public class Constants {
                                                                            "api-key-store-service",
                                                                            "primary-route"
     );
-    public static final String CAMEL_HTTP_SERVLET_REQUEST = "CamelHttpServletRequest";
-    public static final String CAMEL_CLIENT_ENDPOINT_URL = "capi.client.endpoint.url";
-    public static final String CAMEL_SERVER_ENDPOINT_URL = "capi.server.endpoint.url";
-    public static final String CAMEL_SERVER_EXCHANGE_ID = "capi.server.exchange.id";
+    public static final String SERVER_ENDPOINT_URL = "capi.server.endpoint.url";
     public static final String CAPI_REQUESTER_TOKEN_ISSUER = "capi.requester.token.issuer";
-    public static final String CAMEL_SERVER_EXCHANGE_FAILURE = "camel.server.exchange.failure";
     public static final String CAPI_EXCHANGE_REQUESTER_ID = "capi.token.requester.id";
     public static final String CAPI_TOKEN_EXPIRED = "capi.token.expired";
     public static final String CAPI_REQUEST_METHOD = "capi.request.method";

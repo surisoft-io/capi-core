@@ -15,9 +15,9 @@ import io.surisoft.capi.schema.OpaResult;
 import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.service.OpaService;
 import io.undertow.server.HttpServerExchange;
+import io.undertow.util.HttpString;
 import jakarta.annotation.Nullable;
 import jakarta.servlet.http.HttpServletRequest;
-import org.apache.camel.Exchange;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -99,14 +99,6 @@ public class HttpUtils {
         return null;
     }
 
-    public String extractApiKey(Exchange exchange) {
-        String authorization = exchange.getIn().getHeader(Constants.AUTHORIZATION_HEADER, String.class);
-        if (authorization != null && authorization.startsWith(Constants.API_KEY_SCHEME_PREFIX)) {
-            return authorization.substring(Constants.API_KEY_SCHEME_PREFIX.length());
-        }
-        return null;
-    }
-
     public static String hashApiKey(String rawKey) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -117,36 +109,70 @@ public class HttpUtils {
         }
     }
 
-    public String processAuthorizationAccessToken(Exchange exchange) throws AuthorizationException {
-        String authorization = exchange.getIn().getHeader(Constants.AUTHORIZATION_HEADER, String.class);
-        if (authorization != null && authorization.startsWith(Constants.API_KEY_SCHEME_PREFIX)) {
-            return null;
-        }
-        if(authorization == null) {
-            if(exchange.getIn().getHeader(Constants.AUTHORIZATION_REQUEST_PARAMETER, String.class) != null) {
-                return exchange.getIn().getHeader(Constants.AUTHORIZATION_REQUEST_PARAMETER, String.class);
-            }
-            if(authorizationCookieName != null && exchange.getIn().getHeader(Constants.COOKIE_HEADER) != null) {
-                List<HttpCookie> cookies = getCookiesFromExchange(exchange);
-                String authorizationName = exchange.getIn().getHeader(authorizationCookieName, String.class);
-                if(authorizationName != null) {
-                    return getAuthorizationCookieValue(cookies, authorizationName);
-                }
-            }
-        } else {
+    public String processAuthorizationAccessToken(HttpServerExchange httpServerExchange) throws AuthorizationException {
+        String authorization = httpServerExchange.getRequestHeaders().contains(Constants.AUTHORIZATION_HEADER)
+                ? httpServerExchange.getRequestHeaders().get(Constants.AUTHORIZATION_HEADER).getFirst()
+                : null;
+        if (authorization != null) {
             return getBearerTokenFromHeader(authorization);
+        }
+        if (httpServerExchange.getRequestHeaders().contains(Constants.AUTHORIZATION_REQUEST_PARAMETER)) {
+            return httpServerExchange.getRequestHeaders().get(Constants.AUTHORIZATION_REQUEST_PARAMETER).getFirst();
+        }
+        // Try query parameter (e.g. ?access_token=...)
+        java.util.Deque<String> queryToken = httpServerExchange.getQueryParameters().get(Constants.AUTHORIZATION_REQUEST_PARAMETER);
+        if (queryToken != null && !queryToken.isEmpty()) {
+            return queryToken.getFirst();
+        }
+        // Try cookie-based authorization
+        if (authorizationCookieName != null && httpServerExchange.getRequestHeaders().contains(Constants.COOKIE_HEADER)) {
+            String authorizationName = httpServerExchange.getRequestHeaders().contains(authorizationCookieName)
+                    ? httpServerExchange.getRequestHeaders().get(authorizationCookieName).getFirst()
+                    : null;
+            if (authorizationName != null) {
+                List<HttpCookie> cookies = getCookiesFromExchange(httpServerExchange);
+                return getAuthorizationCookieValue(cookies, authorizationName);
+            }
         }
         return null;
     }
 
-    public String processAuthorizationAccessToken(HttpServerExchange httpServerExchange) throws AuthorizationException {
-        String accessToken = null;
-        if(httpServerExchange.getRequestHeaders().contains(Constants.AUTHORIZATION_HEADER)) {
-            accessToken = getBearerTokenFromHeader(httpServerExchange.getRequestHeaders().get(Constants.AUTHORIZATION_HEADER).get(0));
-        } else if(httpServerExchange.getQueryParameters().containsKey("access_token")) {
-            accessToken = httpServerExchange.getQueryParameters().get("access_token").getFirst();
+    public void propagateAuthorization(HttpServerExchange exchange) {
+        try {
+            // Leave non-Bearer schemes (e.g. Basic) untouched — just forward as-is
+            String existing = exchange.getRequestHeaders().contains(Constants.AUTHORIZATION_HEADER)
+                    ? exchange.getRequestHeaders().get(Constants.AUTHORIZATION_HEADER).getFirst()
+                    : null;
+            if (existing != null && !existing.startsWith(Constants.BEARER)) {
+                return;
+            }
+            String accessToken = processAuthorizationAccessToken(exchange);
+            if (accessToken != null) {
+                exchange.getRequestHeaders().put(
+                        new HttpString(Constants.AUTHORIZATION_HEADER),
+                        Constants.BEARER + accessToken.replaceAll("\\p{Cntrl}", ""));
+            }
+        } catch (Exception e) {
+            log.trace("Could not extract access token for propagation: {}", e.getMessage());
         }
-        return accessToken;
+    }
+
+    private List<HttpCookie> getCookiesFromExchange(HttpServerExchange exchange) {
+        List<HttpCookie> httpCookieList = new ArrayList<>();
+        String cookieHeader = exchange.getRequestHeaders().contains(Constants.COOKIE_HEADER)
+                ? exchange.getRequestHeaders().get(Constants.COOKIE_HEADER).getFirst()
+                : null;
+        if (cookieHeader != null) {
+            String[] cookieArray = cookieHeader.split(";");
+            for (String cookieString : cookieArray) {
+                String[] cookieKeyValue = cookieString.trim().split("=", 2);
+                if (cookieKeyValue.length == 2) {
+                    HttpCookie httpCookie = new HttpCookie(stripOffSurroundingQuote(cookieKeyValue[0].trim()), stripOffSurroundingQuote(cookieKeyValue[1].trim()));
+                    httpCookieList.add(httpCookie);
+                }
+            }
+        }
+        return httpCookieList;
     }
 
     public String processAuthorizationAccessToken(HttpServletRequest httpServletRequest) throws AuthorizationException {
@@ -178,23 +204,6 @@ public class HttpUtils {
 
     public boolean isEndpointSecure(String httpEndpoint) {
         return httpEndpoint.contains("https://");
-    }
-
-    public List<HttpCookie> getCookiesFromExchange(Exchange exchange) {
-        List<HttpCookie> httpCookieList = new ArrayList<>();
-        try {
-            if(exchange.getIn().getHeader(Constants.COOKIE_HEADER) != null) {
-                String[] cookieArray = exchange.getIn().getHeader(Constants.COOKIE_HEADER, String.class).split(";");
-                for (String cookieString : cookieArray) {
-                    String[] cookieKeyValue = cookieString.split("=");
-                    HttpCookie httpCookie = new HttpCookie(stripOffSurroundingQuote(cookieKeyValue[0]), stripOffSurroundingQuote(cookieKeyValue[1]));
-                    httpCookieList.add(httpCookie);
-                }
-            }
-        } catch(Exception e) {
-            return httpCookieList;
-        }
-        return httpCookieList;
     }
 
     public List<HttpCookie> getCookiesFromRequest(HttpServletRequest httpServletRequest) {
@@ -323,42 +332,11 @@ public class HttpUtils {
         }
     }
 
-    public void sendException(Exchange exchange, String message) {
-        String validatedMessage = validateHeaderValue(message);
-        exchange.getIn().setHeader(Constants.REASON_MESSAGE_HEADER, validatedMessage);
-        exchange.getIn().setHeader(Constants.REASON_CODE_HEADER, 403);
-        exchange.setException(new AuthorizationException(message));
-    }
-
     public static String validateHeaderValue(String value) {
         if (!value.matches("^[a-zA-Z0-9 \\-]+$")) {
             throw new IllegalArgumentException("Invalid header value");
         }
         return value;
-    }
-
-    public void prepareForThrottleIfNeeded(Service service, String accessToken, Exchange exchange) throws ParseException {
-        if(service.getServiceMeta().isThrottle() && !service.getServiceMeta().isThrottleGlobal()) {
-            SignedJWT signedJWT = SignedJWT.parse(accessToken);
-            JWTClaimsSet claimsSet = signedJWT.getJWTClaimsSet();
-            if(claimsSet.getClaims().containsKey("throttleTotalCalls") && claimsSet.getClaims().get("throttleTotalCalls") != null) {
-                long throttleTotalCalls = claimsSet.getLongClaim("throttleTotalCalls");
-                long throttleDuration = claimsSet.getLongClaim("throttleDuration");
-                String throttleConsumerKey = claimsSet.getStringClaim("azp");
-                exchange.setProperty(Constants.CAPI_META_THROTTLE_DURATION, throttleDuration);
-                exchange.setProperty(Constants.CAPI_META_THROTTLE_TOTAL_CALLS_ALLOWED, throttleTotalCalls);
-
-                exchange.getIn().setHeader(Constants.CAPI_META_THROTTLE_CONSUMER_KEY, throttleConsumerKey);
-                exchange.getIn().setHeader(Constants.CAPI_META_THROTTLE_DURATION, throttleDuration);
-                exchange.getIn().setHeader(Constants.CAPI_META_THROTTLE_TOTAL_CALLS_ALLOWED, throttleTotalCalls);
-            }
-        }
-    }
-
-    public void propagateAuthorization(Exchange exchange, String accessToken) {
-        if(accessToken != null) {
-            exchange.getIn().setHeader(Constants.AUTHORIZATION_HEADER, Constants.BEARER + accessToken.replaceAll("[\\p{Cntrl}]", ""));
-        }
     }
 
     public boolean isSafeUri(URI uri, boolean allowLocalTraffic) {
