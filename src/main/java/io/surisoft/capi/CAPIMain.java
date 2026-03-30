@@ -294,11 +294,14 @@ public class CAPIMain {
 
     private static void initializeLogs(CAPIConfiguration configuration) {
         if(configuration.getLoggingTraces().isEnabled()) {
-            System.setProperty("logging.logback.logs.enabled", Boolean.toString(true));
-            System.setProperty("logging.logback.logs.tenant", configuration.getLoggingTraces().getTenant());
-            System.setProperty("logging.logback.logs.appName", configuration.getLoggingTraces().getAppName());
-            System.setProperty("logging.logback.logs.appEnvironment", configuration.getLoggingTraces().getAppEnvironment());
-            System.setProperty("logging.logback.logs.destination", configuration.getLoggingTraces().getDestination());
+            String destination = configuration.getLoggingTraces().getDestination();
+            if(destination != null && !destination.isEmpty()) {
+                System.setProperty("logging.logback.logs.enabled", Boolean.toString(true));
+                System.setProperty("logging.logback.logs.tenant", configuration.getLoggingTraces().getTenant());
+                System.setProperty("logging.logback.logs.appName", configuration.getLoggingTraces().getAppName());
+                System.setProperty("logging.logback.logs.appEnvironment", configuration.getLoggingTraces().getAppEnvironment());
+                System.setProperty("logging.logback.logs.destination", destination);
+            }
             if(configuration.getLoggingTraces().getFilePath() != null && !configuration.getLoggingTraces().getFilePath().isEmpty()) {
                 System.setProperty("logging.logback.logs.fileEnabled", Boolean.toString(true));
                 System.setProperty("logging.logback.logs.filePath", configuration.getLoggingTraces().getFilePath());
@@ -306,10 +309,13 @@ public class CAPIMain {
         }
 
         if(configuration.getAccessLogs().isEnabled()) {
-            System.setProperty("logging.logback.access.enabled", Boolean.toString(true));
-            System.setProperty("logging.logback.access.tenant", configuration.getAccessLogs().getTenant());
-            System.setProperty("logging.logback.access.service", configuration.getAccessLogs().getService());
-            System.setProperty("logging.logback.access.destination", configuration.getAccessLogs().getDestination());
+            String accessDestination = configuration.getAccessLogs().getDestination();
+            if(accessDestination != null && !accessDestination.isEmpty()) {
+                System.setProperty("logging.logback.access.enabled", Boolean.toString(true));
+                System.setProperty("logging.logback.access.tenant", configuration.getAccessLogs().getTenant());
+                System.setProperty("logging.logback.access.service", configuration.getAccessLogs().getService());
+                System.setProperty("logging.logback.access.destination", accessDestination);
+            }
             if(configuration.getAccessLogs().getFilePath() != null && !configuration.getAccessLogs().getFilePath().isEmpty()) {
                 System.setProperty("logging.logback.access.fileEnabled", Boolean.toString(true));
                 System.setProperty("logging.logback.access.filePath", configuration.getAccessLogs().getFilePath());

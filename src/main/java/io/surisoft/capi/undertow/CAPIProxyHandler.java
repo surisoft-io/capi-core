@@ -55,15 +55,14 @@ public final class CAPIProxyHandler implements HttpHandler {
      * Hop-by-hop headers (RFC 7230 §6.1) and X-Forwarded-* headers that CAPIProxyHandler sets explicitly.
      */
     private static final Set<HttpString> FILTERED_HEADERS = Set.of(
-            // Hop-by-hop (RFC 7230 §6.1)
-            Headers.CONNECTION,
+            // Hop-by-hop (RFC 7230 §6.1) — Connection and Upgrade are NOT filtered
+            // because they are required for WebSocket handshake proxying.
             Headers.KEEP_ALIVE,
             Headers.PROXY_AUTHENTICATE,
             Headers.PROXY_AUTHORIZATION,
             Headers.TE,
             Headers.TRAILER,
             Headers.TRANSFER_ENCODING,
-            Headers.UPGRADE,
             // X-Forwarded-* — set explicitly by ProxyAction below
             Headers.X_FORWARDED_FOR,
             Headers.X_FORWARDED_PROTO,
