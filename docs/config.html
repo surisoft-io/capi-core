@@ -1,0 +1,1040 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CAPI Gateway — Configuration Generator</title>
+  <meta name="description" content="Interactive configuration generator for CAPI Gateway. Explore every config attribute, enable or disable features, and generate a ready-to-use config.yaml.">
+  <style>
+    :root {
+      --primary: #111111;
+      --primary-light: #222222;
+      --accent: #000000;
+      --surface: #f5f5f5;
+      --surface-alt: #e8e8e8;
+      --text: #111111;
+      --text-muted: #666666;
+      --white: #ffffff;
+      --border: #d4d4d4;
+      --radius: 10px;
+      --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.04);
+      --shadow-lg: 0 4px 24px rgba(0,0,0,0.10);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      color: var(--text); line-height: 1.6; background: var(--white);
+    }
+
+    /* --- Nav --- */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      background: rgba(17,17,17,0.97); backdrop-filter: blur(8px);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .nav-inner {
+      max-width: 1120px; margin: 0 auto;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 24px; height: 60px;
+    }
+    .nav-logo {
+      display: inline-flex; align-items: center; gap: 10px;
+      font-size: 1.25rem; font-weight: 700; color: var(--white); text-decoration: none; letter-spacing: -0.5px;
+    }
+    .nav-logo img { height: 32px; width: auto; }
+    .nav-logo span { color: #cccccc; }
+    .nav-links { display: flex; gap: 28px; list-style: none; }
+    .nav-links a {
+      color: rgba(255,255,255,0.75); text-decoration: none; font-size: 0.9rem; font-weight: 500;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--white); }
+    .nav-gh {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15);
+      padding: 6px 14px; border-radius: 6px; color: var(--white); text-decoration: none;
+      font-size: 0.85rem; font-weight: 500; transition: background 0.2s;
+    }
+    .nav-gh:hover { background: rgba(255,255,255,0.18); }
+    .nav-gh svg { width: 18px; height: 18px; fill: currentColor; }
+
+    /* --- Header --- */
+    .page-header {
+      background: linear-gradient(160deg, var(--primary) 0%, var(--primary-light) 60%, #333333 100%);
+      color: var(--white); padding: 100px 24px 48px; text-align: center;
+    }
+    .page-header h1 { font-size: 2.2rem; font-weight: 800; letter-spacing: -1px; margin-bottom: 12px; }
+    .page-header p { font-size: 1.1rem; color: rgba(255,255,255,0.8); max-width: 600px; margin: 0 auto; }
+
+    /* --- Layout --- */
+    .main { max-width: 1120px; margin: 0 auto; padding: 48px 24px; }
+    .toc { margin-bottom: 40px; }
+    .toc h2 { font-size: 1.2rem; font-weight: 700; margin-bottom: 12px; }
+    .toc ul { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; }
+    .toc a {
+      display: inline-block; padding: 6px 16px; border-radius: 6px;
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--text); text-decoration: none; font-size: 0.88rem; font-weight: 500;
+      transition: all 0.2s;
+    }
+    .toc a:hover { background: var(--surface-alt); box-shadow: var(--shadow); }
+
+    /* --- Section cards --- */
+    .config-section {
+      background: var(--white); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 32px; margin-bottom: 24px;
+      box-shadow: var(--shadow);
+    }
+    .config-section h2 {
+      font-size: 1.25rem; font-weight: 700; margin-bottom: 4px;
+      padding-bottom: 12px; border-bottom: 1px solid var(--border);
+    }
+    .config-section .section-desc {
+      font-size: 0.92rem; color: var(--text-muted); margin-bottom: 20px; padding-top: 8px;
+    }
+
+    /* --- Field rows --- */
+    .field { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; align-items: start; padding: 14px 0; border-bottom: 1px solid #eee; }
+    .field:last-child { border-bottom: none; }
+    .field-info h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 2px; }
+    .field-info .yaml-path { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.8rem; color: var(--text-muted); }
+    .field-info p { font-size: 0.85rem; color: var(--text-muted); margin-top: 4px; line-height: 1.5; }
+    .field-control { display: flex; align-items: center; gap: 8px; }
+    .field-control input[type="text"],
+    .field-control input[type="number"],
+    .field-control select {
+      width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px;
+      font-size: 0.9rem; font-family: inherit; background: var(--white);
+    }
+    .field-control input:focus, .field-control select:focus { outline: none; border-color: #888; }
+
+    /* Toggle switch */
+    .toggle { position: relative; width: 48px; height: 26px; flex-shrink: 0; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle .slider {
+      position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+      background: #ccc; border-radius: 26px; cursor: pointer; transition: 0.3s;
+    }
+    .toggle .slider::before {
+      content: ''; position: absolute; width: 20px; height: 20px; left: 3px; bottom: 3px;
+      background: var(--white); border-radius: 50%; transition: 0.3s;
+    }
+    .toggle input:checked + .slider { background: var(--primary); }
+    .toggle input:checked + .slider::before { transform: translateX(22px); }
+
+    .children { margin-left: 16px; border-left: 2px solid var(--surface-alt); padding-left: 16px; }
+    .children.disabled { opacity: 0.4; pointer-events: none; }
+
+    /* --- List fields --- */
+    .list-items { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+    .list-item { display: flex; gap: 6px; align-items: center; }
+    .list-item input { flex: 1; }
+    .list-item button {
+      background: none; border: 1px solid var(--border); border-radius: 4px;
+      padding: 4px 10px; cursor: pointer; font-size: 0.85rem; color: var(--text-muted);
+    }
+    .list-item button:hover { background: #fee; color: #c00; border-color: #c00; }
+    .add-item-btn {
+      background: var(--surface); border: 1px dashed var(--border); border-radius: 6px;
+      padding: 6px 14px; cursor: pointer; font-size: 0.85rem; color: var(--text-muted);
+      margin-top: 6px;
+    }
+    .add-item-btn:hover { background: var(--surface-alt); }
+
+    /* --- Generate bar --- */
+    .generate-bar {
+      position: sticky; bottom: 0; background: var(--primary); padding: 16px 24px;
+      display: flex; align-items: center; justify-content: center; gap: 16px;
+      border-radius: var(--radius) var(--radius) 0 0; box-shadow: 0 -4px 20px rgba(0,0,0,0.15);
+      z-index: 50;
+    }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 12px 28px; border-radius: 8px; font-size: 1rem; font-weight: 600;
+      text-decoration: none; transition: all 0.2s; border: none; cursor: pointer;
+    }
+    .btn-primary { background: var(--white); color: var(--primary); }
+    .btn-primary:hover { background: #e0e0e0; }
+    .btn-secondary {
+      background: transparent; color: var(--white);
+      border: 1.5px solid rgba(255,255,255,0.3);
+    }
+    .btn-secondary:hover { border-color: rgba(255,255,255,0.6); background: rgba(255,255,255,0.05); }
+
+    /* --- Output --- */
+    .output-section {
+      display: none; margin-top: 32px; margin-bottom: 80px;
+    }
+    .output-section.visible { display: block; }
+    .output-section h2 { font-size: 1.3rem; font-weight: 700; margin-bottom: 12px; }
+    .output-wrapper {
+      position: relative; background: var(--primary); border-radius: var(--radius);
+      box-shadow: var(--shadow-lg);
+    }
+    .output-wrapper textarea {
+      width: 100%; min-height: 500px; padding: 24px 28px; border: none; border-radius: var(--radius);
+      background: transparent; color: #e2e8f0;
+      font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 0.88rem;
+      line-height: 1.7; resize: vertical;
+    }
+    .output-wrapper textarea:focus { outline: none; }
+    .copy-btn {
+      position: absolute; top: 12px; right: 12px;
+      background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+      color: var(--white); padding: 6px 14px; border-radius: 6px;
+      font-size: 0.82rem; cursor: pointer; transition: 0.2s;
+    }
+    .copy-btn:hover { background: rgba(255,255,255,0.2); }
+
+    /* --- Footer --- */
+    footer {
+      text-align: center; padding: 40px 24px; color: var(--text-muted); font-size: 0.85rem;
+      border-top: 1px solid var(--border);
+    }
+
+    @media (max-width: 700px) {
+      .field { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-inner">
+    <a href="index.html" class="nav-logo">
+      <img src="capi-logo-white.svg" alt="CAPI">
+      <span>Config Generator</span>
+    </a>
+    <ul class="nav-links">
+      <li><a href="index.html">Home</a></li>
+      <li><a href="guide.html">Guide</a></li>
+      <li><a href="security.md">Security</a></li>
+      <li><a href="config.html">Config</a></li>
+    </ul>
+    <a href="https://github.com/surisoft-io/capi" class="nav-gh">
+      <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+      GitHub
+    </a>
+  </div>
+</nav>
+
+<div class="page-header">
+  <h1>Configuration Generator</h1>
+  <p>Explore every CAPI configuration attribute, toggle features on or off, and generate a ready-to-use <code>config.yaml</code>.</p>
+</div>
+
+<div class="main">
+
+  <div class="toc">
+    <h2>Sections</h2>
+    <ul>
+      <li><a href="#sec-general">General</a></li>
+      <li><a href="#sec-rest">REST Gateway</a></li>
+      <li><a href="#sec-websocket">WebSocket Gateway</a></li>
+      <li><a href="#sec-grpc">gRPC Gateway</a></li>
+      <li><a href="#sec-ssl">SSL</a></li>
+      <li><a href="#sec-truststore">Trust Store</a></li>
+      <li><a href="#sec-consul">Consul Discovery</a></li>
+      <li><a href="#sec-consulstore">Consul KV Store</a></li>
+      <li><a href="#sec-apikey">API Key Store</a></li>
+      <li><a href="#sec-oauth2">OAuth2 / JWT</a></li>
+      <li><a href="#sec-opa">OPA (Open Policy Agent)</a></li>
+      <li><a href="#sec-traces">Tracing (OpenTelemetry)</a></li>
+      <li><a href="#sec-cors">CORS &amp; Allowed Headers</a></li>
+      <li><a href="#sec-logging">Logging Traces</a></li>
+      <li><a href="#sec-accesslogs">Access Logs</a></li>
+      <li><a href="#sec-throttle">Throttle</a></li>
+      <li><a href="#sec-mcp">MCP Gateway</a></li>
+    </ul>
+  </div>
+
+  <!-- ===== General ===== -->
+  <div class="config-section" id="sec-general">
+    <h2>General</h2>
+    <p class="section-desc">Core gateway identity and operating mode.</p>
+
+    <div class="field">
+      <div class="field-info">
+        <h3>Version</h3>
+        <div class="yaml-path">capi.version</div>
+        <p>Configuration schema version. Used for compatibility tracking.</p>
+      </div>
+      <div class="field-control"><input type="text" id="version" value="2.0"></div>
+    </div>
+
+    <div class="field">
+      <div class="field-info">
+        <h3>Instance Name</h3>
+        <div class="yaml-path">capi.instanceName</div>
+        <p>Unique name for this gateway instance. Used by Consul to filter which services this instance should discover.</p>
+      </div>
+      <div class="field-control"><input type="text" id="instanceName" value="capi-instance"></div>
+    </div>
+
+    <div class="field">
+      <div class="field-info">
+        <h3>Strict to Instance Name</h3>
+        <div class="yaml-path">capi.strictToInstanceName</div>
+        <p>When enabled, only services tagged with this instance name in Consul metadata will be discovered. Disable to discover all services.</p>
+      </div>
+      <div class="field-control">
+        <label class="toggle"><input type="checkbox" id="strictToInstanceName" checked><span class="slider"></span></label>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-info">
+        <h3>Public Endpoint</h3>
+        <div class="yaml-path">capi.publicEndpoint</div>
+        <p>The externally reachable URL for this gateway. Used in documentation and discovery responses.</p>
+      </div>
+      <div class="field-control"><input type="text" id="publicEndpoint" value="http://localhost:8380/api/"></div>
+    </div>
+
+    <div class="field">
+      <div class="field-info">
+        <h3>Running Mode</h3>
+        <div class="yaml-path">capi.runningMode</div>
+        <p><strong>full</strong>: Runs all enabled gateways (REST, WebSocket, gRPC, MCP) and the admin API.<br>
+           <strong>rest</strong>: Only REST gateway.<br>
+           <strong>websocket</strong>: Only WebSocket gateway.<br>
+           <strong>grpc</strong>: Only gRPC gateway.</p>
+      </div>
+      <div class="field-control">
+        <select id="runningMode">
+          <option value="full" selected>full</option>
+          <option value="rest">rest</option>
+          <option value="websocket">websocket</option>
+          <option value="grpc">grpc</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-info">
+        <h3>Admin Port</h3>
+        <div class="yaml-path">capi.adminPort</div>
+        <p>Port for the admin API. Exposes management endpoints for route listing, health, and Swagger aggregation.</p>
+      </div>
+      <div class="field-control"><input type="number" id="adminPort" value="8381"></div>
+    </div>
+
+    <div class="field">
+      <div class="field-info">
+        <h3>Reverse Proxy Host</h3>
+        <div class="yaml-path">capi.reverseProxyHost</div>
+        <p>If CAPI runs behind a reverse proxy (e.g. nginx), set this to the proxy's host. Leave empty if not behind a proxy.</p>
+      </div>
+      <div class="field-control"><input type="text" id="reverseProxyHost" value="" placeholder="(empty = not behind proxy)"></div>
+    </div>
+  </div>
+
+  <!-- ===== REST ===== -->
+  <div class="config-section" id="sec-rest">
+    <h2>REST Gateway</h2>
+    <p class="section-desc">HTTP reverse proxy for REST API traffic. Routes are discovered automatically from Consul.</p>
+
+    <div class="field">
+      <div class="field-info"><h3>Enabled</h3><div class="yaml-path">capi.rest.enabled</div><p>Enable or disable the REST gateway.</p></div>
+      <div class="field-control"><label class="toggle"><input type="checkbox" id="rest.enabled" checked data-toggles="rest-children"><span class="slider"></span></label></div>
+    </div>
+    <div class="children" id="rest-children">
+      <div class="field">
+        <div class="field-info"><h3>Port</h3><div class="yaml-path">capi.rest.port</div><p>Listening port for REST traffic.</p></div>
+        <div class="field-control"><input type="number" id="rest.port" value="8380"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>Listening Address</h3><div class="yaml-path">capi.rest.listeningAddress</div><p>Bind address. Use <code>0.0.0.0</code> for all interfaces or <code>127.0.0.1</code> for localhost only.</p></div>
+        <div class="field-control"><input type="text" id="rest.listeningAddress" value="0.0.0.0"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>Context Path</h3><div class="yaml-path">capi.rest.contextPath</div><p>Base path prefix for all REST routes (e.g. <code>/api</code>).</p></div>
+        <div class="field-control"><input type="text" id="rest.contextPath" value="/api"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>I/O Threads</h3><div class="yaml-path">capi.rest.ioThreads</div><p>Number of XNIO I/O threads for the Undertow server. Typically set to the number of CPU cores.</p></div>
+        <div class="field-control"><input type="number" id="rest.ioThreads" value="4"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>Connection Request Timeout</h3><div class="yaml-path">capi.rest.connectionRequestTimeout</div><p>Timeout in ms to obtain a connection from the pool to the upstream service.</p></div>
+        <div class="field-control"><input type="number" id="rest.connectionRequestTimeout" value="5000"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>Request Timeout</h3><div class="yaml-path">capi.rest.requestTimeout</div><p>Timeout in ms for the upstream request to begin sending a response.</p></div>
+        <div class="field-control"><input type="number" id="rest.requestTimeout" value="5000"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>Response Timeout</h3><div class="yaml-path">capi.rest.responseTimeout</div><p>Timeout in ms for the complete response to be received from the upstream. Set higher for large payloads or streaming.</p></div>
+        <div class="field-control"><input type="number" id="rest.responseTimeout" value="120000"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== WebSocket ===== -->
+  <div class="config-section" id="sec-websocket">
+    <h2>WebSocket Gateway</h2>
+    <p class="section-desc">WebSocket reverse proxy for real-time bidirectional communication.</p>
+
+    <div class="field">
+      <div class="field-info"><h3>Enabled</h3><div class="yaml-path">capi.websocket.enabled</div><p>Enable or disable the WebSocket gateway.</p></div>
+      <div class="field-control"><label class="toggle"><input type="checkbox" id="ws.enabled" checked data-toggles="ws-children"><span class="slider"></span></label></div>
+    </div>
+    <div class="children" id="ws-children">
+      <div class="field">
+        <div class="field-info"><h3>Port</h3><div class="yaml-path">capi.websocket.port</div><p>Listening port for WebSocket traffic.</p></div>
+        <div class="field-control"><input type="number" id="ws.port" value="8382"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>Listening Address</h3><div class="yaml-path">capi.websocket.listeningAddress</div><p>Bind address for the WebSocket server.</p></div>
+        <div class="field-control"><input type="text" id="ws.listeningAddress" value="0.0.0.0"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>Context Path</h3><div class="yaml-path">capi.websocket.contextPath</div><p>Base path for WebSocket connections (e.g. <code>/capi/*</code>).</p></div>
+        <div class="field-control"><input type="text" id="ws.contextPath" value="/capi/*"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>I/O Threads</h3><div class="yaml-path">capi.websocket.ioThreads</div><p>Number of XNIO I/O threads for the WebSocket server.</p></div>
+        <div class="field-control"><input type="number" id="ws.ioThreads" value="8"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== gRPC ===== -->
+  <div class="config-section" id="sec-grpc">
+    <h2>gRPC Gateway</h2>
+    <p class="section-desc">gRPC reverse proxy for protocol-buffer based services.</p>
+
+    <div class="field">
+      <div class="field-info"><h3>Enabled</h3><div class="yaml-path">capi.grpc.enabled</div><p>Enable or disable the gRPC gateway.</p></div>
+      <div class="field-control"><label class="toggle"><input type="checkbox" id="grpc.enabled" data-toggles="grpc-children"><span class="slider"></span></label></div>
+    </div>
+    <div class="children disabled" id="grpc-children">
+      <div class="field">
+        <div class="field-info"><h3>Port</h3><div class="yaml-path">capi.grpc.port</div><p>Listening port for gRPC traffic.</p></div>
+        <div class="field-control"><input type="number" id="grpc.port" value="8384"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== SSL ===== -->
+  <div class="config-section" id="sec-ssl">
+    <h2>SSL / TLS</h2>
+    <p class="section-desc">Configure SSL termination at the gateway level. When enabled, the gateway will serve HTTPS.</p>
+
+    <div class="field">
+      <div class="field-info"><h3>Enabled</h3><div class="yaml-path">capi.ssl.enabled</div><p>Enable SSL termination. Requires a valid keystore.</p></div>
+      <div class="field-control"><label class="toggle"><input type="checkbox" id="ssl.enabled" data-toggles="ssl-children"><span class="slider"></span></label></div>
+    </div>
+    <div class="children disabled" id="ssl-children">
+      <div class="field">
+        <div class="field-info"><h3>Key Store Type</h3><div class="yaml-path">capi.ssl.keyStoreType</div><p>Format of the keystore file (e.g. <code>PKCS12</code>, <code>JKS</code>).</p></div>
+        <div class="field-control">
+          <select id="ssl.keyStoreType"><option value="PKCS12" selected>PKCS12</option><option value="JKS">JKS</option></select>
+        </div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>Path</h3><div class="yaml-path">capi.ssl.path</div><p>File system path to the keystore file.</p></div>
+        <div class="field-control"><input type="text" id="ssl.path" value="" placeholder="/path/to/keystore.p12"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>Password</h3><div class="yaml-path">capi.ssl.password</div><p>Password to unlock the keystore.</p></div>
+        <div class="field-control"><input type="text" id="ssl.password" value="" placeholder="keystore password"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Trust Store ===== -->
+  <div class="config-section" id="sec-truststore">
+    <h2>Trust Store</h2>
+    <p class="section-desc">Custom trust store for upstream TLS connections. Use when upstream services present certificates signed by internal CAs.</p>
+
+    <div class="field">
+      <div class="field-info"><h3>Enabled</h3><div class="yaml-path">capi.trustStore.enabled</div><p>Enable a custom trust store for outbound connections.</p></div>
+      <div class="field-control"><label class="toggle"><input type="checkbox" id="trust.enabled" data-toggles="trust-children"><span class="slider"></span></label></div>
+    </div>
+    <div class="children disabled" id="trust-children">
+      <div class="field">
+        <div class="field-info"><h3>Path</h3><div class="yaml-path">capi.trustStore.path</div><p>File system path to the trust store. Leave empty if using <em>encoded</em>.</p></div>
+        <div class="field-control"><input type="text" id="trust.path" value="" placeholder="/path/to/truststore.jks"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>Encoded</h3><div class="yaml-path">capi.trustStore.encoded</div><p>Base64-encoded trust store content. Alternative to providing a file path; useful in containerized environments.</p></div>
+        <div class="field-control"><input type="text" id="trust.encoded" value="" placeholder="(base64 string)"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>Password</h3><div class="yaml-path">capi.trustStore.password</div><p>Password to unlock the trust store.</p></div>
+        <div class="field-control"><input type="text" id="trust.password" value="" placeholder="truststore password"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Consul ===== -->
+  <div class="config-section" id="sec-consul">
+    <h2>Consul Discovery</h2>
+    <p class="section-desc">CAPI discovers upstream services from the Consul catalog. Configure the polling interval and Consul endpoints.</p>
+
+    <div class="field">
+      <div class="field-info">
+        <h3>Discovery Interval</h3>
+        <div class="yaml-path">capi.consulCatalogDiscoverInterval</div>
+        <p>How often (in ms) to poll the Consul catalog for service changes.</p>
+      </div>
+      <div class="field-control"><input type="number" id="consulInterval" value="10000"></div>
+    </div>
+
+    <div class="field">
+      <div class="field-info">
+        <h3>Consul Hosts</h3>
+        <div class="yaml-path">capi.consulHosts</div>
+        <p>List of Consul endpoints. Each entry has an <code>endpoint</code> URL and optional ACL <code>token</code>.</p>
+      </div>
+      <div class="field-control">
+        <div class="list-items" id="consulHosts-list">
+          <div class="list-item">
+            <input type="text" value="http://localhost:8500" placeholder="endpoint URL" class="consul-endpoint">
+            <input type="text" value="" placeholder="token (optional)" class="consul-token" style="max-width:160px">
+            <button onclick="this.closest('.list-item').remove()">x</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <button class="add-item-btn" onclick="addConsulHost()">+ Add Consul host</button>
+  </div>
+
+  <!-- ===== Consul KV Store ===== -->
+  <div class="config-section" id="sec-consulstore">
+    <h2>Consul KV Store</h2>
+    <p class="section-desc">Optional Consul KV store integration for persisting gateway state such as API keys.</p>
+
+    <div class="field">
+      <div class="field-info"><h3>Enabled</h3><div class="yaml-path">capi.consulStore.enabled</div><p>Enable Consul KV store integration.</p></div>
+      <div class="field-control"><label class="toggle"><input type="checkbox" id="consulStore.enabled" data-toggles="consulStore-children"><span class="slider"></span></label></div>
+    </div>
+    <div class="children disabled" id="consulStore-children">
+      <div class="field">
+        <div class="field-info"><h3>Endpoint</h3><div class="yaml-path">capi.consulStore.endpoint</div><p>Consul HTTP endpoint for KV operations.</p></div>
+        <div class="field-control"><input type="text" id="consulStore.endpoint" value="http://localhost:8500"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>Token</h3><div class="yaml-path">capi.consulStore.token</div><p>ACL token for Consul KV access.</p></div>
+        <div class="field-control"><input type="text" id="consulStore.token" value="" placeholder="(optional)"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== API Key Store ===== -->
+  <div class="config-section" id="sec-apikey">
+    <h2>API Key Store</h2>
+    <p class="section-desc">Enable API key-based authentication. API keys are managed via the admin API and optionally persisted in Consul KV.</p>
+
+    <div class="field">
+      <div class="field-info"><h3>Enabled</h3><div class="yaml-path">capi.apiKeyStore.enabled</div><p>Enable API key authentication support.</p></div>
+      <div class="field-control"><label class="toggle"><input type="checkbox" id="apiKey.enabled"><span class="slider"></span></label></div>
+    </div>
+  </div>
+
+  <!-- ===== OAuth2 ===== -->
+  <div class="config-section" id="sec-oauth2">
+    <h2>OAuth2 / JWT</h2>
+    <p class="section-desc">JWT-based authentication using OAuth2 JWKS endpoints. When enabled, secured routes will validate bearer tokens against these keys.</p>
+
+    <div class="field">
+      <div class="field-info"><h3>Enabled</h3><div class="yaml-path">capi.oauth2.enabled</div><p>Enable JWT token validation.</p></div>
+      <div class="field-control"><label class="toggle"><input type="checkbox" id="oauth2.enabled" data-toggles="oauth2-children"><span class="slider"></span></label></div>
+    </div>
+    <div class="children disabled" id="oauth2-children">
+      <div class="field">
+        <div class="field-info"><h3>Cookie Name</h3><div class="yaml-path">capi.oauth2.cookieName</div><p>Name of the cookie to read the JWT token from (alternative to Authorization header).</p></div>
+        <div class="field-control"><input type="text" id="oauth2.cookieName" value="x-apigateway-authorization-cookie-name"></div>
+      </div>
+      <div class="field">
+        <div class="field-info">
+          <h3>JWKS Key URLs</h3>
+          <div class="yaml-path">capi.oauth2.keys</div>
+          <p>List of JWKS endpoint URLs used to fetch public keys for JWT verification.</p>
+        </div>
+        <div class="field-control">
+          <div class="list-items" id="oauth2Keys-list">
+            <div class="list-item">
+              <input type="text" value="" placeholder="https://idp.example.com/.well-known/jwks.json" class="oauth2-key">
+              <button onclick="this.closest('.list-item').remove()">x</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <button class="add-item-btn" onclick="addOAuth2Key()">+ Add JWKS URL</button>
+    </div>
+  </div>
+
+  <!-- ===== OPA ===== -->
+  <div class="config-section" id="sec-opa">
+    <h2>OPA (Open Policy Agent)</h2>
+    <p class="section-desc">Policy-based authorization using OPA. Supports remote OPA server or in-process Wasm bundle evaluation.</p>
+
+    <div class="field">
+      <div class="field-info"><h3>Enabled</h3><div class="yaml-path">capi.opa.enabled</div><p>Enable OPA policy evaluation for route authorization.</p></div>
+      <div class="field-control"><label class="toggle"><input type="checkbox" id="opa.enabled" data-toggles="opa-children"><span class="slider"></span></label></div>
+    </div>
+    <div class="children disabled" id="opa-children">
+      <div class="field">
+        <div class="field-info"><h3>Endpoint</h3><div class="yaml-path">capi.opa.endpoint</div><p>URL of the remote OPA server (used when Wasm is disabled).</p></div>
+        <div class="field-control"><input type="text" id="opa.endpoint" value="http://localhost:8181"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>Wasm Enabled</h3><div class="yaml-path">capi.opa.wasmEnabled</div><p>Evaluate policies in-process using a compiled Wasm bundle instead of calling the remote OPA server.</p></div>
+        <div class="field-control"><label class="toggle"><input type="checkbox" id="opa.wasmEnabled" data-toggles="opa-wasm-children"><span class="slider"></span></label></div>
+      </div>
+      <div class="children disabled" id="opa-wasm-children">
+        <div class="field">
+          <div class="field-info"><h3>Wasm Bundle URL</h3><div class="yaml-path">capi.opa.wasmBundleUrl</div><p>URL to download the OPA Wasm bundle from.</p></div>
+          <div class="field-control"><input type="text" id="opa.wasmBundleUrl" value="" placeholder="http://opa:8181/bundles/policy.tar.gz"></div>
+        </div>
+        <div class="field">
+          <div class="field-info"><h3>Bundle Poll Interval</h3><div class="yaml-path">capi.opa.wasmBundlePollIntervalSeconds</div><p>How often (in seconds) to re-fetch the Wasm bundle.</p></div>
+          <div class="field-control"><input type="number" id="opa.wasmBundlePollIntervalSeconds" value="60"></div>
+        </div>
+        <div class="field">
+          <div class="field-info"><h3>Wasm Pool Size</h3><div class="yaml-path">capi.opa.wasmPoolSize</div><p>Number of pooled Wasm instances for concurrent evaluation.</p></div>
+          <div class="field-control"><input type="number" id="opa.wasmPoolSize" value="10"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Traces ===== -->
+  <div class="config-section" id="sec-traces">
+    <h2>Tracing (OpenTelemetry)</h2>
+    <p class="section-desc">Distributed tracing via OpenTelemetry. Sends spans to an OTLP-compatible collector.</p>
+
+    <div class="field">
+      <div class="field-info"><h3>Enabled</h3><div class="yaml-path">capi.traces.enabled</div><p>Enable distributed tracing.</p></div>
+      <div class="field-control"><label class="toggle"><input type="checkbox" id="traces.enabled" data-toggles="traces-children"><span class="slider"></span></label></div>
+    </div>
+    <div class="children disabled" id="traces-children">
+      <div class="field">
+        <div class="field-info"><h3>Service Name</h3><div class="yaml-path">capi.traces.serviceName</div><p>Name used to identify this service in traces.</p></div>
+        <div class="field-control"><input type="text" id="traces.serviceName" value="capi"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>Endpoint</h3><div class="yaml-path">capi.traces.endpoint</div><p>OTLP collector endpoint (HTTP).</p></div>
+        <div class="field-control"><input type="text" id="traces.endpoint" value="http://localhost:4318"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>Extra Metadata Prefix</h3><div class="yaml-path">capi.traces.extraMetadataPrefix</div><p>Prefix to match Consul metadata keys to add as span attributes. Leave empty to skip.</p></div>
+        <div class="field-control"><input type="text" id="traces.extraMetadataPrefix" value="" placeholder="(optional)"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== CORS ===== -->
+  <div class="config-section" id="sec-cors">
+    <h2>CORS &amp; Allowed Headers</h2>
+    <p class="section-desc">Cross-Origin Resource Sharing and managed headers for the REST gateway.</p>
+
+    <div class="field">
+      <div class="field-info"><h3>CORS Enabled</h3><div class="yaml-path">capi.corsEnabled</div><p>Enable CORS handling for preflight OPTIONS requests.</p></div>
+      <div class="field-control"><label class="toggle"><input type="checkbox" id="corsEnabled"><span class="slider"></span></label></div>
+    </div>
+
+    <div class="field">
+      <div class="field-info">
+        <h3>Allowed Headers</h3>
+        <div class="yaml-path">capi.allowedHeaders</div>
+        <p>Headers that the gateway will accept and forward. These are also used in CORS <code>Access-Control-Allow-Headers</code>.</p>
+      </div>
+      <div class="field-control">
+        <div class="list-items" id="allowedHeaders-list">
+          <div class="list-item"><input type="text" value="Origin" class="header-item"><button onclick="this.closest('.list-item').remove()">x</button></div>
+          <div class="list-item"><input type="text" value="Accept" class="header-item"><button onclick="this.closest('.list-item').remove()">x</button></div>
+          <div class="list-item"><input type="text" value="X-Requested-With" class="header-item"><button onclick="this.closest('.list-item').remove()">x</button></div>
+          <div class="list-item"><input type="text" value="Content-Type" class="header-item"><button onclick="this.closest('.list-item').remove()">x</button></div>
+          <div class="list-item"><input type="text" value="Access-Control-Request-Method" class="header-item"><button onclick="this.closest('.list-item').remove()">x</button></div>
+          <div class="list-item"><input type="text" value="Authorization" class="header-item"><button onclick="this.closest('.list-item').remove()">x</button></div>
+        </div>
+      </div>
+    </div>
+    <button class="add-item-btn" onclick="addHeader()">+ Add header</button>
+  </div>
+
+  <!-- ===== Logging Traces ===== -->
+  <div class="config-section" id="sec-logging">
+    <h2>Logging Traces</h2>
+    <p class="section-desc">Structured logging for request/response traces. Can output to file or a remote destination.</p>
+
+    <div class="field">
+      <div class="field-info"><h3>Enabled</h3><div class="yaml-path">capi.loggingTraces.enabled</div><p>Enable structured logging traces.</p></div>
+      <div class="field-control"><label class="toggle"><input type="checkbox" id="logging.enabled" checked data-toggles="logging-children"><span class="slider"></span></label></div>
+    </div>
+    <div class="children" id="logging-children">
+      <div class="field">
+        <div class="field-info"><h3>Tenant</h3><div class="yaml-path">capi.loggingTraces.tenant</div><p>Tenant identifier added to log entries.</p></div>
+        <div class="field-control"><input type="text" id="logging.tenant" value="capi"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>App Name</h3><div class="yaml-path">capi.loggingTraces.appName</div><p>Application name added to log entries.</p></div>
+        <div class="field-control"><input type="text" id="logging.appName" value="capi"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>App Environment</h3><div class="yaml-path">capi.loggingTraces.appEnvironment</div><p>Environment label (e.g. dev, staging, prod).</p></div>
+        <div class="field-control"><input type="text" id="logging.appEnvironment" value="dev"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>Destination</h3><div class="yaml-path">capi.loggingTraces.destination</div><p>Remote destination for log shipping (e.g. Logstash endpoint). Leave empty for local-only.</p></div>
+        <div class="field-control"><input type="text" id="logging.destination" value="" placeholder="host:port (optional)"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>File Path</h3><div class="yaml-path">capi.loggingTraces.filePath</div><p>Local file path for log output.</p></div>
+        <div class="field-control"><input type="text" id="logging.filePath" value="" placeholder="/var/log/capi/capi.logs"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Access Logs ===== -->
+  <div class="config-section" id="sec-accesslogs">
+    <h2>Access Logs</h2>
+    <p class="section-desc">HTTP access logs for auditing and monitoring. Can be sent to a remote collector or written to a file.</p>
+
+    <div class="field">
+      <div class="field-info"><h3>Enabled</h3><div class="yaml-path">capi.accessLogs.enabled</div><p>Enable access log collection.</p></div>
+      <div class="field-control"><label class="toggle"><input type="checkbox" id="access.enabled" data-toggles="access-children"><span class="slider"></span></label></div>
+    </div>
+    <div class="children disabled" id="access-children">
+      <div class="field">
+        <div class="field-info"><h3>Tenant</h3><div class="yaml-path">capi.accessLogs.tenant</div><p>Tenant identifier for access logs.</p></div>
+        <div class="field-control"><input type="text" id="access.tenant" value="capi"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>Service</h3><div class="yaml-path">capi.accessLogs.service</div><p>Service name for access logs.</p></div>
+        <div class="field-control"><input type="text" id="access.service" value="capi"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>Destination</h3><div class="yaml-path">capi.accessLogs.destination</div><p>Remote collector endpoint (e.g. <code>host:port</code>).</p></div>
+        <div class="field-control"><input type="text" id="access.destination" value="" placeholder="localhost:5444"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>File Path</h3><div class="yaml-path">capi.accessLogs.filePath</div><p>Local file path for access log output.</p></div>
+        <div class="field-control"><input type="text" id="access.filePath" value="" placeholder="/var/log/capi/access.log"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Throttle ===== -->
+  <div class="config-section" id="sec-throttle">
+    <h2>Throttle</h2>
+    <p class="section-desc">Rate limiting using distributed counters. In Kubernetes, uses the Kubernetes API to coordinate across replicas.</p>
+
+    <div class="field">
+      <div class="field-info"><h3>Enabled</h3><div class="yaml-path">capi.throttle.enabled</div><p>Enable rate limiting / throttling.</p></div>
+      <div class="field-control"><label class="toggle"><input type="checkbox" id="throttle.enabled" data-toggles="throttle-children"><span class="slider"></span></label></div>
+    </div>
+    <div class="children disabled" id="throttle-children">
+      <div class="field">
+        <div class="field-info"><h3>Kubernetes Namespace</h3><div class="yaml-path">capi.throttle.kubernetesNamespace</div><p>Namespace of the CAPI deployment. Required for distributed counter coordination via Kubernetes API.</p></div>
+        <div class="field-control"><input type="text" id="throttle.kubernetesNamespace" value="" placeholder="default"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>Kubernetes Service Name</h3><div class="yaml-path">capi.throttle.kubernetesServiceName</div><p>Name of the CAPI Kubernetes Service. Used to discover peer pods.</p></div>
+        <div class="field-control"><input type="text" id="throttle.kubernetesServiceName" value="" placeholder="capi-core"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MCP ===== -->
+  <div class="config-section" id="sec-mcp">
+    <h2>MCP Gateway</h2>
+    <p class="section-desc">Model Context Protocol gateway that bridges MCP tool servers to REST/SSE clients.</p>
+
+    <div class="field">
+      <div class="field-info"><h3>Enabled</h3><div class="yaml-path">capi.mcp.enabled</div><p>Enable the MCP gateway.</p></div>
+      <div class="field-control"><label class="toggle"><input type="checkbox" id="mcp.enabled" data-toggles="mcp-children"><span class="slider"></span></label></div>
+    </div>
+    <div class="children disabled" id="mcp-children">
+      <div class="field">
+        <div class="field-info"><h3>Port</h3><div class="yaml-path">capi.mcp.port</div><p>Listening port for MCP SSE/HTTP traffic.</p></div>
+        <div class="field-control"><input type="number" id="mcp.port" value="8383"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>Session TTL</h3><div class="yaml-path">capi.mcp.sessionTtl</div><p>Session time-to-live in ms. Inactive sessions are evicted after this period.</p></div>
+        <div class="field-control"><input type="number" id="mcp.sessionTtl" value="1800000"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>Tool Call Timeout</h3><div class="yaml-path">capi.mcp.toolCallTimeout</div><p>Timeout in ms for individual MCP tool calls to upstream servers.</p></div>
+        <div class="field-control"><input type="number" id="mcp.toolCallTimeout" value="30000"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>Circuit Breaker Cooldown</h3><div class="yaml-path">capi.mcp.circuitBreakerCooldownMs</div><p>Cooldown period in ms before retrying a tripped circuit breaker.</p></div>
+        <div class="field-control"><input type="number" id="mcp.circuitBreakerCooldownMs" value="30000"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>Server Discovery Timeout</h3><div class="yaml-path">capi.mcp.mcpServerDiscoveryTimeoutMs</div><p>Timeout in ms for discovering MCP servers from Consul.</p></div>
+        <div class="field-control"><input type="number" id="mcp.mcpServerDiscoveryTimeoutMs" value="10000"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Output area -->
+  <div class="output-section" id="output-section">
+    <h2>Generated config.yaml</h2>
+    <div class="output-wrapper">
+      <button class="copy-btn" onclick="copyOutput()">Copy</button>
+      <textarea id="yaml-output" readonly></textarea>
+    </div>
+  </div>
+
+</div>
+
+<div class="generate-bar">
+  <button class="btn btn-primary" onclick="generate()">Generate config.yaml</button>
+  <button class="btn btn-secondary" onclick="resetAll()">Reset defaults</button>
+</div>
+
+<footer>CAPI Gateway &mdash; Configuration Generator</footer>
+
+<script>
+  // Toggle children visibility
+  document.querySelectorAll('[data-toggles]').forEach(cb => {
+    const target = document.getElementById(cb.dataset.toggles);
+    cb.addEventListener('change', () => {
+      target.classList.toggle('disabled', !cb.checked);
+    });
+  });
+
+  // List helpers
+  function addConsulHost() {
+    const list = document.getElementById('consulHosts-list');
+    const div = document.createElement('div');
+    div.className = 'list-item';
+    div.innerHTML = '<input type="text" value="" placeholder="endpoint URL" class="consul-endpoint">'
+      + '<input type="text" value="" placeholder="token (optional)" class="consul-token" style="max-width:160px">'
+      + '<button onclick="this.closest(\'.list-item\').remove()">x</button>';
+    list.appendChild(div);
+  }
+
+  function addOAuth2Key() {
+    const list = document.getElementById('oauth2Keys-list');
+    const div = document.createElement('div');
+    div.className = 'list-item';
+    div.innerHTML = '<input type="text" value="" placeholder="https://idp.example.com/.well-known/jwks.json" class="oauth2-key">'
+      + '<button onclick="this.closest(\'.list-item\').remove()">x</button>';
+    list.appendChild(div);
+  }
+
+  function addHeader() {
+    const list = document.getElementById('allowedHeaders-list');
+    const div = document.createElement('div');
+    div.className = 'list-item';
+    div.innerHTML = '<input type="text" value="" placeholder="Header-Name" class="header-item">'
+      + '<button onclick="this.closest(\'.list-item\').remove()">x</button>';
+    list.appendChild(div);
+  }
+
+  // Helpers
+  function val(id) { return document.getElementById(id).value; }
+  function checked(id) { return document.getElementById(id).checked; }
+  function indent(n) { return '  '.repeat(n); }
+
+  function yamlValue(v) {
+    if (v === true || v === false) return String(v);
+    if (v === '' || v === null || v === undefined) return '';
+    return String(v);
+  }
+
+  function line(depth, key, value) {
+    const v = yamlValue(value);
+    if (v === '') return indent(depth) + key + ':';
+    return indent(depth) + key + ': ' + v;
+  }
+
+  function generate() {
+    const lines = [];
+    const L = (d, k, v) => lines.push(line(d, k, v));
+
+    lines.push('capi:');
+    L(1, 'version', val('version'));
+    L(1, 'instanceName', val('instanceName'));
+    L(1, 'strictToInstanceName', checked('strictToInstanceName'));
+    L(1, 'publicEndpoint', val('publicEndpoint'));
+    L(1, 'runningMode', val('runningMode'));
+    L(1, 'adminPort', val('adminPort'));
+    L(1, 'reverseProxyHost', val('reverseProxyHost'));
+
+    // REST
+    lines.push(indent(1) + 'rest:');
+    L(2, 'enabled', checked('rest.enabled'));
+    if (checked('rest.enabled')) {
+      L(2, 'port', val('rest.port'));
+      L(2, 'listeningAddress', val('rest.listeningAddress'));
+      L(2, 'contextPath', val('rest.contextPath'));
+      L(2, 'ioThreads', val('rest.ioThreads'));
+      L(2, 'connectionRequestTimeout', val('rest.connectionRequestTimeout'));
+      L(2, 'requestTimeout', val('rest.requestTimeout'));
+      L(2, 'responseTimeout', val('rest.responseTimeout'));
+    }
+
+    // WebSocket
+    lines.push(indent(1) + 'websocket:');
+    L(2, 'enabled', checked('ws.enabled'));
+    if (checked('ws.enabled')) {
+      L(2, 'port', val('ws.port'));
+      L(2, 'listeningAddress', val('ws.listeningAddress'));
+      L(2, 'contextPath', val('ws.contextPath'));
+      L(2, 'ioThreads', val('ws.ioThreads'));
+    }
+
+    // gRPC
+    lines.push(indent(1) + 'grpc:');
+    L(2, 'enabled', checked('grpc.enabled'));
+    if (checked('grpc.enabled')) {
+      L(2, 'port', val('grpc.port'));
+    }
+
+    // SSL
+    lines.push(indent(1) + 'ssl:');
+    L(2, 'enabled', checked('ssl.enabled'));
+    if (checked('ssl.enabled')) {
+      L(2, 'keyStoreType', val('ssl.keyStoreType'));
+      L(2, 'path', val('ssl.path'));
+      L(2, 'password', val('ssl.password'));
+    }
+
+    // Trust Store
+    lines.push(indent(1) + 'trustStore:');
+    L(2, 'enabled', checked('trust.enabled'));
+    if (checked('trust.enabled')) {
+      L(2, 'path', val('trust.path'));
+      L(2, 'encoded', val('trust.encoded'));
+      L(2, 'password', val('trust.password'));
+    }
+
+    // Consul
+    L(1, 'consulCatalogDiscoverInterval', val('consulInterval'));
+    lines.push(indent(1) + 'consulHosts:');
+    document.querySelectorAll('#consulHosts-list .list-item').forEach(item => {
+      const ep = item.querySelector('.consul-endpoint').value;
+      const tk = item.querySelector('.consul-token').value;
+      if (ep) {
+        lines.push(indent(2) + '- endpoint: ' + ep);
+        lines.push(indent(3) + 'token: ' + tk);
+      }
+    });
+
+    // Consul Store
+    lines.push(indent(1) + 'consulStore:');
+    L(2, 'enabled', checked('consulStore.enabled'));
+    if (checked('consulStore.enabled')) {
+      L(2, 'endpoint', val('consulStore.endpoint'));
+      L(2, 'token', val('consulStore.token'));
+    }
+
+    // API Key Store
+    lines.push(indent(1) + 'apiKeyStore:');
+    L(2, 'enabled', checked('apiKey.enabled'));
+
+    // OAuth2
+    lines.push(indent(1) + 'oauth2:');
+    L(2, 'enabled', checked('oauth2.enabled'));
+    if (checked('oauth2.enabled')) {
+      L(2, 'cookieName', val('oauth2.cookieName'));
+      lines.push(indent(2) + 'keys:');
+      document.querySelectorAll('#oauth2Keys-list .list-item').forEach(item => {
+        const url = item.querySelector('.oauth2-key').value;
+        if (url) lines.push(indent(3) + '- ' + url);
+      });
+    }
+
+    // OPA
+    lines.push(indent(1) + 'opa:');
+    L(2, 'enabled', checked('opa.enabled'));
+    if (checked('opa.enabled')) {
+      L(2, 'endpoint', val('opa.endpoint'));
+      L(2, 'wasmEnabled', checked('opa.wasmEnabled'));
+      if (checked('opa.wasmEnabled')) {
+        L(2, 'wasmBundleUrl', val('opa.wasmBundleUrl'));
+        L(2, 'wasmBundlePollIntervalSeconds', val('opa.wasmBundlePollIntervalSeconds'));
+        L(2, 'wasmPoolSize', val('opa.wasmPoolSize'));
+      }
+    }
+
+    // Traces
+    lines.push(indent(1) + 'traces:');
+    L(2, 'enabled', checked('traces.enabled'));
+    if (checked('traces.enabled')) {
+      L(2, 'serviceName', val('traces.serviceName'));
+      L(2, 'endpoint', val('traces.endpoint'));
+      L(2, 'extraMetadataPrefix', val('traces.extraMetadataPrefix'));
+    }
+
+    // CORS
+    L(1, 'corsEnabled', checked('corsEnabled'));
+    lines.push(indent(1) + 'allowedHeaders:');
+    document.querySelectorAll('#allowedHeaders-list .list-item').forEach(item => {
+      const h = item.querySelector('.header-item').value;
+      if (h) lines.push(indent(2) + '- ' + h);
+    });
+
+    // Logging Traces
+    lines.push(indent(1) + 'loggingTraces:');
+    L(2, 'enabled', checked('logging.enabled'));
+    if (checked('logging.enabled')) {
+      L(2, 'tenant', val('logging.tenant'));
+      L(2, 'appName', val('logging.appName'));
+      L(2, 'appEnvironment', val('logging.appEnvironment'));
+      L(2, 'destination', val('logging.destination'));
+      L(2, 'filePath', val('logging.filePath'));
+    }
+
+    // Access Logs
+    lines.push(indent(1) + 'accessLogs:');
+    L(2, 'enabled', checked('access.enabled'));
+    if (checked('access.enabled')) {
+      L(2, 'tenant', val('access.tenant'));
+      L(2, 'service', val('access.service'));
+      L(2, 'destination', val('access.destination'));
+      L(2, 'filePath', val('access.filePath'));
+    }
+
+    // Throttle
+    lines.push(indent(1) + 'throttle:');
+    L(2, 'enabled', checked('throttle.enabled'));
+    if (checked('throttle.enabled')) {
+      L(2, 'kubernetesNamespace', val('throttle.kubernetesNamespace'));
+      L(2, 'kubernetesServiceName', val('throttle.kubernetesServiceName'));
+    }
+
+    // MCP
+    lines.push(indent(1) + 'mcp:');
+    L(2, 'enabled', checked('mcp.enabled'));
+    if (checked('mcp.enabled')) {
+      L(2, 'port', val('mcp.port'));
+      L(2, 'sessionTtl', val('mcp.sessionTtl'));
+      L(2, 'toolCallTimeout', val('mcp.toolCallTimeout'));
+      L(2, 'circuitBreakerCooldownMs', val('mcp.circuitBreakerCooldownMs'));
+      L(2, 'mcpServerDiscoveryTimeoutMs', val('mcp.mcpServerDiscoveryTimeoutMs'));
+    }
+
+    const output = lines.join('\n') + '\n';
+    document.getElementById('yaml-output').value = output;
+    const sec = document.getElementById('output-section');
+    sec.classList.add('visible');
+    sec.scrollIntoView({ behavior: 'smooth' });
+  }
+
+  function copyOutput() {
+    const ta = document.getElementById('yaml-output');
+    navigator.clipboard.writeText(ta.value).then(() => {
+      const btn = document.querySelector('.copy-btn');
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = 'Copy', 2000);
+    });
+  }
+
+  function resetAll() {
+    if (confirm('Reset all fields to defaults?')) {
+      location.reload();
+    }
+  }
+</script>
+
+</body>
+</html>
