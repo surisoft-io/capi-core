@@ -30,4 +30,13 @@ spec:
           type: Utilization
           averageUtilization: {{ .Values.autoscaling.targetMemoryUtilizationPercentage }}
     {{- end }}
+    {{- if .Values.autoscaling.targetRequestsPerSecond }}
+    - type: Pods
+      pods:
+        metric:
+          name: capi_requests_per_second
+        target:
+          type: AverageValue
+          averageValue: {{ .Values.autoscaling.targetRequestsPerSecond | quote }}
+    {{- end }}
 {{- end }}

@@ -46,58 +46,78 @@ curl -sf -X POST "$KEYCLOAK/admin/realms" \
   -d "{\"realm\": \"$REALM\", \"enabled\": true}" || true
 echo " OK"
 
+# --- Disable SSL requirement (needed when behind ALB/reverse proxy) ---
+echo "Disabling SSL requirement for realm '$REALM'..."
+curl -sf -X PUT "$KEYCLOAK/admin/realms/$REALM" \
+  -H "$AUTH" \
+  -H "Content-Type: application/json" \
+  -d "{\"sslRequired\": \"none\"}"
+echo " OK"
+
 # --- Create client: demo-bff (confidential, auth code flow) ---
 echo "Creating client 'demo-bff'..."
+BFF_PAYLOAD=$(jq -n \
+  --arg secret "$BFF_CLIENT_SECRET" \
+  --arg redirect "$EXTERNAL_URL/bff/callback" \
+  --arg origin "$EXTERNAL_URL" \
+  --arg logout "$EXTERNAL_URL##http://nginx" \
+  '{
+    clientId: "demo-bff",
+    enabled: true,
+    protocol: "openid-connect",
+    publicClient: false,
+    secret: $secret,
+    directAccessGrantsEnabled: true,
+    standardFlowEnabled: true,
+    serviceAccountsEnabled: false,
+    redirectUris: [$redirect, "http://nginx/bff/callback"],
+    webOrigins: [$origin],
+    attributes: {"post.logout.redirect.uris": $logout}
+  }')
 curl -sf -X POST "$KEYCLOAK/admin/realms/$REALM/clients" \
   -H "$AUTH" \
   -H "Content-Type: application/json" \
-  -d '{
-    "clientId": "demo-bff",
-    "enabled": true,
-    "protocol": "openid-connect",
-    "publicClient": false,
-    "secret": "'"$BFF_CLIENT_SECRET"'",
-    "directAccessGrantsEnabled": true,
-    "standardFlowEnabled": true,
-    "serviceAccountsEnabled": false,
-    "redirectUris": ["'"$EXTERNAL_URL"'/bff/callback", "http://nginx/bff/callback"],
-    "webOrigins": ["'"$EXTERNAL_URL"'"],
-    "attributes": {"post.logout.redirect.uris": "'"$EXTERNAL_URL"'##http://nginx"}
-  }' || true
+  -d "$BFF_PAYLOAD" || true
 echo " OK"
 
 # --- Create client: client-premium (subscription: all groups) ---
 echo "Creating client 'client-premium'..."
+PREMIUM_PAYLOAD=$(jq -n \
+  --arg secret "$PREMIUM_CLIENT_SECRET" \
+  '{
+    clientId: "client-premium",
+    enabled: true,
+    protocol: "openid-connect",
+    publicClient: false,
+    secret: $secret,
+    directAccessGrantsEnabled: true,
+    standardFlowEnabled: false,
+    serviceAccountsEnabled: false
+  }')
 curl -sf -X POST "$KEYCLOAK/admin/realms/$REALM/clients" \
   -H "$AUTH" \
   -H "Content-Type: application/json" \
-  -d '{
-    "clientId": "client-premium",
-    "enabled": true,
-    "protocol": "openid-connect",
-    "publicClient": false,
-    "secret": "'"$PREMIUM_CLIENT_SECRET"'",
-    "directAccessGrantsEnabled": true,
-    "standardFlowEnabled": false,
-    "serviceAccountsEnabled": false
-  }' || true
+  -d "$PREMIUM_PAYLOAD" || true
 echo " OK"
 
 # --- Create client: client-basic (subscription: notifications only) ---
 echo "Creating client 'client-basic'..."
+BASIC_PAYLOAD=$(jq -n \
+  --arg secret "$BASIC_CLIENT_SECRET" \
+  '{
+    clientId: "client-basic",
+    enabled: true,
+    protocol: "openid-connect",
+    publicClient: false,
+    secret: $secret,
+    directAccessGrantsEnabled: true,
+    standardFlowEnabled: false,
+    serviceAccountsEnabled: false
+  }')
 curl -sf -X POST "$KEYCLOAK/admin/realms/$REALM/clients" \
   -H "$AUTH" \
   -H "Content-Type: application/json" \
-  -d '{
-    "clientId": "client-basic",
-    "enabled": true,
-    "protocol": "openid-connect",
-    "publicClient": false,
-    "secret": "'"$BASIC_CLIENT_SECRET"'",
-    "directAccessGrantsEnabled": true,
-    "standardFlowEnabled": false,
-    "serviceAccountsEnabled": false
-  }' || true
+  -d "$BASIC_PAYLOAD" || true
 echo " OK"
 
 # --- Get internal client IDs ---
@@ -198,19 +218,15 @@ VIEWER_ROLE=$(curl -sf "$KEYCLOAK/admin/realms/$REALM/roles/viewer" \
 
 # --- Create user: alice (admin) ---
 echo "Creating user 'alice' (admin)..."
+ALICE_PAYLOAD=$(jq -n --arg pw "$ALICE_PASSWORD" '{
+  username: "alice", firstName: "Alice", lastName: "Admin",
+  email: "alice@e2e-demo.com", enabled: true, emailVerified: true,
+  requiredActions: [], credentials: [{type: "password", value: $pw, temporary: false}]
+}')
 curl -sf -X POST "$KEYCLOAK/admin/realms/$REALM/users" \
   -H "$AUTH" \
   -H "Content-Type: application/json" \
-  -d '{
-    "username": "alice",
-    "firstName": "Alice",
-    "lastName": "Admin",
-    "email": "alice@e2e-demo.com",
-    "enabled": true,
-    "emailVerified": true,
-    "requiredActions": [],
-    "credentials": [{"type": "password", "value": "'"$ALICE_PASSWORD"'", "temporary": false}]
-  }' || true
+  -d "$ALICE_PAYLOAD" || true
 
 ALICE_ID=$(curl -sf "$KEYCLOAK/admin/realms/$REALM/users?username=alice" \
   -H "$AUTH" | jq -r '.[0].id')
@@ -223,19 +239,15 @@ echo " OK"
 
 # --- Create user: bob (manager) ---
 echo "Creating user 'bob' (manager)..."
+BOB_PAYLOAD=$(jq -n --arg pw "$BOB_PASSWORD" '{
+  username: "bob", firstName: "Bob", lastName: "Manager",
+  email: "bob@e2e-demo.com", enabled: true, emailVerified: true,
+  requiredActions: [], credentials: [{type: "password", value: $pw, temporary: false}]
+}')
 curl -sf -X POST "$KEYCLOAK/admin/realms/$REALM/users" \
   -H "$AUTH" \
   -H "Content-Type: application/json" \
-  -d '{
-    "username": "bob",
-    "firstName": "Bob",
-    "lastName": "Manager",
-    "email": "bob@e2e-demo.com",
-    "enabled": true,
-    "emailVerified": true,
-    "requiredActions": [],
-    "credentials": [{"type": "password", "value": "'"$BOB_PASSWORD"'", "temporary": false}]
-  }' || true
+  -d "$BOB_PAYLOAD" || true
 
 BOB_ID=$(curl -sf "$KEYCLOAK/admin/realms/$REALM/users?username=bob" \
   -H "$AUTH" | jq -r '.[0].id')
@@ -248,19 +260,15 @@ echo " OK"
 
 # --- Create user: charlie (viewer) ---
 echo "Creating user 'charlie' (viewer)..."
+CHARLIE_PAYLOAD=$(jq -n --arg pw "$CHARLIE_PASSWORD" '{
+  username: "charlie", firstName: "Charlie", lastName: "Viewer",
+  email: "charlie@e2e-demo.com", enabled: true, emailVerified: true,
+  requiredActions: [], credentials: [{type: "password", value: $pw, temporary: false}]
+}')
 curl -sf -X POST "$KEYCLOAK/admin/realms/$REALM/users" \
   -H "$AUTH" \
   -H "Content-Type: application/json" \
-  -d '{
-    "username": "charlie",
-    "firstName": "Charlie",
-    "lastName": "Viewer",
-    "email": "charlie@e2e-demo.com",
-    "enabled": true,
-    "emailVerified": true,
-    "requiredActions": [],
-    "credentials": [{"type": "password", "value": "'"$CHARLIE_PASSWORD"'", "temporary": false}]
-  }' || true
+  -d "$CHARLIE_PAYLOAD" || true
 
 CHARLIE_ID=$(curl -sf "$KEYCLOAK/admin/realms/$REALM/users?username=charlie" \
   -H "$AUTH" | jq -r '.[0].id')

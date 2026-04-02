@@ -42,7 +42,7 @@ public class Constants {
     public static final HttpString PROTOCOL_HTTP = new HttpString("HTTP/1.1");
     public static final String MAP_HTTP_MESSAGE_FORM_URL_ENCODED_BODY = "&mapHttpMessageFormUrlEncodedBody=false";
     public static final String BLUECOAT_HEADER = "X-BlueCoat-Via";
-    public static final String UNDERSTOW_HEALTH_PATH = "/health";
+    public static final String CAPI_HEALTH_PATH = "/health";
     public static final String[] CAPI_WHITELISTED_PATHS = {
             //Swagger UI v2
             "/v2/api-docs",

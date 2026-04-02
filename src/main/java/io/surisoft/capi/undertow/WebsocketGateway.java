@@ -82,7 +82,7 @@ public class WebsocketGateway {
                             httpServerExchange.getRequestHeaders().remove(Constants.BLUECOAT_HEADER);
                         }
 
-                        if(requestPath.equals(Constants.UNDERSTOW_HEALTH_PATH)) {
+                        if(requestPath.equals(Constants.CAPI_HEALTH_PATH)) {
                             httpServerExchange.setStatusCode(HttpServletResponse.SC_OK);
                             httpServerExchange.endExchange();
                         } else {
