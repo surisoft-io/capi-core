@@ -2,8 +2,8 @@ replicaCount: 1
 
 image:
   repository: surisoft/capi-core
-  tag: ""  # Defaults to Chart.appVersion
-  pullPolicy: IfNotPresent
+  tag: "latest"  # Defaults to Chart.appVersion
+  pullPolicy: Always
 
 imagePullSecrets: []
 nameOverride: ""
@@ -209,17 +209,18 @@ autoscaling:
   maxReplicas: 5
   targetCPUUtilizationPercentage: 80
   # targetMemoryUtilizationPercentage: 80
+  # Request-based scaling (requires prometheus-adapter installed in the cluster)
+  targetRequestsPerSecond: 500
 
 serviceAccount:
   create: true
   annotations: {}
   name: ""
 
-podAnnotations: {}
-  # Prometheus scraping — enable if running Prometheus in the cluster
-  # prometheus.io/scrape: "true"
-  # prometheus.io/port: "8381"
-  # prometheus.io/path: "/info/metrics"
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8381"
+  prometheus.io/path: "/info/metrics"
 podLabels: {}
 nodeSelector: {}
 tolerations: []

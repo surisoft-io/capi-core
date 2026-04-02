@@ -3,6 +3,7 @@ package io.surisoft.capi.undertow;
 import io.surisoft.capi.exception.AuthorizationException;
 import io.surisoft.capi.processor.ThrottleProcessor;
 import io.surisoft.capi.schema.*;
+import io.surisoft.capi.service.ConsulNodeDiscovery;
 import io.surisoft.capi.service.OpaService;
 import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.HttpUtils;
@@ -23,6 +24,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.quality.Strictness;
 import org.mockito.junit.jupiter.MockitoSettings;
 
+import java.lang.reflect.Field;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -58,6 +60,7 @@ class RestGatewayTest {
         restClientMap = new HashMap<>();
         allowedHeaders = new ArrayList<>(List.of("Authorization", "Content-Type"));
         when(httpUtils.contextToRole(anyString())).thenCallRealMethod();
+        setConnectedToConsul(true);
     }
 
     @AfterEach
@@ -67,6 +70,7 @@ class RestGatewayTest {
             runningGateway = null;
         }
         serviceCache.close();
+        setConnectedToConsul(false);
     }
 
     private int pickPort() {
@@ -89,6 +93,16 @@ class RestGatewayTest {
             exchange.getResponseSender().send("{\"ok\":true}");
         });
         return rc;
+    }
+
+    private void setConnectedToConsul(boolean value) {
+        try {
+            Field field = ConsulNodeDiscovery.class.getDeclaredField("connectedToConsul");
+            field.setAccessible(true);
+            field.set(null, value);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     // === Health endpoint ===

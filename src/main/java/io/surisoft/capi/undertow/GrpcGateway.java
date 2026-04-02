@@ -44,7 +44,7 @@ public class GrpcGateway {
         builder.setHandler(httpServerExchange -> {
             String requestPath = httpServerExchange.getRequestPath();
 
-            if(requestPath.equals(Constants.UNDERSTOW_HEALTH_PATH)) {
+            if(requestPath.equals(Constants.CAPI_HEALTH_PATH)) {
                 httpServerExchange.setStatusCode(HttpServletResponse.SC_OK);
                 httpServerExchange.endExchange();
                 return;

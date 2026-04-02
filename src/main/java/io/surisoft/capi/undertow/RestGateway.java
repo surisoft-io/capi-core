@@ -3,6 +3,7 @@ package io.surisoft.capi.undertow;
 import io.surisoft.capi.exception.AuthorizationException;
 import io.surisoft.capi.exception.HttpErrorHandler;
 import io.surisoft.capi.processor.ThrottleProcessor;
+import io.surisoft.capi.service.ConsulNodeDiscovery;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
 import io.surisoft.capi.schema.OpaResult;
@@ -17,10 +18,8 @@ import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.HttpUtils;
 import io.surisoft.capi.utils.WebsocketUtils;
 import io.undertow.Undertow;
-import io.undertow.util.SameThreadExecutor;
+import io.undertow.util.*;
 import io.undertow.server.HttpServerExchange;
-import io.undertow.util.HeaderValues;
-import io.undertow.util.HttpString;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -163,25 +162,26 @@ public class RestGateway {
 
             // Access log — fires after the full proxy round-trip completes
             exchange.addExchangeCompleteListener((ex, nextListener) -> {
-                long durationMs = (System.nanoTime() - startNanos) / 1_000_000;
-                String originalIp = resolveClientIp(ex);
-                ACCESS_LOG.info("{} {} {} {}ms {}",
-                        ex.getRequestMethod(),
-                        ex.getRequestPath(),
-                        ex.getStatusCode(),
-                        durationMs,
-                        originalIp);
-                nextListener.proceed();
+                //We dont want to log health calls
+                if(!requestPath.equals(Constants.CAPI_HEALTH_PATH)) {
+                    long durationMs = (System.nanoTime() - startNanos) / 1_000_000;
+                    String originalIp = resolveClientIp(ex);
+                    ACCESS_LOG.info("{} {} {} {}ms {}",
+                            ex.getRequestMethod(),
+                            ex.getRequestPath(),
+                            ex.getStatusCode(),
+                            durationMs,
+                            originalIp);
+                    nextListener.proceed();
+                }
             });
 
             // Add CORS headers to all responses (not just OPTIONS)
             addCorsHeaders(exchange);
 
             // Health check
-            if (requestPath.equals("/health")) {
-                exchange.setStatusCode(HttpServletResponse.SC_OK);
-                exchange.getResponseHeaders().put(new HttpString("Content-Type"), "application/json");
-                exchange.getResponseSender().send("{\"status\":\"UP\"}");
+            if (requestPath.equals(Constants.CAPI_HEALTH_PATH)) {
+                handleHealth(exchange);
                 return;
             }
 
@@ -544,11 +544,22 @@ public class RestGateway {
         if (reqSegments.length != defSegments.length) return false;
 
         for (int i = 0; i < reqSegments.length; i++) {
-            if (!defSegments[i].equals(reqSegments[i]) && !defSegments[i].matches("\\{.*\\}")) {
+            if (!defSegments[i].equals(reqSegments[i]) && !defSegments[i].matches("\\{.*}")) {
                 return false;
             }
         }
         return true;
+    }
+
+    private void handleHealth(HttpServerExchange exchange) {
+        exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+        if(ConsulNodeDiscovery.isConnectedToConsul()) {
+            exchange.setStatusCode(StatusCodes.OK);
+            exchange.getResponseSender().send("{\"status\":\"UP\"}");
+        } else {
+            exchange.setStatusCode(StatusCodes.SERVICE_UNAVAILABLE);
+            exchange.getResponseSender().send("{\"status\":\"DOWN\"}");
+        }
     }
 
     private void handleOptions(HttpServerExchange exchange) {
