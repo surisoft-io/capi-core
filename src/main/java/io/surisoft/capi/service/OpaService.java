@@ -24,11 +24,15 @@ public class OpaService {
     private static final Logger log = LoggerFactory.getLogger(OpaService.class);
     private static final Pattern VALID_OPA_REGO = Pattern.compile("^[a-zA-Z0-9_/\\-]+$");
     private final String opaEndpoint;
-    private HttpClient httpClient;
+    private volatile HttpClient httpClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public OpaService(String opaEndpoint, HttpClient httpClient) {
         this.opaEndpoint = opaEndpoint;
+        this.httpClient = httpClient;
+    }
+
+    public void setHttpClient(HttpClient httpClient) {
         this.httpClient = httpClient;
     }
 

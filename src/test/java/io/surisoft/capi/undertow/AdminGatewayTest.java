@@ -8,7 +8,7 @@ import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.schema.WebsocketClient;
 import io.surisoft.capi.service.*;
 import io.surisoft.capi.service.CapiTrustManager;
-import io.surisoft.capi.service.ConsulNodeDiscovery;
+import io.surisoft.capi.service.consul.ConsulCatalogService;
 import io.surisoft.capi.utils.Constants;
 import io.undertow.server.HttpServerExchange;
 import io.undertow.server.ServerConnection;
@@ -379,7 +379,7 @@ class AdminGatewayTest {
 
     @Test
     void handleHealth_whenConnectedToConsul_sendsUpStatus() throws Exception {
-        Field connectedField = ConsulNodeDiscovery.class.getDeclaredField("connectedToConsul");
+        Field connectedField = ConsulCatalogService.class.getDeclaredField("connectedToConsul");
         connectedField.setAccessible(true);
         connectedField.set(null, true);
 
@@ -399,7 +399,7 @@ class AdminGatewayTest {
 
     @Test
     void handleHealth_whenNotConnectedToConsul_sendsDownStatus() throws Exception {
-        Field connectedField = ConsulNodeDiscovery.class.getDeclaredField("connectedToConsul");
+        Field connectedField = ConsulCatalogService.class.getDeclaredField("connectedToConsul");
         connectedField.setAccessible(true);
         connectedField.set(null, false);
 
@@ -750,7 +750,7 @@ class AdminGatewayTest {
 
     @Test
     void start_withoutSsl_startsHttpServer_healthEndpoint_connected() throws Exception {
-        Field connectedField = ConsulNodeDiscovery.class.getDeclaredField("connectedToConsul");
+        Field connectedField = ConsulCatalogService.class.getDeclaredField("connectedToConsul");
         connectedField.setAccessible(true);
         connectedField.set(null, true);
 
@@ -771,7 +771,7 @@ class AdminGatewayTest {
 
     @Test
     void start_withoutSsl_startsHttpServer_healthEndpoint_notConnected() throws Exception {
-        Field connectedField = ConsulNodeDiscovery.class.getDeclaredField("connectedToConsul");
+        Field connectedField = ConsulCatalogService.class.getDeclaredField("connectedToConsul");
         connectedField.setAccessible(true);
         connectedField.set(null, false);
 
@@ -849,7 +849,7 @@ class AdminGatewayTest {
 
     @Test
     void start_thenStop_serverStopsCleanly() throws Exception {
-        Field connectedField = ConsulNodeDiscovery.class.getDeclaredField("connectedToConsul");
+        Field connectedField = ConsulCatalogService.class.getDeclaredField("connectedToConsul");
         connectedField.setAccessible(true);
         connectedField.set(null, true);
 

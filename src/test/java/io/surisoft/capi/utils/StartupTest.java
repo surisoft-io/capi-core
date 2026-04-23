@@ -27,7 +27,7 @@ class StartupTest {
         assertNotNull(startup.getServiceCache());
         assertNotNull(startup.getHttpUtils());
         assertNotNull(startup.getRouteUtils());
-        assertNotNull(startup.getConsulNodeDiscovery());
+        assertNotNull(startup.getConsulCatalogService());
         assertNotNull(startup.getPrometheusRegistry());
         assertNotNull(startup.getRouteConsistencyChecker());
     }
@@ -119,7 +119,7 @@ class StartupTest {
         startup = new Startup(configuration);
         startup.start();
 
-        assertNotNull(startup.getConsulNodeDiscovery());
+        assertNotNull(startup.getConsulCatalogService());
     }
 
     @Test
@@ -129,7 +129,7 @@ class StartupTest {
         startup = new Startup(configuration);
         startup.start();
 
-        assertNotNull(startup.getConsulNodeDiscovery());
+        assertNotNull(startup.getConsulCatalogService());
     }
 
     @Test
@@ -140,7 +140,7 @@ class StartupTest {
         startup = new Startup(configuration);
         startup.start();
 
-        assertNotNull(startup.getConsulNodeDiscovery());
+        assertNotNull(startup.getConsulCatalogService());
     }
 
     @Test
@@ -151,7 +151,7 @@ class StartupTest {
         startup = new Startup(configuration);
         startup.start();
 
-        assertNotNull(startup.getConsulNodeDiscovery());
+        assertNotNull(startup.getConsulCatalogService());
     }
 
     @Test
@@ -197,7 +197,7 @@ class StartupTest {
         startup = new Startup(configuration);
         startup.start();
 
-        assertNotNull(startup.getConsulNodeDiscovery());
+        assertNotNull(startup.getConsulCatalogService());
     }
 
     @Test
@@ -207,7 +207,7 @@ class StartupTest {
         startup = new Startup(configuration);
         startup.start();
 
-        assertNotNull(startup.getConsulNodeDiscovery());
+        assertNotNull(startup.getConsulCatalogService());
     }
 
     @Test
@@ -218,7 +218,7 @@ class StartupTest {
         startup = new Startup(configuration);
         startup.start();
 
-        assertNotNull(startup.getConsulNodeDiscovery());
+        assertNotNull(startup.getConsulCatalogService());
     }
 
     @Test
@@ -229,7 +229,7 @@ class StartupTest {
         startup = new Startup(configuration);
         startup.start();
 
-        assertNotNull(startup.getConsulNodeDiscovery());
+        assertNotNull(startup.getConsulCatalogService());
     }
 
     @Test
@@ -239,7 +239,7 @@ class StartupTest {
         startup = new Startup(configuration);
         startup.start();
 
-        assertNotNull(startup.getConsulNodeDiscovery());
+        assertNotNull(startup.getConsulCatalogService());
     }
 
     @Test
@@ -250,7 +250,7 @@ class StartupTest {
         startup = new Startup(configuration);
         startup.start();
 
-        assertNotNull(startup.getConsulNodeDiscovery());
+        assertNotNull(startup.getConsulCatalogService());
     }
 
     @Test
@@ -279,7 +279,7 @@ class StartupTest {
         startup = new Startup(configuration);
         startup.start();
 
-        assertNotNull(startup.getConsulNodeDiscovery());
+        assertNotNull(startup.getConsulCatalogService());
     }
 
     @Test
@@ -313,7 +313,7 @@ class StartupTest {
         startup = new Startup(configuration);
         startup.start();
 
-        assertNotNull(startup.getConsulNodeDiscovery());
+        assertNotNull(startup.getConsulCatalogService());
     }
 
     @Test
@@ -494,7 +494,7 @@ class StartupTest {
         startup = new Startup(configuration);
         startup.start();
 
-        assertNotNull(startup.getConsulNodeDiscovery());
+        assertNotNull(startup.getConsulCatalogService());
     }
 
     @Test

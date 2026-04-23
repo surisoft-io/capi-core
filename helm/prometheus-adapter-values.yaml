@@ -1,0 +1,22 @@
+# Values for prometheus-community/prometheus-adapter Helm chart.
+# Install with:
+#   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+#   helm install prometheus-adapter prometheus-community/prometheus-adapter -f prometheus-adapter-values.yaml -n capi-load-monitoring
+#
+# This exposes a "capi_requests_per_second" custom metric derived from
+# the capi_requests_total counter that CAPI emits via Micrometer/Prometheus.
+
+prometheus:
+  url: http://prometheus-server.capi-load-monitoring.svc  # adjust to your Prometheus service URL
+  port: 80
+
+rules:
+  custom:
+    - seriesQuery: 'capi_requests_total{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        as: "capi_requests_per_second"
+      metricsQuery: 'rate(capi_requests_total{<<.LabelMatchers>>}[2m])'

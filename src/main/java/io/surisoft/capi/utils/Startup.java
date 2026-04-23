@@ -16,6 +16,7 @@ import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.schema.RestClient;
 import io.surisoft.capi.schema.WebsocketClient;
 import io.surisoft.capi.service.*;
+import io.surisoft.capi.service.consul.*;
 import io.surisoft.capi.configuration.LocalCacheConfiguration;
 import io.surisoft.capi.tracer.TracingBootstrap;
 import jakarta.annotation.Nullable;
@@ -43,7 +44,7 @@ public class Startup {
     private RouteUtils routeUtils;
     private Cache<String, Service> serviceCache;
     private HttpUtils httpUtils;
-    private ConsulNodeDiscovery consulNodeDiscovery;
+    private ConsulCatalogService consulCatalogService;
     private ThrottleProcessor throttleProcessor;
     private HttpClient consulHttpClient;
 
@@ -111,7 +112,7 @@ public class Startup {
         startRouteUtils();
         startServiceUtils();
         startOpaService();
-        startConsulNodeDiscoveryService();
+        startConsulCatalogService();
 
         if(configuration.getConsulStore().isEnabled()) {
             startConsulStore();
@@ -177,7 +178,19 @@ public class Startup {
                 consulStore.setGrpcUtils(grpcUtils);
                 consulStore.setGrpcClientMap(grpcClientMap);
             }
+            consulStore.setTrustStoreReloadedCallback(this::rebuildConsulHttpClient);
         }
+    }
+
+    private void rebuildConsulHttpClient() {
+        startConsulHttpClient();
+        HttpClient client = consulHttpClient;
+        if (consulStore != null) consulStore.setHttpClient(client);
+        if (consulCatalogService != null) consulCatalogService.setHttpClient(client);
+        if (opaService != null) opaService.setHttpClient(client);
+        if (opaWasmService != null) opaWasmService.setHttpClient(client);
+        if (apiKeyStore != null) apiKeyStore.setHttpClient(client);
+        log.info("Consul HttpClient rebuilt with updated SSLContext and re-injected into consumers");
     }
 
     private void startApiKeyStore() {
@@ -196,38 +209,47 @@ public class Startup {
         routeConsistencyChecker.setRestClientMap(restClientMap);
     }
 
-    private void startConsulNodeDiscoveryService() {
-        consulNodeDiscovery = new ConsulNodeDiscovery(//capiSslContextHolder,
-                configuration.getConsulHosts(), serviceUtils, serviceCache, websocketUtils, consulHttpClient);
-        consulNodeDiscovery.setHttpUtils(httpUtils);
-        if (opaWasmService != null) {
-            consulNodeDiscovery.setOpaWasmService(opaWasmService);
-        }
-        consulNodeDiscovery.setCapiRunningMode(configuration.getRunningMode());
+    private void startConsulCatalogService() {
+        int globalResponseTimeout = (configuration.getRest() != null && configuration.getRest().getResponseTimeout() > 0)
+                ? configuration.getRest().getResponseTimeout()
+                : 120000;
 
-        if(configuration.getInstanceName() != null) {
-            consulNodeDiscovery.setCapiInstanceNamespace(configuration.getInstanceName());
+        List<TransportHandler> handlers = new ArrayList<>();
+        if (configuration.getRest() != null) {
+            handlers.add(new RestTransportHandler(
+                    configuration.getRest().isEnabled(),
+                    restClientMap,
+                    websocketUtils,
+                    httpUtils,
+                    opaWasmService,
+                    globalResponseTimeout));
+        }
+        if (configuration.getWebsocket() != null) {
+            handlers.add(new WebsocketTransportHandler(
+                    configuration.getWebsocket().isEnabled(),
+                    webSocketClientMap,
+                    websocketUtils));
+        }
+        if (configuration.getGrpc() != null) {
+            handlers.add(new GrpcTransportHandler(
+                    configuration.getGrpc().isEnabled(),
+                    grpcClientMap,
+                    grpcUtils));
         }
 
-        consulNodeDiscovery.setStrictToInstanceName(configuration.isStrictToInstanceName());
+        String extrasPrefix = configuration.getTraces() != null
+                ? configuration.getTraces().getExtraMetadataPrefix()
+                : null;
 
-        if(configuration.getRest() != null && configuration.getRest().getResponseTimeout() > 0) {
-            consulNodeDiscovery.setGlobalResponseTimeout(configuration.getRest().getResponseTimeout());
-        }
-
-        if(configuration.getTraces().getExtraMetadataPrefix() != null) {
-            consulNodeDiscovery.setServiceMetaExtrasPrefix(configuration.getTraces().getExtraMetadataPrefix());
-        }
-
-        if(websocketUtils != null) {
-            consulNodeDiscovery.setWebsocketClientMap(webSocketClientMap);
-            consulNodeDiscovery.setRestClientMap(restClientMap);
-        }
-
-        if(grpcUtils != null) {
-            consulNodeDiscovery.setGrpcUtils(grpcUtils);
-            consulNodeDiscovery.setGrpcClientMap(grpcClientMap);
-        }
+        consulCatalogService = new ConsulCatalogService(
+                configuration.getConsulHosts(),
+                serviceCache,
+                serviceUtils,
+                handlers,
+                consulHttpClient,
+                configuration.getInstanceName(),
+                configuration.isStrictToInstanceName(),
+                extrasPrefix);
     }
 
     private void createServiceCache() {
@@ -341,8 +363,8 @@ public class Startup {
         return httpUtils;
     }
 
-    public ConsulNodeDiscovery getConsulNodeDiscovery() {
-        return consulNodeDiscovery;
+    public ConsulCatalogService getConsulCatalogService() {
+        return consulCatalogService;
     }
 
     public RouteUtils getRouteUtils() {

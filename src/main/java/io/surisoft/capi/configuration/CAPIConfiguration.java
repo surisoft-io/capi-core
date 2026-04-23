@@ -305,6 +305,7 @@ public class CAPIConfiguration {
         private String listeningAddress;
         private String contextPath;
         private int ioThreads = Math.max(2, Runtime.getRuntime().availableProcessors() * 2);
+        private int responseTimeout = 180000;
 
         public boolean isEnabled() {
             return enabled;
@@ -335,6 +336,12 @@ public class CAPIConfiguration {
         }
         public void setIoThreads(int ioThreads) {
             this.ioThreads = ioThreads;
+        }
+        public int getResponseTimeout() {
+            return responseTimeout;
+        }
+        public void setResponseTimeout(int responseTimeout) {
+            this.responseTimeout = responseTimeout;
         }
     }
 

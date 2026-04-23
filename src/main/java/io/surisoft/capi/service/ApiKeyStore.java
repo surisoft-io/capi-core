@@ -23,7 +23,7 @@ public class ApiKeyStore {
     private final Cache<String, ApiKeyStoreEntry> apiKeyCache;
     private final String consulKvHost;
     private final String consulKvToken;
-    private final HttpClient httpClient;
+    private volatile HttpClient httpClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ApiKeyStore(Cache<String, ApiKeyStoreEntry> apiKeyCache,
@@ -33,6 +33,10 @@ public class ApiKeyStore {
         this.apiKeyCache = apiKeyCache;
         this.consulKvHost = consulKvHost;
         this.consulKvToken = consulKvToken;
+        this.httpClient = httpClient;
+    }
+
+    public void setHttpClient(HttpClient httpClient) {
         this.httpClient = httpClient;
     }
 

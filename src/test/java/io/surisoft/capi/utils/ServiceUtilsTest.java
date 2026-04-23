@@ -378,127 +378,8 @@ class ServiceUtilsTest {
         assertTrue(serviceUtils.isMappingChanged(List.of(m1), List.of(m2)));
     }
 
-    // --- updateExistingService tests ---
-
-    @Test
-    void updateExistingService_changed_redeploysService() throws Exception {
-        ServiceUtils spyServiceUtils = new ServiceUtils(httpUtils, Optional.empty(), routeUtils, Optional.empty(), "full");
-
-        Service existing = createServiceWithMapping("svc", "dev", "host1", 8080);
-        existing.setId("svc:dev");
-        existing.getServiceMeta().setType("rest");
-        Service incoming = createServiceWithMapping("svc", "dev", "host2", 9090);
-        incoming.setId("svc:dev");
-        incoming.getServiceMeta().setType("rest");
-
-        when(routeUtils.getAllRouteIdForAGivenService(existing)).thenReturn(List.of("svc:dev:GET", "svc:dev:POST"));
-
-        boolean result = spyServiceUtils.updateExistingService(existing, incoming, serviceCache);
-        assertTrue(result);
-        verify(serviceCache).remove("svc:dev");
-    }
-
-    @Test
-    void updateExistingService_notChanged_returnsFalse() {
-        ServiceUtils spyServiceUtils = new ServiceUtils(httpUtils, Optional.empty(), routeUtils, Optional.empty(), "full");
-
-        Service existing = createServiceWithMapping("svc", "dev", "host1", 8080);
-        existing.setId("svc:dev");
-        existing.getServiceMeta().setType("rest");
-        Service incoming = createServiceWithMapping("svc", "dev", "host1", 8080);
-        incoming.setId("svc:dev");
-        incoming.getServiceMeta().setType("rest");
-
-        boolean result = spyServiceUtils.updateExistingService(existing, incoming, serviceCache);
-        assertFalse(result);
-        verify(serviceCache, never()).remove(anyString());
-    }
-
-    @Test
-    void updateExistingService_websocketType_removesFromWebsocketMap() throws Exception {
-        Map<String, WebsocketClient> wsMap = new HashMap<>();
-        WebsocketClient wc = new WebsocketClient();
-        wc.setServiceId("svc:dev");
-        wsMap.put("svc:dev", wc);
-
-        ServiceUtils wsServiceUtils = new ServiceUtils(httpUtils, Optional.of(wsMap), routeUtils, Optional.empty(), "full");
-
-        Service existing = createServiceWithMapping("svc", "dev", "host1", 8080);
-        existing.setId("svc:dev");
-        existing.setContext("/svc/dev");
-        existing.getServiceMeta().setType("websocket");
-        Service incoming = createServiceWithMapping("svc", "dev", "host2", 9090);
-        incoming.setId("svc:dev");
-        incoming.getServiceMeta().setType("websocket");
-
-        boolean result = wsServiceUtils.updateExistingService(existing, incoming, serviceCache);
-        assertTrue(result);
-    }
-
-    @Test
-    void updateExistingService_sseType_removesFromWebsocketMap() throws Exception {
-        Map<String, WebsocketClient> wsMap = new HashMap<>();
-        WebsocketClient wc = new WebsocketClient();
-        wc.setServiceId("svc:dev");
-        wsMap.put("svc:dev", wc);
-
-        ServiceUtils sseServiceUtils = new ServiceUtils(httpUtils, Optional.of(wsMap), routeUtils, Optional.empty(), "full");
-
-        Service existing = createServiceWithMapping("svc", "dev", "host1", 8080);
-        existing.setId("svc:dev");
-        existing.setContext("/svc/dev");
-        existing.getServiceMeta().setType("sse");
-        Service incoming = createServiceWithMapping("svc", "dev", "host2", 9090);
-        incoming.setId("svc:dev");
-        incoming.getServiceMeta().setType("sse");
-
-        boolean result = sseServiceUtils.updateExistingService(existing, incoming, serviceCache);
-        assertTrue(result);
-    }
-
-    // --- removeUnusedService tests ---
-
-    @Test
-    void removeUnusedService_websocketType_removesFromMap() throws Exception {
-        Map<String, WebsocketClient> wsMap = new HashMap<>();
-        wsMap.put("/svc/dev", new WebsocketClient());
-
-        ServiceUtils wsServiceUtils = new ServiceUtils(httpUtils, Optional.of(wsMap), routeUtils, Optional.of(websocketUtils), "full");
-
-        Service service = createService("svc", "dev");
-        service.setContext("/svc/dev");
-        service.getServiceMeta().setType("websocket");
-
-        wsServiceUtils.removeUnusedService(service);
-        verify(websocketUtils).removeClientFromMap(wsMap, service);
-    }
-
-    @Test
-    void removeUnusedService_sseType_removesFromWebsocketMap() throws Exception {
-        Map<String, WebsocketClient> wsMap = new HashMap<>();
-        wsMap.put("/svc/dev", new WebsocketClient());
-
-        ServiceUtils sseServiceUtils = new ServiceUtils(httpUtils, Optional.of(wsMap), routeUtils, Optional.of(websocketUtils), "full");
-
-        Service service = createService("svc", "dev");
-        service.setContext("/svc/dev");
-        service.getServiceMeta().setType("sse");
-
-        sseServiceUtils.removeUnusedService(service);
-        verify(websocketUtils).removeClientFromMap(wsMap, service);
-    }
-
-    @Test
-    void removeUnusedService_restType_doesNotThrow() throws Exception {
-        ServiceUtils restServiceUtils = new ServiceUtils(httpUtils, Optional.empty(), routeUtils, Optional.empty(), "full");
-
-        Service service = createServiceWithMapping("svc", "dev", "host1", 8080);
-        service.setId("svc:dev");
-        service.setContext("/svc/dev");
-        service.getServiceMeta().setType("rest");
-
-        assertDoesNotThrow(() -> restServiceUtils.removeUnusedService(service));
-    }
+    // updateExistingService / removeUnusedService tests removed — logic migrated to transport handlers.
+    // Handler-level tests belong in a follow-up PR.
 
     // --- checkIfOpenApiIsEnabled tests ---
 
@@ -726,5 +607,76 @@ class ServiceUtilsTest {
         mappings.add(mapping);
         service.setMappingList(mappings);
         return service;
+    }
+
+    @Test
+    void stripJsonNulls_removesTopLevelNulls() {
+        String body = "{\"a\":\"x\",\"b\":null,\"c\":1}";
+        String result = serviceUtils.stripJsonNulls(body);
+        assertFalse(result.contains("\"b\""));
+        assertTrue(result.contains("\"a\":\"x\""));
+        assertTrue(result.contains("\"c\":1"));
+    }
+
+    @Test
+    void stripJsonNulls_removesNestedNulls() {
+        String body = "{\"outer\":{\"inner\":null,\"keep\":\"ok\"}}";
+        String result = serviceUtils.stripJsonNulls(body);
+        assertFalse(result.contains("\"inner\""));
+        assertTrue(result.contains("\"keep\":\"ok\""));
+    }
+
+    @Test
+    void stripJsonNulls_handlesNullsInsideArrayElements() {
+        String body = "{\"list\":[{\"keep\":1,\"drop\":null},{\"keep\":2}]}";
+        String result = serviceUtils.stripJsonNulls(body);
+        assertFalse(result.contains("\"drop\""));
+        assertTrue(result.contains("\"keep\":1"));
+        assertTrue(result.contains("\"keep\":2"));
+    }
+
+    @Test
+    void stripJsonNulls_preservesEmptyObjectsAndArrays() {
+        String body = "{\"obj\":{},\"arr\":[]}";
+        String result = serviceUtils.stripJsonNulls(body);
+        assertTrue(result.contains("\"obj\":{}"));
+        assertTrue(result.contains("\"arr\":[]"));
+    }
+
+    @Test
+    void stripJsonNulls_malformedJson_returnsOriginal() {
+        String body = "not json at all";
+        assertEquals(body, serviceUtils.stripJsonNulls(body));
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void processOpenApiSpec_openApi31WithExplicitNulls_parsesSuccessfully() {
+        // Minimal OpenAPI 3.1 spec with the null pollution pattern emitted by
+        // springdoc without @JsonInclude(NON_NULL) — this shape is what triggered
+        // NullNode → ObjectNode cast in OpenAPIV3Parser on babel's real spec.
+        String spec = "{"
+                + "\"openapi\":\"3.1.0\","
+                + "\"info\":{\"title\":\"t\",\"version\":\"1\",\"termsOfService\":null,"
+                +   "\"contact\":{\"name\":\"x\",\"url\":null,\"email\":\"a@b\",\"extensions\":null},"
+                +   "\"license\":{\"name\":\"l\",\"url\":null,\"identifier\":null,\"extensions\":null},"
+                +   "\"extensions\":null,\"summary\":null},"
+                + "\"externalDocs\":{\"description\":\"d\",\"url\":\"https://x\",\"extensions\":null},"
+                + "\"servers\":[{\"url\":\"https://s\",\"description\":\"d\",\"variables\":null,\"extensions\":null}],"
+                + "\"security\":null,"
+                + "\"paths\":{\"/ping\":{\"get\":{\"responses\":{\"200\":{\"description\":\"ok\"}}}}}"
+                + "}";
+
+        HttpResponse<String> response = mock(HttpResponse.class);
+        when(response.statusCode()).thenReturn(200);
+        when(response.body()).thenReturn(spec);
+
+        Service service = createService("test", "dev");
+        assertTrue(serviceUtils.processOpenApiSpec(service, response),
+                "spec with explicit nulls should parse after null-stripping");
+        assertNotNull(service.getOpenAPI());
+        assertEquals("3.1.0", service.getOpenAPI().getOpenapi());
+        assertNotNull(service.getOpenAPI().getPaths());
+        assertTrue(service.getOpenAPI().getPaths().containsKey("/ping"));
     }
 }

@@ -1259,9 +1259,9 @@ class CAPIMainTest {
         logField.set(null, org.slf4j.LoggerFactory.getLogger(CAPIMain.class));
 
         Startup mockStartup = mock(Startup.class);
-        io.surisoft.capi.service.ConsulNodeDiscovery mockDiscovery = mock(io.surisoft.capi.service.ConsulNodeDiscovery.class);
+        io.surisoft.capi.service.consul.ConsulCatalogService mockDiscovery = mock(io.surisoft.capi.service.consul.ConsulCatalogService.class);
         io.surisoft.capi.service.RouteConsistencyChecker mockChecker = mock(io.surisoft.capi.service.RouteConsistencyChecker.class);
-        when(mockStartup.getConsulNodeDiscovery()).thenReturn(mockDiscovery);
+        when(mockStartup.getConsulCatalogService()).thenReturn(mockDiscovery);
         when(mockStartup.getRouteConsistencyChecker()).thenReturn(mockChecker);
         when(mockStartup.getConsulStore()).thenReturn(null);
         when(mockStartup.getApiKeyStore()).thenReturn(null);
@@ -1298,7 +1298,7 @@ class CAPIMainTest {
 
         io.surisoft.capi.service.ConsulStore mockStore = mock(io.surisoft.capi.service.ConsulStore.class);
         Startup mockStartup = mock(Startup.class);
-        when(mockStartup.getConsulNodeDiscovery()).thenReturn(mock(io.surisoft.capi.service.ConsulNodeDiscovery.class));
+        when(mockStartup.getConsulCatalogService()).thenReturn(mock(io.surisoft.capi.service.consul.ConsulCatalogService.class));
         when(mockStartup.getRouteConsistencyChecker()).thenReturn(mock(io.surisoft.capi.service.RouteConsistencyChecker.class));
         when(mockStartup.getConsulStore()).thenReturn(mockStore);
         when(mockStartup.getApiKeyStore()).thenReturn(null);
@@ -1335,7 +1335,7 @@ class CAPIMainTest {
 
         io.surisoft.capi.service.ApiKeyStore mockApiKeyStore = mock(io.surisoft.capi.service.ApiKeyStore.class);
         Startup mockStartup = mock(Startup.class);
-        when(mockStartup.getConsulNodeDiscovery()).thenReturn(mock(io.surisoft.capi.service.ConsulNodeDiscovery.class));
+        when(mockStartup.getConsulCatalogService()).thenReturn(mock(io.surisoft.capi.service.consul.ConsulCatalogService.class));
         when(mockStartup.getRouteConsistencyChecker()).thenReturn(mock(io.surisoft.capi.service.RouteConsistencyChecker.class));
         when(mockStartup.getConsulStore()).thenReturn(null);
         when(mockStartup.getApiKeyStore()).thenReturn(mockApiKeyStore);

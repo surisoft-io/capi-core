@@ -10,7 +10,7 @@ import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.schema.RestClient;
 import io.surisoft.capi.schema.WebsocketClient;
 import io.surisoft.capi.service.CapiTrustManager;
-import io.surisoft.capi.service.ConsulNodeDiscovery;
+import io.surisoft.capi.service.consul.ConsulCatalogService;
 import io.surisoft.capi.service.ConsulStore;
 import io.surisoft.capi.service.McpSessionStore;
 import io.surisoft.capi.service.McpToolRegistry;
@@ -130,7 +130,7 @@ public class AdminGateway implements AutoCloseable {
 
     private void handleHealth(HttpServerExchange exchange) {
         exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
-        if(ConsulNodeDiscovery.isConnectedToConsul()) {
+        if(ConsulCatalogService.isConnectedToConsul()) {
             exchange.setStatusCode(StatusCodes.OK);
             exchange.getResponseSender().send("{\"status\":\"UP\"}");
         } else {

@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
+<!-- Drops UT005028 ClosedChannelException noise (upstream idle-close / stale pool); real proxy errors still logged -->
+<turboFilter class="io.surisoft.capi.utils.UndertowProxyNoiseFilter"/>
 <!-- Camel noise control -->
 <logger name="org.apache.camel" level="INFO"/>
 <logger name="org.apache.camel.impl.engine" level="WARN"/>
