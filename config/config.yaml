@@ -1,5 +1,5 @@
 capi:
-  version: 2.0
+  version: 2.10
   instanceName: default
   strictToInstanceName: false
   publicEndpoint: http://localhost:8380/api/
@@ -21,6 +21,7 @@ capi:
     listeningAddress: 0.0.0.0
     contextPath: /capi/*
     ioThreads: 8
+    responseTimeout: 180000
   grpc:
     enabled: false
     port: 8384
@@ -36,7 +37,7 @@ capi:
     password:
   consulCatalogDiscoverInterval: 10000
   consulHosts:
-    - endpoint: http://localhost:8500
+    - endpoint: https://localhost:8500
       token:
   consulStore:
     enabled: false
@@ -48,7 +49,7 @@ capi:
     enabled: false
     cookieName:
     keys:
-      - http://localhost:8080/realms/capi/protocol/openid-connect/certs
+      - https://localhost:8080/keycloak/realms/capi/protocol/openid-connect/certs
   opa:
     enabled: false
     endpoint: http://localhost:8181
@@ -74,8 +75,8 @@ capi:
     tenant: capi
     appName: capi
     appEnvironment: dev
-    destination: localhost:5444
-    filePath:
+    destination:
+    filePath: /capi.logs
   accessLogs:
     enabled: false
     tenant: capi

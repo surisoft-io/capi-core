@@ -3,7 +3,7 @@ package io.surisoft.capi.undertow;
 import io.surisoft.capi.exception.AuthorizationException;
 import io.surisoft.capi.processor.ThrottleProcessor;
 import io.surisoft.capi.schema.*;
-import io.surisoft.capi.service.ConsulNodeDiscovery;
+import io.surisoft.capi.service.consul.ConsulCatalogService;
 import io.surisoft.capi.service.OpaService;
 import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.HttpUtils;
@@ -97,7 +97,7 @@ class RestGatewayTest {
 
     private void setConnectedToConsul(boolean value) {
         try {
-            Field field = ConsulNodeDiscovery.class.getDeclaredField("connectedToConsul");
+            Field field = ConsulCatalogService.class.getDeclaredField("connectedToConsul");
             field.setAccessible(true);
             field.set(null, value);
         } catch (Exception e) {

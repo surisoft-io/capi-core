@@ -57,7 +57,10 @@ public class WebsocketUtils {
     }
 
     public HttpHandler createClientHttpHandler(WebsocketClient webSocketClient, Service service, HttpErrorHandler httpErrorHandler) {
-        return createClientHttpHandler(webSocketClient, service, httpErrorHandler, 30000);
+        int globalTimeoutMs = websocketConfiguration != null && websocketConfiguration.getResponseTimeout() > 0
+                ? websocketConfiguration.getResponseTimeout()
+                : 180000;
+        return createClientHttpHandler(webSocketClient, service, httpErrorHandler, globalTimeoutMs);
     }
 
     public HttpHandler createClientHttpHandler(WebsocketClient webSocketClient, Service service, HttpErrorHandler httpErrorHandler, int globalTimeoutMs) {

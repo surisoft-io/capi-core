@@ -37,7 +37,7 @@ public class OpaWasmService {
     private static final Logger log = LoggerFactory.getLogger(OpaWasmService.class);
     private final String bundleBaseUrl;
     private final int poolSize;
-    private final HttpClient httpClient;
+    private volatile HttpClient httpClient;
     private final OpaService fallbackOpaService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -55,9 +55,13 @@ public class OpaWasmService {
         this.fallbackOpaService = fallbackOpaService;
     }
 
+    public void setHttpClient(HttpClient httpClient) {
+        this.httpClient = httpClient;
+    }
+
     /**
      * Register a rego policy path for bundle polling.
-     * Called when ConsulNodeDiscovery finds a service with an OPA rego.
+     * Called when ConsulCatalogService finds a service with an OPA rego.
      * e.g. registerPolicy("capi/allow_all")
      */
     public void registerPolicy(String opaRego) {

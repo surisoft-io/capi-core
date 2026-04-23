@@ -54,6 +54,8 @@ public class ConsulStore {
     private CapiTrustManager capiTrustManager;
     private int globalResponseTimeout = 120000;
     private volatile HttpClient httpClient;
+    @Nullable
+    private volatile Runnable trustStoreReloadedCallback;
 
     private ObjectMapper objectMapper = new ObjectMapper();
 
@@ -108,6 +110,14 @@ public class ConsulStore {
 
     public void setGlobalResponseTimeout(int globalResponseTimeout) {
         this.globalResponseTimeout = globalResponseTimeout;
+    }
+
+    public void setHttpClient(HttpClient httpClient) {
+        this.httpClient = httpClient;
+    }
+
+    public void setTrustStoreReloadedCallback(@Nullable Runnable trustStoreReloadedCallback) {
+        this.trustStoreReloadedCallback = trustStoreReloadedCallback;
     }
 
     public void process() {
@@ -198,6 +208,15 @@ public class ConsulStore {
                 grpcUtils.refreshXnioSsl();
                 log.debug("XnioSsl refreshed in GrpcUtils");
                 rebuildGrpcClientHandlers();
+            }
+
+            Runnable callback = trustStoreReloadedCallback;
+            if (callback != null) {
+                try {
+                    callback.run();
+                } catch (Exception e) {
+                    log.error("Trust store reloaded callback failed: {}", e.getMessage(), e);
+                }
             }
         } catch (Exception e) {
             log.error("Failed to process trust store update: {}", e.getMessage(), e);

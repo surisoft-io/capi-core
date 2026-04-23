@@ -679,6 +679,89 @@ class ConsulStoreTest {
         svcCache.close();
     }
 
+    @SuppressWarnings("unchecked")
+    @Test
+    void process_withRealJks_invokesTrustStoreReloadedCallback() throws Exception {
+        java.security.KeyStore ks = java.security.KeyStore.getInstance("JKS");
+        ks.load(null, "changeit".toCharArray());
+        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+        ks.store(baos, "changeit".toCharArray());
+        byte[] jksBytes = baos.toByteArray();
+
+        String innerBase64 = Base64.getEncoder().encodeToString(jksBytes);
+        String outerBase64 = Base64.getEncoder().encodeToString(innerBase64.getBytes());
+
+        ConsulKeyStoreEntry remoteEntry = new ConsulKeyStoreEntry();
+        remoteEntry.setModifyIndex(300);
+        remoteEntry.setValue(outerBase64);
+
+        ObjectMapper objectMapper = new ObjectMapper();
+        String responseBody = objectMapper.writeValueAsString(new ConsulKeyStoreEntry[]{remoteEntry});
+
+        HttpResponse<String> mockResponse = mock(HttpResponse.class);
+        when(mockResponse.statusCode()).thenReturn(200);
+        when(mockResponse.body()).thenReturn(responseBody);
+        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class))).thenReturn(mockResponse);
+
+        when(consulTrustStoreCache.get(Constants.CONSUL_CAPI_TRUST_STORE_GROUP_KEY)).thenReturn(null);
+
+        Runnable callback = mock(Runnable.class);
+        consulStore.setTrustStoreReloadedCallback(callback);
+
+        consulStore.process();
+
+        verify(callback, times(1)).run();
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void process_whenTrustStoreProcessingFails_doesNotInvokeCallback() throws Exception {
+        // Invalid JKS content will cause KeyStore.load to throw; callback must not fire.
+        ConsulKeyStoreEntry remoteEntry = createValidTrustStoreEntry(400);
+
+        ObjectMapper objectMapper = new ObjectMapper();
+        String responseBody = objectMapper.writeValueAsString(new ConsulKeyStoreEntry[]{remoteEntry});
+
+        HttpResponse<String> mockResponse = mock(HttpResponse.class);
+        when(mockResponse.statusCode()).thenReturn(200);
+        when(mockResponse.body()).thenReturn(responseBody);
+        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class))).thenReturn(mockResponse);
+
+        when(consulTrustStoreCache.get(Constants.CONSUL_CAPI_TRUST_STORE_GROUP_KEY)).thenReturn(null);
+
+        Runnable callback = mock(Runnable.class);
+        consulStore.setTrustStoreReloadedCallback(callback);
+
+        consulStore.process();
+
+        verify(callback, never()).run();
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void process_whenRemoteUnchanged_doesNotInvokeCallback() throws Exception {
+        ConsulKeyStoreEntry remoteEntry = createValidTrustStoreEntry(500);
+
+        ObjectMapper objectMapper = new ObjectMapper();
+        String responseBody = objectMapper.writeValueAsString(new ConsulKeyStoreEntry[]{remoteEntry});
+
+        HttpResponse<String> mockResponse = mock(HttpResponse.class);
+        when(mockResponse.statusCode()).thenReturn(200);
+        when(mockResponse.body()).thenReturn(responseBody);
+        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class))).thenReturn(mockResponse);
+
+        // Cached entry has same modifyIndex → nothing to do
+        ConsulKeyStoreEntry cached = createValidTrustStoreEntry(500);
+        when(consulTrustStoreCache.get(Constants.CONSUL_CAPI_TRUST_STORE_GROUP_KEY)).thenReturn(cached);
+
+        Runnable callback = mock(Runnable.class);
+        consulStore.setTrustStoreReloadedCallback(callback);
+
+        consulStore.process();
+
+        verify(callback, never()).run();
+    }
+
     // === Helper to create a trust store entry with double-base64 encoded content ===
 
     private ConsulKeyStoreEntry createValidTrustStoreEntry(int modifyIndex) {

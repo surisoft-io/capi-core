@@ -3,7 +3,7 @@ package io.surisoft.capi.undertow;
 import io.surisoft.capi.exception.AuthorizationException;
 import io.surisoft.capi.exception.HttpErrorHandler;
 import io.surisoft.capi.processor.ThrottleProcessor;
-import io.surisoft.capi.service.ConsulNodeDiscovery;
+import io.surisoft.capi.service.consul.ConsulCatalogService;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
 import io.surisoft.capi.schema.OpaResult;
@@ -553,7 +553,7 @@ public class RestGateway {
 
     private void handleHealth(HttpServerExchange exchange) {
         exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
-        if(ConsulNodeDiscovery.isConnectedToConsul()) {
+        if(ConsulCatalogService.isConnectedToConsul()) {
             exchange.setStatusCode(StatusCodes.OK);
             exchange.getResponseSender().send("{\"status\":\"UP\"}");
         } else {

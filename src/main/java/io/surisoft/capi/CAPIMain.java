@@ -139,7 +139,7 @@ public class CAPIMain {
         // Consul service discovery
         scheduler.scheduleAtFixedRate(() -> {
             try {
-                startup.getConsulNodeDiscovery().processInfo();
+                startup.getConsulCatalogService().runCycle();
                 if (startup.getMcpServerClient() != null) {
                     startup.getMcpServerClient().refreshMcpServerTools();
                 }

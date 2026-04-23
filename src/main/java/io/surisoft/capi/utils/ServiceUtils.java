@@ -1,5 +1,9 @@
 package io.surisoft.capi.utils;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.surisoft.capi.processor.ServiceCapiInstanceMapper;
 import io.surisoft.capi.schema.*;
 import io.swagger.v3.oas.models.OpenAPI;
@@ -23,6 +27,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class ServiceUtils {
 
     private static final Logger log = LoggerFactory.getLogger(ServiceUtils.class);
+    private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
     private final HttpUtils httpUtils;
     private final Optional<Map<String, WebsocketClient>> websocketClientMap;
     private final RouteUtils routeUtils;
@@ -111,34 +116,6 @@ public class ServiceUtils {
         }
     }
 
-    public boolean updateExistingService(Service existingService,
-                                      Service incomingService,
-                                      Cache<String, Service> serviceCache) {
-
-        if(didServiceChange(existingService, incomingService)) {
-            redeployService(incomingService, existingService, serviceCache);
-            serviceCache.remove(existingService.getId());
-            return true;
-        } else {
-            log.trace("No changes detected for Service: {}.", existingService.getId());
-            return false;
-        }
-    }
-
-    private void redeployService(Service incomingService, Service existingService, Cache<String, Service> serviceCache) {
-        log.trace("Changes detected for Service: {}, redeploying routes.", existingService.getId());
-        if(existingService.getServiceMeta().getType() != null &&
-                (existingService.getServiceMeta().getType().equals(Constants.WEBSOCKET_TYPE) || existingService.getServiceMeta().getType().equals(Constants.SSE_TYPE)) &&
-                (incomingService.getServiceMeta().getType().equals(Constants.WEBSOCKET_TYPE) || incomingService.getServiceMeta().getType().equals(Constants.SSE_TYPE)) &&
-                websocketClientMap.isPresent() &&
-                websocketClientMap.get().containsKey(existingService.getId())) {
-            websocketClientMap.get().remove(existingService.getContext());
-        } else if(restClientMap != null) {
-            restClientMap.remove(existingService.getContext());
-            log.info("REST client removed for update: {}", existingService.getContext());
-        }
-    }
-
     public boolean isMappingChanged(List<Mapping> existingMappingList, List<Mapping> incomingMappingList) {
         if(existingMappingList.size() != incomingMappingList.size()) {
             return true;
@@ -211,15 +188,6 @@ public class ServiceUtils {
     }
 
 
-    public void removeUnusedService(Service service) {
-        if((service.getServiceMeta().getType().equals(Constants.WEBSOCKET_TYPE) || service.getServiceMeta().getType().equals(Constants.SSE_TYPE)) && websocketClientMap.isPresent() && websocketUtils.isPresent()) {
-            websocketUtils.get().removeClientFromMap(websocketClientMap.get(), service);
-        } else if(restClientMap != null) {
-            restClientMap.remove(service.getContext());
-            log.info("REST client removed: {}", service.getContext());
-        }
-    }
-
     public boolean checkIfOpenApiIsEnabled(Service service, HttpClient httpClient) {
         if (!capiRunningMode.equalsIgnoreCase(Constants.FULL_TYPE) || !serviceHasOpenApiEndpoint(service)) {
             return true;
@@ -247,7 +215,7 @@ public class ServiceUtils {
             }
 
             assert response.body() != null;
-            SwaggerParseResult swaggerParseResult = new OpenAPIV3Parser().readContents(response.body());
+            SwaggerParseResult swaggerParseResult = new OpenAPIV3Parser().readContents(stripJsonNulls(response.body()));
             if (swaggerParseResult.getMessages() != null) {
                 swaggerParseResult.getMessages().forEach(log::trace);
             }
@@ -292,15 +260,22 @@ public class ServiceUtils {
             }
 
             assert response.body() != null;
-            SwaggerParseResult swaggerParseResult = new OpenAPIV3Parser().readContents(response.body());
-            if (swaggerParseResult.getMessages() != null) {
-                swaggerParseResult.getMessages().forEach(log::trace);
-            }
+            SwaggerParseResult swaggerParseResult = new OpenAPIV3Parser().readContents(stripJsonNulls(response.body()));
 
             OpenAPI openAPI = swaggerParseResult.getOpenAPI();
             if (openAPI == null) {
-                log.warn("Open API specification is null for service {}", service.getId());
+                log.warn("Open API specification is null for service {} (body length={})", service.getId(), response.body().length());
+                if (swaggerParseResult.getMessages() != null && !swaggerParseResult.getMessages().isEmpty()) {
+                    swaggerParseResult.getMessages().forEach(m -> log.warn("OpenAPI parse message for {}: {}", service.getId(), m));
+                } else {
+                    String body = response.body();
+                    String snippet = body.length() > 200 ? body.substring(0, 200) + "..." : body;
+                    log.warn("OpenAPI parser returned no messages for {}; body snippet: {}", service.getId(), snippet);
+                }
                 return false;
+            }
+            if (swaggerParseResult.getMessages() != null) {
+                swaggerParseResult.getMessages().forEach(log::trace);
             }
 
             service.setOpenAPI(openAPI);
@@ -309,6 +284,45 @@ public class ServiceUtils {
             log.trace(e.getMessage(), e);
             log.warn("Open API specification is invalid for service {}", service.getId());
             return false;
+        }
+    }
+
+    /**
+     * Strip all JSON null values from the body before handing it to OpenAPIV3Parser.
+     * Some backends (notably springdoc emitting OpenAPI 3.1 without NON_NULL serialization)
+     * produce specs where optional fields are serialized as explicit nulls. The parser
+     * chokes on these with `NullNode cannot be cast to ObjectNode` when it encounters a
+     * null where it expects an object. Nulls are valid JSON but semantically equivalent
+     * to the field being absent, so removing them is safe and restores parseability.
+     * Falls back to the original body on error — downstream parse will produce the
+     * familiar warning and we stay fail-closed.
+     */
+    String stripJsonNulls(String body) {
+        try {
+            JsonNode root = JSON_MAPPER.readTree(body);
+            removeNulls(root);
+            return JSON_MAPPER.writeValueAsString(root);
+        } catch (Exception e) {
+            log.debug("Null-stripping failed, falling back to original body: {}", e.getMessage());
+            return body;
+        }
+    }
+
+    private static void removeNulls(JsonNode node) {
+        if (node instanceof ObjectNode obj) {
+            List<String> toRemove = new java.util.ArrayList<>();
+            obj.fields().forEachRemaining(e -> {
+                if (e.getValue() == null || e.getValue().isNull()) {
+                    toRemove.add(e.getKey());
+                } else {
+                    removeNulls(e.getValue());
+                }
+            });
+            toRemove.forEach(obj::remove);
+        } else if (node instanceof ArrayNode arr) {
+            for (JsonNode child : arr) {
+                removeNulls(child);
+            }
         }
     }
 
