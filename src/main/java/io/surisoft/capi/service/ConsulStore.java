@@ -228,7 +228,7 @@ public class ConsulStore {
         int count = 0;
         for (Map.Entry<String, RestClient> entry : restClientMap.entrySet()) {
             RestClient restClient = entry.getValue();
-            String serviceKey = httpUtils != null ? httpUtils.contextToRole(restClient.getServiceId()) : restClient.getServiceId();
+            String serviceKey = restClient.getCanonicalServiceId();
             Service service = serviceCache.get(serviceKey);
             if (service == null) continue;
             WebsocketClient tempClient = new WebsocketClient();

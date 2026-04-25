@@ -9,6 +9,8 @@ import java.util.Set;
 public class RestClient {
 
     private String serviceId;
+    // Stable Service.id (always "<name>:<group>") for serviceCache lookups — decoupled from context-path order (§5.1/Q6).
+    private String canonicalServiceId;
     private Set<Mapping> mappingList;
     @JsonIgnore
     private HttpHandler httpHandler;
@@ -46,6 +48,14 @@ public class RestClient {
 
     public void setServiceId(String serviceId) {
         this.serviceId = serviceId;
+    }
+
+    public String getCanonicalServiceId() {
+        return canonicalServiceId;
+    }
+
+    public void setCanonicalServiceId(String canonicalServiceId) {
+        this.canonicalServiceId = canonicalServiceId;
     }
 
     public Set<Mapping> getMappingList() {

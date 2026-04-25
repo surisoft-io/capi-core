@@ -81,6 +81,7 @@ public class RestTransportHandler implements TransportHandler {
     private RestClient buildRestClient(Service service) {
         RestClient restClient = new RestClient();
         restClient.setServiceId(service.getContext());
+        restClient.setCanonicalServiceId(service.getId());
         restClient.setMappingList(service.getMappingList());
 
         String rootContext = service.getMappingList().stream().toList().getFirst().getRootContext();
