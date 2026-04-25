@@ -320,7 +320,7 @@ public class RestGateway {
                                                     return;
                                                 }
                                                 if (fc.isThrottle() && throttleProcessor != null) {
-                                                    Service svc = serviceCache.get(httpUtils.contextToRole(fcId));
+                                                    Service svc = serviceCache.get(fc.getCanonicalServiceId());
                                                     if (svc != null && !throttleProcessor.canContinue(svc, null, false, -1, -1)) {
                                                         httpErrorHandler.sendError(exchange, 429, "Too Many requests");
                                                         return;
@@ -360,7 +360,7 @@ public class RestGateway {
 
             // 4. Throttle check
             if (restClient.isThrottle() && throttleProcessor != null) {
-                Service service = serviceCache.get(httpUtils.contextToRole(restClientId));
+                Service service = serviceCache.get(restClient.getCanonicalServiceId());
                 if (service != null && !throttleProcessor.canContinue(service, null, false, -1, -1)) {
                     httpErrorHandler.sendError(exchange, 429, "Too Many requests");
                     return;
@@ -461,7 +461,7 @@ public class RestGateway {
 
         // Check per-key throttle
         if (apiKeyEntry.getThrottleTotalCalls() > 0 && apiKeyEntry.getThrottleDuration() > 0 && throttleProcessor != null) {
-            Service service = serviceCache.get(serviceId);
+            Service service = serviceCache.get(restClient.getCanonicalServiceId());
             if (service != null) {
                 String consumerKey = "apikey:" + keyHash;
                 if (!throttleProcessor.canContinue(service, consumerKey, true,
@@ -514,7 +514,7 @@ public class RestGateway {
                             if (accessToken == null) {
                                 return "No authorization provided";
                             }
-                            String serviceKey = httpUtils.contextToRole(restClient.getServiceId());
+                            String serviceKey = restClient.getCanonicalServiceId();
                             Service service = serviceCache.get(serviceKey);
                             if (service != null) {
                                 if (!httpUtils.isAuthorized(accessToken, serviceKey, service, opaService)) {

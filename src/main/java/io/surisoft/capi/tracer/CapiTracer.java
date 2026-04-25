@@ -213,7 +213,7 @@ public class CapiTracer {
             }
 
             // Extra service metadata
-            String serviceKey = httpUtils.contextToRole(restClient.getServiceId());
+            String serviceKey = restClient.getCanonicalServiceId();
             Service service = serviceCache.peek(serviceKey);
             if (service != null && service.getServiceMeta().getExtraServiceMeta() != null) {
                 for (Map.Entry<String, String> entry : service.getServiceMeta().getExtraServiceMeta().entrySet()) {
