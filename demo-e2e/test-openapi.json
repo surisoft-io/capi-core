@@ -1,0 +1,18 @@
+{
+  "openapi": "3.0.1",
+  "info": {"title": "regression", "version": "1.0.0"},
+  "paths": {
+    "/api/content/resolution": {
+      "post": {
+        "operationId": "resolveContent",
+        "security": [{"bearerToken": []}],
+        "responses": {"200": {"description": "OK"}}
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerToken": {"type": "http", "scheme": "bearer"}
+    }
+  }
+}

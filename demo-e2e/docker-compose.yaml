@@ -137,7 +137,9 @@ services:
   # --- CAPI Gateway ---
 
   capi:
-    image: surisoft/capi-core:latest
+    build:
+      context: ..
+      dockerfile: Dockerfile
     container_name: demo-e2e-capi
     volumes:
       - ./capi-config.yaml:/capi/config/config.yaml

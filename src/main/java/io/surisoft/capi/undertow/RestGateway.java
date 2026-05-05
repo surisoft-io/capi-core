@@ -65,6 +65,8 @@ public class RestGateway {
     @Nullable
     private String reverseProxyHost;
     @Nullable
+    private String publicEndpointScheme;
+    @Nullable
     private MeterRegistry meterRegistry;
 
     private final HttpErrorHandler httpErrorHandler;
@@ -117,6 +119,10 @@ public class RestGateway {
 
     public void setReverseProxyHost(@Nullable String reverseProxyHost) {
         this.reverseProxyHost = reverseProxyHost;
+    }
+
+    public void setPublicEndpointScheme(@Nullable String publicEndpointScheme) {
+        this.publicEndpointScheme = publicEndpointScheme;
     }
 
     public void setMeterRegistry(@Nullable MeterRegistry meterRegistry) {
@@ -229,6 +235,9 @@ public class RestGateway {
             }
 
             // Reverse proxy headers (set as attachments so CAPIProxyHandler applies them on the outbound request)
+            if (publicEndpointScheme != null) {
+                exchange.putAttachment(CAPIProxyHandler.REVERSE_PROXY_PROTO, publicEndpointScheme);
+            }
             if (reverseProxyHost != null) {
                 String prefix = (contextPath != null ? contextPath : "") + restClient.getServiceId();
                 exchange.putAttachment(CAPIProxyHandler.REVERSE_PROXY_HOST, reverseProxyHost);

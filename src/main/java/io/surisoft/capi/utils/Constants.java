@@ -145,6 +145,9 @@ public class Constants {
     public static final String MCP_META_CATEGORY = "mcp-category";
     public static final String MCP_META_TIMEOUT = "mcp-timeout";
     public static final String MCP_META_TYPE = "mcp-type";
+    public static final String MCP_META_FROM_OPENAPI = "mcp-from-openapi";
+    public static final String MCP_META_PROMOTE_INCLUDE = "mcp-promote-include";
+    public static final String MCP_META_PROMOTE_EXCLUDE = "mcp-promote-exclude";
 
     // gRPC Gateway
     public static final String GRPC_SERVICE_HEADER = "x-capi-service";
@@ -155,4 +158,34 @@ public class Constants {
     public static final int JSONRPC_METHOD_NOT_FOUND = -32601;
     public static final int JSONRPC_INVALID_PARAMS = -32602;
     public static final int JSONRPC_INTERNAL_ERROR = -32603;
+
+    // OpenTelemetry GenAI semantic conventions (MCP gateway only)
+    public static final String GEN_AI_SYSTEM = "gen_ai.system";
+    public static final String GEN_AI_SYSTEM_MCP = "mcp";
+    public static final String GEN_AI_OPERATION_NAME = "gen_ai.operation.name";
+    public static final String GEN_AI_OPERATION_INITIALIZE = "initialize";
+    public static final String GEN_AI_OPERATION_LIST_TOOLS = "list_tools";
+    public static final String GEN_AI_OPERATION_EXECUTE_TOOL = "execute_tool";
+    public static final String GEN_AI_TOOL_NAME = "gen_ai.tool.name";
+    public static final String GEN_AI_TOOL_CALL_ID = "gen_ai.tool.call.id";
+    public static final String GEN_AI_TOOL_TYPE = "gen_ai.tool.type";
+    public static final String GEN_AI_TOOL_TYPE_FUNCTION = "function";
+    public static final String GEN_AI_TOOL_TYPE_MCP_SERVER = "mcp_server";
+
+    // CAPI MCP-specific span attributes (no stable semconv yet)
+    public static final String MCP_SESSION_ID_ATTR = "mcp.session.id";
+    public static final String MCP_PROTOCOL_VERSION_ATTR = "mcp.protocol.version";
+    public static final String MCP_ATTEMPT_ATTR = "mcp.attempt";
+    public static final String CAPI_OUTCOME_ATTR = "capi.outcome";
+    public static final String CAPI_OUTCOME_SUCCESS = "success";
+    public static final String CAPI_OUTCOME_PARSE_ERROR = "parse_error";
+    public static final String CAPI_OUTCOME_INVALID_REQUEST = "invalid_request";
+    public static final String CAPI_OUTCOME_UNAUTHORIZED = "unauthorized";
+    public static final String CAPI_OUTCOME_POLICY_DENIED = "policy_denied";
+    public static final String CAPI_OUTCOME_TOOL_NOT_FOUND = "tool_not_found";
+    public static final String CAPI_OUTCOME_NO_BACKEND = "no_backend";
+    public static final String CAPI_OUTCOME_BACKEND_FAILED = "backend_failed";
+    public static final String CAPI_OUTCOME_TIMEOUT = "timeout";
+    public static final String CAPI_OUTCOME_INTERRUPTED = "interrupted";
+    public static final String CAPI_OUTCOME_ERROR = "error";
 }

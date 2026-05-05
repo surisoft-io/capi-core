@@ -8,6 +8,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -16,42 +17,58 @@ public class McpToolRegistry {
     private static final Logger log = LoggerFactory.getLogger(McpToolRegistry.class);
     private static final String TOOLS_DOT = "tools-";
     private final Cache<String, Service> serviceCache;
+    private final OpenApiToMcpPromoter promoter;
 
     public McpToolRegistry(Cache<String, Service> serviceCache) {
+        this(serviceCache, new OpenApiToMcpPromoter());
+    }
+
+    public McpToolRegistry(Cache<String, Service> serviceCache, OpenApiToMcpPromoter promoter) {
         this.serviceCache = serviceCache;
+        this.promoter = promoter;
     }
 
     public List<McpTool> getAllTools() {
         List<McpTool> tools = new ArrayList<>();
         for (Service service : serviceCache.asMap().values()) {
-            if (service.getServiceMeta() == null) {
-                continue;
-            }
-            Map<String, String> props = service.getServiceMeta().getUnknownProperties();
-            if (props == null || !"true".equalsIgnoreCase(props.get(Constants.MCP_META_ENABLED))) {
-                continue;
-            }
-            tools.addAll(extractTools(service));
+            tools.addAll(toolsForService(service));
         }
         return tools;
     }
 
     public McpToolResolution resolveToolByName(String toolName) {
         for (Service service : serviceCache.asMap().values()) {
-            if (service.getServiceMeta() == null) {
-                continue;
-            }
-            Map<String, String> props = service.getServiceMeta().getUnknownProperties();
-            if (props == null || !"true".equalsIgnoreCase(props.get(Constants.MCP_META_ENABLED))) {
-                continue;
-            }
-            for (McpTool tool : extractTools(service)) {
+            for (McpTool tool : toolsForService(service)) {
                 if (tool.getName().equals(toolName)) {
                     return new McpToolResolution(tool, service);
                 }
             }
         }
         return null;
+    }
+
+    private List<McpTool> toolsForService(Service service) {
+        if (service == null || service.getServiceMeta() == null) return List.of();
+        Map<String, String> props = service.getServiceMeta().getUnknownProperties();
+        if (props == null) return List.of();
+
+        boolean tagsEnabled = "true".equalsIgnoreCase(props.get(Constants.MCP_META_ENABLED));
+        boolean openApiEnabled = "true".equalsIgnoreCase(props.get(Constants.MCP_META_FROM_OPENAPI));
+        if (!tagsEnabled && !openApiEnabled) return List.of();
+
+        // Tag-defined tools win on name collisions, so insert them last.
+        Map<String, McpTool> byName = new LinkedHashMap<>();
+        if (openApiEnabled) {
+            for (McpTool t : promoter.promote(service)) {
+                byName.put(t.getName(), t);
+            }
+        }
+        if (tagsEnabled) {
+            for (McpTool t : extractTools(service)) {
+                byName.put(t.getName(), t);
+            }
+        }
+        return new ArrayList<>(byName.values());
     }
 
     private List<McpTool> extractTools(Service service) {

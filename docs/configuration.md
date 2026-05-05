@@ -240,6 +240,20 @@ See [Security](security.md) for details.
 
 Per-service throttle settings are configured via Consul metadata. See [Service Registration](consul-metadata.md) for details.
 
+### MCP
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `mcp.enabled` | `false` | Enable the MCP Gateway. |
+| `mcp.port` | `8383` | Listening port. |
+| `mcp.sessionTtl` | `1800000` | MCP session TTL (ms). Sessions are evicted on inactivity. |
+| `mcp.toolCallTimeout` | `30000` | Per-tool-call backend timeout (ms). Overridable per tool via Consul metadata. |
+| `mcp.circuitBreakerCooldownMs` | `30000` | Cooldown (ms) before re-trying a failed backend in the per-tool load balancer. |
+| `mcp.mcpServerDiscoveryTimeoutMs` | `10000` | Timeout (ms) for the JSON-RPC `initialize` + `tools/list` probe used to discover tools from upstream MCP servers. |
+| `mcp.observability.genAi.enabled` | `false` | Emit OpenTelemetry GenAI semconv spans (`gen_ai.system=mcp`, `gen_ai.operation.name`, `gen_ai.tool.name`, `capi.outcome`, …) for every MCP request. Requires `traces.enabled: true`. See [MCP Gateway → Observability](mcp-gateway.md#observability-opentelemetry-genai) for the full attribute list and span model. |
+
+See [MCP Gateway](mcp-gateway.md) for the full design, wire protocol and Consul metadata extensions.
+
 ## Ports Summary
 
 | Port | Description | Config Key |

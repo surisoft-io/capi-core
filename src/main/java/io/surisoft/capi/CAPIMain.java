@@ -229,6 +229,17 @@ public class CAPIMain {
             if (capiConfiguration.getReverseProxyHost() != null && !capiConfiguration.getReverseProxyHost().isEmpty()) {
                 gateway.setReverseProxyHost(capiConfiguration.getReverseProxyHost());
             }
+            String publicEndpoint = capiConfiguration.getPublicEndpoint();
+            if (publicEndpoint != null && !publicEndpoint.isEmpty()) {
+                try {
+                    String scheme = java.net.URI.create(publicEndpoint).getScheme();
+                    if (scheme != null) {
+                        gateway.setPublicEndpointScheme(scheme);
+                    }
+                } catch (IllegalArgumentException e) {
+                    log.warn("Invalid capi.publicEndpoint, ignoring for X-Forwarded-Proto: {}", publicEndpoint);
+                }
+            }
             gateway.setMeterRegistry(startup.getPrometheusRegistry());
             gateway.runProxy();
             return gateway;
@@ -286,6 +297,21 @@ public class CAPIMain {
                     loadBalancer,
                     startup.getMcpServerClient()
             );
+            if (startup.getOpenTelemetryTracer() != null
+                    && capiConfiguration.getMcp().getObservability() != null
+                    && capiConfiguration.getMcp().getObservability().getGenAi() != null
+                    && capiConfiguration.getMcp().getObservability().getGenAi().isEnabled()) {
+                io.surisoft.capi.tracer.McpTracer mcpTracer = new io.surisoft.capi.tracer.McpTracer(
+                        startup.getOpenTelemetryTracer(),
+                        capiConfiguration.getInstanceName(),
+                        true
+                );
+                mcpGateway.setMcpTracer(mcpTracer);
+                if (startup.getMcpServerClient() != null) {
+                    startup.getMcpServerClient().setMcpTracer(mcpTracer);
+                }
+                log.info("MCP GenAI tracing enabled");
+            }
             mcpGateway.start();
             return mcpGateway;
         }

@@ -343,6 +343,53 @@ class RestGatewayTest {
         assertTrue(resp.body().contains("/api/my-service/v1"));
     }
 
+    @Test
+    void publicEndpointScheme_setsForwardedProtoAttachment() throws Exception {
+        int port = pickPort();
+        RestClient rc = new RestClient();
+        rc.setServiceId("/my-service/v1");
+        rc.setSecured(false);
+        rc.setHttpHandler(exchange -> {
+            String proto = exchange.getAttachment(CAPIProxyHandler.REVERSE_PROXY_PROTO);
+            exchange.setStatusCode(200);
+            exchange.getResponseSender().send("{\"proto\":\"" + (proto != null ? proto : "none") + "\"}");
+        });
+        restClientMap.put("/my-service/v1", rc);
+        runningGateway = createGateway(port);
+        runningGateway.setPublicEndpointScheme("https");
+        runningGateway.runProxy();
+
+        HttpResponse<String> resp = HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder().uri(URI.create("http://localhost:" + port + "/api/my-service/v1")).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, resp.statusCode());
+        assertTrue(resp.body().contains("\"proto\":\"https\""), "expected REVERSE_PROXY_PROTO=https, got: " + resp.body());
+    }
+
+    @Test
+    void publicEndpointScheme_unsetLeavesProtoAttachmentNull() throws Exception {
+        int port = pickPort();
+        RestClient rc = new RestClient();
+        rc.setServiceId("/my-service/v1");
+        rc.setSecured(false);
+        rc.setHttpHandler(exchange -> {
+            String proto = exchange.getAttachment(CAPIProxyHandler.REVERSE_PROXY_PROTO);
+            exchange.setStatusCode(200);
+            exchange.getResponseSender().send("{\"proto\":\"" + (proto != null ? proto : "none") + "\"}");
+        });
+        restClientMap.put("/my-service/v1", rc);
+        runningGateway = createGateway(port);
+        runningGateway.runProxy();
+
+        HttpResponse<String> resp = HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder().uri(URI.create("http://localhost:" + port + "/api/my-service/v1")).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, resp.statusCode());
+        assertTrue(resp.body().contains("\"proto\":\"none\""), "expected no REVERSE_PROXY_PROTO attachment, got: " + resp.body());
+    }
+
     // === keepGroup header ===
 
     @Test

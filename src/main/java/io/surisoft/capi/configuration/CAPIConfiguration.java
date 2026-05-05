@@ -637,6 +637,7 @@ public class CAPIConfiguration {
         private int toolCallTimeout = 30000;
         private long circuitBreakerCooldownMs = 30000;
         private int mcpServerDiscoveryTimeoutMs = 10000;
+        private Observability observability = new Observability();
 
         public boolean isEnabled() {
             return enabled;
@@ -673,6 +674,34 @@ public class CAPIConfiguration {
         }
         public void setMcpServerDiscoveryTimeoutMs(int mcpServerDiscoveryTimeoutMs) {
             this.mcpServerDiscoveryTimeoutMs = mcpServerDiscoveryTimeoutMs;
+        }
+        public Observability getObservability() {
+            return observability;
+        }
+        public void setObservability(Observability observability) {
+            this.observability = observability;
+        }
+
+        public static class Observability {
+            private GenAi genAi = new GenAi();
+
+            public GenAi getGenAi() {
+                return genAi;
+            }
+            public void setGenAi(GenAi genAi) {
+                this.genAi = genAi;
+            }
+
+            public static class GenAi {
+                private boolean enabled = false;
+
+                public boolean isEnabled() {
+                    return enabled;
+                }
+                public void setEnabled(boolean enabled) {
+                    this.enabled = enabled;
+                }
+            }
         }
     }
 

@@ -49,6 +49,7 @@ public final class CAPIProxyHandler implements HttpHandler {
     private static final AttachmentKey<XnioExecutor.Key> TIMEOUT_KEY = AttachmentKey.create(XnioExecutor.Key.class);
     public static final AttachmentKey<String> REVERSE_PROXY_HOST = AttachmentKey.create(String.class);
     public static final AttachmentKey<String> REVERSE_PROXY_PREFIX = AttachmentKey.create(String.class);
+    public static final AttachmentKey<String> REVERSE_PROXY_PROTO = AttachmentKey.create(String.class);
 
     /**
      * Headers filtered before proxying to the backend, similar to Camel's DefaultHeaderFilterStrategy.
@@ -370,8 +371,13 @@ public final class CAPIProxyHandler implements HttpHandler {
                     request.getRequestHeaders().put(Headers.X_DISABLE_PUSH, "true");
                 }
 
-                // X-Forwarded-Proto
-                final String proto = exchange.getRequestScheme().equals("https") ? "https" : "http";
+                // X-Forwarded-Proto: prefer publicEndpoint scheme attachment when CAPI is fronted
+                // by a TLS-terminating reverse proxy (otherwise exchange.getRequestScheme() reflects
+                // the plain-HTTP hop from the edge to CAPI and backends would build http:// redirects).
+                final String rpProto = exchange.getAttachment(REVERSE_PROXY_PROTO);
+                final String proto = rpProto != null
+                        ? rpProto
+                        : (exchange.getRequestScheme().equals("https") ? "https" : "http");
                 request.getRequestHeaders().put(Headers.X_FORWARDED_PROTO, proto);
                 request.putAttachment(ProxiedRequestAttachments.IS_SSL, proto.equals("https"));
 

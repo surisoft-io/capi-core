@@ -112,6 +112,10 @@ Three API keys per service (values in `.env`):
 MCP REST tools have their metadata (name, description, inputSchema) declared in Consul service meta.
 MCP Server tools are auto-discovered via JSON-RPC `tools/list` — no Consul metadata needed.
 
+The demo `weather` service additionally exposes `GET /openapi.json`, so it can also be wired up as an **OpenAPI auto-promoted** MCP service via `mcp-from-openapi=true` (exercised by `test-mcp-features.sh`). See [docs/mcp-gateway.md](../docs/mcp-gateway.md#auto-promoting-from-openapi).
+
+GenAI OpenTelemetry tracing is enabled in `capi-config.yaml` (`mcp.observability.genAi.enabled: true`); spans appear in OpenSearch alongside REST gateway spans.
+
 ### gRPC (1) — HTTP/2 proxying
 `greeter` — `greeter.Greeter/SayHello` routed via `x-capi-service: greeter/dev` header.
 
@@ -179,6 +183,25 @@ All passwords and secrets are externalized to a `.env` file (gitignored). Copy `
 9. Run load test with 50+ requests → see real-time status code distribution
 10. Open `/dashboards` → traces visible in OpenSearch
 11. Open `/grafana` → CAPI Gateway dashboard with live metrics
+
+## Regression Test Scripts
+
+Three scripts live alongside this README. All of them assume `docker compose up -d` is running.
+
+| Script | Purpose | Mode | Cleans up after itself |
+|---|---|---|---|
+| `scenarios.sh` | 36 checks across 13 scenarios for `ConsulCatalogService` (discovery invariants §7.1-§7.8). Run before merging any discovery-logic change. | non-interactive | yes |
+| `test-mcp.sh` | Walkthrough of the MCP gateway: `initialize` → `tools/list` → `tools/call` for each demo backend. | **interactive** (Enter to advance) | n/a — read-only |
+| `test-mcp-features.sh` | Phase-1 MCP feature additions: OpenAPI auto-promotion (`mcp-from-openapi`), include/exclude filters, hybrid override, GenAI tracing smoke check. Registers `weather-auto-test-1` as a temp service and deregisters on exit so the 42-service baseline `scenarios.sh` relies on stays intact. | non-interactive | yes |
+
+```bash
+# Run them
+bash scenarios.sh
+bash test-mcp.sh
+bash test-mcp-features.sh
+```
+
+`test-mcp-features.sh` is the regression suite for the OpenAPI-promotion + GenAI-tracing work. Run it after any change to `McpToolRegistry`, `OpenApiToMcpPromoter`, `McpGateway` handlers, or `McpTracer`.
 
 ## CLI Testing
 

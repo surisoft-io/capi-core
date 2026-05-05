@@ -94,3 +94,6 @@ capi:
     toolCallTimeout: 30000
     circuitBreakerCooldownMs: 30000
     mcpServerDiscoveryTimeoutMs: 10000
+    observability:
+      genAi:
+        enabled: false
