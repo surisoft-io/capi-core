@@ -153,7 +153,7 @@ New MCP-specific metadata keys are introduced:
 
 This approach avoids a separate MCP registry and keeps service registration simple and backward compatible.
 
-> **Phase 1 status.** `mcp-from-openapi` currently surfaces promoted tools via `tools/list` so agents can discover them. Invocation via `tools/call` for promoted tools is shipping as **phase 2**; until then, promoted tools are visible-but-not-callable. Tag-defined tools (`mcp-enabled` + `mcp-tools`) remain fully invocable.
+Promoted tools are fully callable: `tools/call` resolves the operation, substitutes path placeholders from `arguments`, places the body in a JSON request body when present, and routes any remaining arguments to the query string for `GET`/`HEAD` or to the body for `POST`/`PUT`/`PATCH`. The incoming `Authorization` header is forwarded verbatim to the backend.
 
 ## Streaming (SSE) Model
 
@@ -465,6 +465,17 @@ paths:
 **Hybrid mode.** A service can set **both** `mcp-from-openapi: "true"` and `mcp-enabled: "true"`. In that case, OpenAPI promotion populates the tool catalogue and tag-defined tools (`mcp-tools` etc.) override individual entries on name collision — useful when you want auto-promotion as the baseline but need to fine-tune one or two tools' descriptions or schemas without touching the OpenAPI spec.
 
 **JSON Schema synthesis.** Path/query/header parameters become top-level properties of `inputSchema`; required parameters are listed in `required`. The JSON request body, if present, becomes a `body` property whose schema mirrors the OpenAPI `requestBody.content["application/json"].schema`. Cookie parameters are skipped (rarely useful for agent callers). When schema serialisation fails (rare; usually due to unresolved `$ref` cycles), CAPI falls back to `{"type":"object"}` for that operation.
+
+**Dispatch rules (`tools/call`).** When an MCP client invokes a promoted tool:
+
+| Argument shape | Becomes |
+|---|---|
+| `{name}` placeholder in path template matched by an arg | URL-encoded into the path; that arg is consumed |
+| `arguments.body` (when method allows a body — POST/PUT/PATCH/DELETE) | the JSON request body, `Content-Type: application/json` |
+| Remaining args, GET/HEAD | query string (form-encoded) |
+| Remaining args, POST/PUT/PATCH (no explicit `body`) | merged into the JSON body |
+
+The gateway forwards the incoming MCP request's `Authorization` header to the backend, so OAuth2/PKCE tokens carried by the agent reach the upstream service unchanged. Backend timeouts use the `mcp-tools-<name>-timeout` per-tool override or fall back to `mcp-timeout` and finally `capi.mcp.toolCallTimeout`. Failover across multiple Consul instances follows the same circuit-breaker policy used for tag-defined tools — child `mcp.upstream` spans are emitted per attempt when GenAI tracing is enabled. Missing required path params return JSON-RPC `-32602` (`INVALID_PARAMS`) without dispatching to a backend.
 
 ### Connecting Claude Desktop or Cursor
 
