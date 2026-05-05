@@ -155,6 +155,126 @@ This approach avoids a separate MCP registry and keeps service registration simp
 
 Promoted tools are fully callable: `tools/call` resolves the operation, substitutes path placeholders from `arguments`, places the body in a JSON request body when present, and routes any remaining arguments to the query string for `GET`/`HEAD` or to the body for `POST`/`PUT`/`PATCH`. The incoming `Authorization` header is forwarded verbatim to the backend.
 
+## Signed Manifests
+
+### Why
+
+In MCP today, the LLM trusts the server's tool descriptions implicitly — they go straight from `tools/list` into the model's context as authoritative instructions. In CAPI, those descriptions live in Consul tags, which means anyone with Consul write access (a leaked ACL token, a CI bot, a compromised microservice running `consul services register`) can replace a benign description with one that exfiltrates data, biases tool selection, or steers the agent toward a malicious tool. This class of attack is known as **MCP tool poisoning**.
+
+Signed manifests close that gap. The operator signs each tool's manifest — `(serviceId, name, description, inputSchema, version)` — with a private key offline. CAPI verifies the signature on every discovery cycle against trusted public keys it pulls from Consul KV. A tampered tag fails verification and (in `enforce` mode) is dropped before it reaches `tools/list`. The LLM never sees the malicious description.
+
+### Modes
+
+`capi.mcp.signing.mode` accepts three values:
+
+| Mode | Behaviour |
+|---|---|
+| `off` (default) | Verification entirely skipped. Backwards-compatible. |
+| `warn` | Verify if signed, log unsigned/tampered tools but **still publish them**. Use during rollout to spot operators that haven't started signing yet without breaking discovery. |
+| `enforce` | Drop tools whose signature is missing (only when `mcp-required-signed=true`), invalid, signs a different version, or references an unknown key id. |
+
+Verification applies to **tag-defined tools** today (phase 1). Auto-promoted tools from OpenAPI specs are out of scope — sign the OpenAPI spec itself if you need provenance there.
+
+### What gets signed
+
+The manifest is canonicalised before signing so the operator's pipeline and CAPI agree byte-for-byte:
+
+```
+{"description":"...","inputSchema":{...},"name":"...","serviceId":"...","version":"..."}
+```
+
+Top-level keys are sorted alphabetically. The `inputSchema` field is parsed as JSON and re-serialised with sorted keys at every depth (so whitespace and key order in the original tag don't matter). Array order is preserved. The full algorithm is in [`McpManifest.canonicalize`](../src/main/java/io/surisoft/capi/service/McpManifest.java) — operators outside the JVM should match it carefully.
+
+### Tags
+
+| Tag | Description |
+|---|---|
+| `mcp-tools-{name}-signature` | Base64-encoded signature bytes (from `openssl dgst -sign` or equivalent). |
+| `mcp-tools-{name}-keyid` | Identifier of the signing public key — matches a Consul KV entry under `capi-mcp-trust-keys/<keyid>`. |
+| `mcp-required-signed` | When `true`, unsigned tools are dropped in `enforce` mode (warn-logged in `warn`). When `false`, unsigned tools pass through even in `enforce` — useful for incremental rollout. |
+| `version` (existing `ServiceMeta` field) | Signed *into* the manifest. Bumping `version` after editing tags forces operators to re-sign — bumping without re-signing is detected as `signature_invalid`. |
+
+### Trust keys in Consul KV
+
+Public keys live under the prefix `capi-mcp-trust-keys/`:
+
+```
+capi-mcp-trust-keys/ops-2026   ← PEM-encoded SubjectPublicKeyInfo (RSA, EC, or Ed25519)
+capi-mcp-trust-keys/ops-2027
+```
+
+CAPI polls this prefix on the same schedule as `consulCatalogDiscoverInterval` (default 10s). The map is replaced atomically on each successful poll; a transient outage (404) preserves the previous map so a brief Consul flap doesn't strip the gateway of all trust.
+
+Algorithm is inferred from the public key type:
+
+| Key | Signature algorithm |
+|---|---|
+| RSA | `SHA256withRSA` |
+| EC (NIST P-256) | `SHA256withECDSA` |
+| Ed25519 | `Ed25519` |
+
+### Operator workflow
+
+```bash
+# 1. One-time: generate a signing keypair
+openssl genpkey -algorithm RSA -out operator.key -pkeyopt rsa_keygen_bits:2048
+openssl rsa -in operator.key -pubout -out operator.pub.pem
+
+# 2. Publish the public key under the trust prefix
+curl -X PUT http://consul:8500/v1/kv/capi-mcp-trust-keys/ops-2026 \
+  --data-binary @operator.pub.pem
+
+# 3. For each tool, build the canonical manifest and sign it
+cat <<'EOF' > forecast.manifest.json
+{"description":"Get weather forecast for a city","inputSchema":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]},"name":"weather_forecast","serviceId":"weather-1","version":"1"}
+EOF
+SIG=$(openssl dgst -sha256 -sign operator.key forecast.manifest.json | base64 -w0)
+
+# 4. Register the service with the signed tags
+curl -X PUT http://consul:8500/v1/agent/service/register -d '{
+  "ID": "weather-1", "Name": "weather-1", "Address": "10.0.1.50", "Port": 8080,
+  "Meta": {
+    "scheme": "http", "root-context": "/", "type": "rest",
+    "mcp-enabled": "true", "mcp-toolPrefix": "weather",
+    "mcp-tools": "forecast",
+    "mcp-tools-forecast-description": "Get weather forecast for a city",
+    "mcp-tools-forecast-inputSchema": "{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\"}},\"required\":[\"city\"]}",
+    "mcp-tools-forecast-signature": "'"$SIG"'",
+    "mcp-tools-forecast-keyid": "ops-2026",
+    "mcp-required-signed": "true",
+    "version": "1"
+  }
+}'
+
+# 5. Set CAPI to enforce
+# capi.mcp.signing.mode: enforce
+```
+
+The manifest JSON in step 3 must be byte-identical to what CAPI canonicalises — sorted keys at every depth, no whitespace. Most operators will wrap this in a CI step (Vault Transit / cloud KMS / GitHub Actions OIDC → KMS) so the signing key never leaves their secret store.
+
+### Failure reasons (telemetry)
+
+When verification fails, the log line carries one of these reasons:
+
+| Reason | Meaning |
+|---|---|
+| `unsigned` | No `signature` tag (only logged when `mcp-required-signed=true`). |
+| `missing_keyid` | Signature present but `keyid` tag missing. |
+| `unknown_keyid` | `keyid` doesn't match any key under `capi-mcp-trust-keys/`. |
+| `bad_signature_encoding` | Signature tag isn't valid base64. |
+| `unsupported_key_algorithm` | Public key is neither RSA, EC, nor Ed25519. |
+| `signature_invalid` | Crypto check failed — usually means a tag was edited without re-signing or the version was bumped without re-signing. |
+| `verification_error` | Other crypto exception (rare; see logs). |
+
+These are stable strings — safe to alert on.
+
+### Limitations (phase 1)
+
+- Verification is at registry-build time, not on each `tools/call`. A tool that passed verification one second ago is admitted for that discovery cycle.
+- OpenAPI-promoted tools are not verified (they come from a different source of truth — the OpenAPI spec).
+- The signing CLI is whatever the operator wires up (`openssl` examples above). A first-class signing tool may ship later.
+- Hot key rotation works (just publish the new key under a new keyid, re-sign with it, then remove the old key). There's no signed transparency log — that's a future enhancement.
+
 ## Streaming (SSE) Model
 
 MCP does not mandate streaming for all calls.
