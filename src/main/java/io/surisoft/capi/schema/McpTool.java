@@ -9,6 +9,8 @@ public class McpTool {
     private String category;
     private int timeout;
     private boolean mcpServer;
+    private String httpMethod;
+    private String httpPathTemplate;
 
     public String getName() {
         return name;
@@ -72,5 +74,25 @@ public class McpTool {
 
     public void setMcpServer(boolean mcpServer) {
         this.mcpServer = mcpServer;
+    }
+
+    public String getHttpMethod() {
+        return httpMethod;
+    }
+
+    public void setHttpMethod(String httpMethod) {
+        this.httpMethod = httpMethod;
+    }
+
+    public String getHttpPathTemplate() {
+        return httpPathTemplate;
+    }
+
+    public void setHttpPathTemplate(String httpPathTemplate) {
+        this.httpPathTemplate = httpPathTemplate;
+    }
+
+    public boolean isOpenApiPromoted() {
+        return httpPathTemplate != null;
     }
 }

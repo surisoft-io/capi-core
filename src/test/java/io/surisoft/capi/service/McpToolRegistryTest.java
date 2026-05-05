@@ -3,6 +3,13 @@ package io.surisoft.capi.service;
 import io.surisoft.capi.schema.McpTool;
 import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.schema.ServiceMeta;
+import io.surisoft.capi.utils.Constants;
+import io.swagger.v3.oas.models.OpenAPI;
+import io.swagger.v3.oas.models.Operation;
+import io.swagger.v3.oas.models.PathItem;
+import io.swagger.v3.oas.models.Paths;
+import io.swagger.v3.oas.models.media.StringSchema;
+import io.swagger.v3.oas.models.parameters.Parameter;
 import org.cache2k.Cache;
 import org.cache2k.Cache2kBuilder;
 import org.junit.jupiter.api.AfterEach;
@@ -229,6 +236,82 @@ class McpToolRegistryTest {
         assertFalse(tools.get(0).isMcpServer());
     }
 
+    @Test
+    void getAllTools_openApiOnlyService_surfacesPromotedTools() {
+        Service service = createOpenApiService("orders");
+        serviceCache.put("orders", service);
+
+        List<McpTool> tools = registry.getAllTools();
+        assertEquals(1, tools.size());
+        assertEquals("getThing", tools.get(0).getName());
+        assertTrue(tools.get(0).isOpenApiPromoted());
+        assertEquals("GET", tools.get(0).getHttpMethod());
+        assertEquals("/things/{id}", tools.get(0).getHttpPathTemplate());
+    }
+
+    @Test
+    void resolveToolByName_findsPromotedTool() {
+        Service service = createOpenApiService("orders");
+        serviceCache.put("orders", service);
+
+        McpToolRegistry.McpToolResolution resolution = registry.resolveToolByName("getThing");
+        assertNotNull(resolution);
+        assertEquals("orders", resolution.getService().getId());
+        assertTrue(resolution.getTool().isOpenApiPromoted());
+    }
+
+    @Test
+    void hybridService_tagDefinedToolWinsOnNameCollision() {
+        Service service = createOpenApiService("orders");
+        // Also enable tag-defined tools, with a tool whose name collides with the OpenAPI one
+        service.getServiceMeta().handleUnknown(Constants.MCP_META_ENABLED, "true");
+        service.getServiceMeta().handleUnknown(Constants.MCP_META_TOOLS, "getThing");
+        service.getServiceMeta().handleUnknown(Constants.MCP_META_PREFIX + "tools-getThing-description", "Tag-defined override");
+        serviceCache.put("orders", service);
+
+        List<McpTool> tools = registry.getAllTools();
+        assertEquals(1, tools.size());
+        // Tag-defined wins: not OpenAPI-promoted, has tag-defined description
+        assertFalse(tools.get(0).isOpenApiPromoted());
+        assertEquals("Tag-defined override", tools.get(0).getDescription());
+    }
+
+    @Test
+    void hybridService_disjointToolsAreMerged() {
+        Service service = createOpenApiService("orders");
+        // Tag-defined tool with a different name than the promoted one
+        service.getServiceMeta().handleUnknown(Constants.MCP_META_ENABLED, "true");
+        service.getServiceMeta().handleUnknown(Constants.MCP_META_TOOLS, "manual");
+        serviceCache.put("orders", service);
+
+        List<McpTool> tools = registry.getAllTools();
+        assertEquals(2, tools.size());
+        assertTrue(tools.stream().anyMatch(t -> "getThing".equals(t.getName()) && t.isOpenApiPromoted()));
+        assertTrue(tools.stream().anyMatch(t -> "manual".equals(t.getName()) && !t.isOpenApiPromoted()));
+    }
+
+    @Test
+    void getAllTools_openApiOptedInButNoSpec_returnsEmpty() {
+        Service service = createService("orders");
+        service.getServiceMeta().handleUnknown(Constants.MCP_META_FROM_OPENAPI, "true");
+        // No openAPI set
+        serviceCache.put("orders", service);
+
+        List<McpTool> tools = registry.getAllTools();
+        assertTrue(tools.isEmpty());
+    }
+
+    @Test
+    void getAllTools_neitherFlag_returnsEmpty() {
+        // Service with an OpenAPI spec but neither mcp-enabled nor mcp-from-openapi
+        Service service = createService("orders");
+        service.setOpenAPI(buildSimpleOpenApi());
+        serviceCache.put("orders", service);
+
+        List<McpTool> tools = registry.getAllTools();
+        assertTrue(tools.isEmpty());
+    }
+
     private Service createService(String id) {
         Service service = new Service();
         service.setId(id);
@@ -243,5 +326,31 @@ class McpToolRegistryTest {
         service.getServiceMeta().handleUnknown("mcp-enabled", "true");
         service.getServiceMeta().handleUnknown("mcp-tools", tools);
         return service;
+    }
+
+    private Service createOpenApiService(String id) {
+        Service service = createService(id);
+        service.getServiceMeta().handleUnknown(Constants.MCP_META_FROM_OPENAPI, "true");
+        service.setOpenAPI(buildSimpleOpenApi());
+        return service;
+    }
+
+    private OpenAPI buildSimpleOpenApi() {
+        OpenAPI api = new OpenAPI();
+        Paths paths = new Paths();
+        Operation op = new Operation();
+        op.setOperationId("getThing");
+        op.setSummary("Get a thing");
+        Parameter idParam = new Parameter();
+        idParam.setName("id");
+        idParam.setIn("path");
+        idParam.setRequired(true);
+        idParam.setSchema(new StringSchema());
+        op.addParametersItem(idParam);
+        PathItem item = new PathItem();
+        item.setGet(op);
+        paths.addPathItem("/things/{id}", item);
+        api.setPaths(paths);
+        return api;
     }
 }

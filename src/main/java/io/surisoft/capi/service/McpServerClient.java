@@ -2,8 +2,11 @@ package io.surisoft.capi.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.context.Scope;
 import io.surisoft.capi.configuration.CAPIConfiguration;
 import io.surisoft.capi.schema.Service;
+import io.surisoft.capi.tracer.McpTracer;
 import io.surisoft.capi.utils.Constants;
 import org.cache2k.Cache;
 import org.slf4j.Logger;
@@ -28,6 +31,7 @@ public class McpServerClient {
     private final ObjectMapper objectMapper;
     private final CAPIConfiguration configuration;
     private final ConcurrentHashMap<String, McpBackendSession> backendSessions = new ConcurrentHashMap<>();
+    private McpTracer mcpTracer;
 
     public McpServerClient(Cache<String, Service> serviceCache,
                            McpBackendLoadBalancer loadBalancer,
@@ -38,6 +42,10 @@ public class McpServerClient {
         this.httpClient = httpClient;
         this.configuration = configuration;
         this.objectMapper = new ObjectMapper();
+    }
+
+    public void setMcpTracer(McpTracer mcpTracer) {
+        this.mcpTracer = mcpTracer;
     }
 
     static class McpBackendSession {
@@ -149,7 +157,13 @@ public class McpServerClient {
         }
 
         Exception lastException = null;
+        int attempt = 0;
         for (String backendUrl : backendUrls) {
+            attempt++;
+            Span attemptSpan = (mcpTracer != null)
+                    ? mcpTracer.startUpstreamSpan(null, backendUrl, toolName, attempt)
+                    : null;
+            Scope attemptScope = (attemptSpan != null) ? attemptSpan.makeCurrent() : null;
             try {
                 McpBackendSession session = backendSessions.get(serviceId);
 
@@ -159,6 +173,7 @@ public class McpServerClient {
                     if (session == null) {
                         loadBalancer.reportFailure(backendUrl);
                         lastException = new RuntimeException("Failed to initialize MCP session with backend: " + backendUrl);
+                        if (mcpTracer != null) mcpTracer.recordError(attemptSpan, lastException);
                         continue;
                     }
                     backendSessions.put(serviceId, session);
@@ -173,9 +188,11 @@ public class McpServerClient {
                 if (session.sessionId != null) {
                     requestBuilder.header(Constants.MCP_SESSION_HEADER, session.sessionId);
                 }
+                if (mcpTracer != null) mcpTracer.injectContext(attemptSpan, requestBuilder);
 
                 HttpResponse<String> response = httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
                 loadBalancer.reportSuccess(backendUrl);
+                if (mcpTracer != null) mcpTracer.setHttpStatus(attemptSpan, response.statusCode());
 
                 if (response.statusCode() >= 200 && response.statusCode() < 300) {
                     Map<String, Object> jsonRpcResponse = objectMapper.readValue(response.body(), Map.class);
@@ -199,7 +216,9 @@ public class McpServerClient {
                                 if (session.sessionId != null) {
                                     requestBuilder.header(Constants.MCP_SESSION_HEADER, session.sessionId);
                                 }
+                                if (mcpTracer != null) mcpTracer.injectContext(attemptSpan, requestBuilder);
                                 response = httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+                                if (mcpTracer != null) mcpTracer.setHttpStatus(attemptSpan, response.statusCode());
                                 jsonRpcResponse = objectMapper.readValue(response.body(), Map.class);
                             }
                         }
@@ -209,23 +228,33 @@ public class McpServerClient {
                     if (jsonRpcResponse.containsKey("result")) {
                         return jsonRpcResponse.get("result");
                     } else if (jsonRpcResponse.containsKey("error")) {
-                        throw new RuntimeException("Backend MCP error: " + objectMapper.writeValueAsString(jsonRpcResponse.get("error")));
+                        RuntimeException ex = new RuntimeException("Backend MCP error: " + objectMapper.writeValueAsString(jsonRpcResponse.get("error")));
+                        if (mcpTracer != null) mcpTracer.recordError(attemptSpan, ex);
+                        throw ex;
                     }
                     return jsonRpcResponse;
                 } else {
-                    throw new RuntimeException("Backend returned status " + response.statusCode() + ": " + response.body());
+                    RuntimeException ex = new RuntimeException("Backend returned status " + response.statusCode() + ": " + response.body());
+                    if (mcpTracer != null) mcpTracer.recordError(attemptSpan, ex);
+                    throw ex;
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+                if (mcpTracer != null) mcpTracer.recordError(attemptSpan, e);
                 throw e;
             } catch (java.io.IOException e) {
                 log.warn("Backend {} failed for MCP tool call {}: {}", backendUrl, toolName, e.getMessage());
                 loadBalancer.reportFailure(backendUrl);
+                if (mcpTracer != null) mcpTracer.recordError(attemptSpan, e);
                 lastException = e;
             } catch (Exception e) {
                 log.warn("Error calling MCP backend {} for tool {}: {}", backendUrl, toolName, e.getMessage());
                 loadBalancer.reportFailure(backendUrl);
+                if (mcpTracer != null) mcpTracer.recordError(attemptSpan, e);
                 lastException = e;
+            } finally {
+                if (attemptScope != null) attemptScope.close();
+                if (attemptSpan != null) attemptSpan.end();
             }
         }
 

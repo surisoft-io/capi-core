@@ -334,6 +334,26 @@ CAPI automatically detects the removal on the next discovery cycle and removes t
 | `expose-open-api-definition` | `false` | When `true`, the spec is available via `GET /info/openapi/<service-id>` on the Admin port. |
 | `secure-open-api-definition` | `false` | When `true`, requires OAuth2 authentication to view the OpenAPI spec. |
 
+### MCP
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `mcp-enabled` | `false` | Expose the service as an MCP tool provider via tag-defined tools (`mcp-tools`). |
+| `mcp-tools` | — | Comma-separated list of tool names (used with `mcp-enabled`). |
+| `mcp-tools-{name}-description` | — | Human-readable description for the tool, surfaced to LLM clients. |
+| `mcp-tools-{name}-inputSchema` | `{"type":"object"}` | JSON Schema describing the tool's input. |
+| `mcp-tools-{name}-timeout` | — | Per-tool override of the global `mcp-timeout`. |
+| `mcp-toolPrefix` | — | Prefix applied to all exposed tool names from this service. |
+| `mcp-streaming` | — | Comma-separated list of tool names that may emit SSE events. |
+| `mcp-category` | — | Semantic classification, used as input to OPA policy. |
+| `mcp-timeout` | — | Default tool execution timeout (ms) for this service. |
+| `mcp-type` | `rest` | `rest` for synthetic tools or `server` to passthrough to an upstream MCP server. |
+| `mcp-from-openapi` | `false` | When `true`, every operation in the service's `open-api` spec is auto-promoted to an MCP tool. Can be combined with `mcp-enabled` to selectively override entries. |
+| `mcp-promote-include` | — | Comma-separated `operationId`s to include when auto-promoting. Empty means all. |
+| `mcp-promote-exclude` | — | Comma-separated `operationId`s to exclude when auto-promoting. Applied after `mcp-promote-include`. |
+
+See [MCP Gateway](mcp-gateway.md) for the full design, the `tools/list` / `tools/call` wire protocol, and worked examples (including OpenAPI auto-promotion).
+
 ### Instance Targeting
 
 | Key | Default | Description |

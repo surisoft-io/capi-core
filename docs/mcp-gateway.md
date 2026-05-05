@@ -139,7 +139,7 @@ New MCP-specific metadata keys are introduced:
 
 | Key | Description |
 |---|---|
-| `mcp-enabled` | Whether the service exposes MCP tools |
+| `mcp-enabled` | Whether the service exposes MCP tools defined via tags (see `mcp-tools` below) |
 | `mcp-tools` | List of tool names |
 | `mcp-tools-{name}-description` | Human-readable tool description (used by LLMs for tool selection) |
 | `mcp-tools-{name}-inputSchema` | JSON Schema defining the tool's input parameters |
@@ -147,10 +147,13 @@ New MCP-specific metadata keys are introduced:
 | `mcp-category` | Semantic classification used as OPA input |
 | `mcp-timeout` | Execution timeout budget |
 | `mcp-toolPrefix` | (Optional) Namespace prefix for exposed tool names |
-
-If a service has an OpenAPI definition and does not provide explicit `inputSchema` metadata, CAPI may derive the tool schema from the OpenAPI spec.
+| `mcp-from-openapi` | When `true`, every operation in the service's OpenAPI spec is auto-published as an MCP tool. Can be combined with `mcp-enabled` to override individual auto-promoted tools with explicit tag-defined ones. |
+| `mcp-promote-include` | Comma-separated list of `operationId`s to include when `mcp-from-openapi=true`. Empty means "include all". |
+| `mcp-promote-exclude` | Comma-separated list of `operationId`s to exclude when `mcp-from-openapi=true`. Applied after `mcp-promote-include`. |
 
 This approach avoids a separate MCP registry and keeps service registration simple and backward compatible.
+
+> **Phase 1 status.** `mcp-from-openapi` currently surfaces promoted tools via `tools/list` so agents can discover them. Invocation via `tools/call` for promoted tools is shipping as **phase 2**; until then, promoted tools are visible-but-not-callable. Tag-defined tools (`mcp-enabled` + `mcp-tools`) remain fully invocable.
 
 ## Streaming (SSE) Model
 
@@ -232,9 +235,79 @@ capi:
     port: 8383
     sessionTtl: 1800000      # 30 minutes (milliseconds)
     toolCallTimeout: 30000   # 30 seconds (milliseconds)
+    observability:
+      genAi:
+        enabled: false       # OpenTelemetry GenAI semconv tracing (see below)
 ```
 
 All fields have sensible defaults. When `enabled: false` (the default), no MCP listener is started.
+
+### Observability (OpenTelemetry GenAI)
+
+The MCP Gateway can emit traces using the [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/), which makes every MCP request directly visible in any APM that recognises `gen_ai.*` attributes (Datadog, Honeycomb, Grafana Tempo, Jaeger, etc.) — no custom dashboards required.
+
+This is **off by default** and lives entirely on the MCP code path. The high-traffic REST and WebSocket gateways are not touched by this feature.
+
+#### Enabling
+
+Two flags must be true:
+
+```yaml
+capi:
+  traces:
+    enabled: true                       # OTel exporter must be running
+    endpoint: http://otel-collector:4318
+  mcp:
+    observability:
+      genAi:
+        enabled: true                   # opt-in for MCP GenAI spans
+```
+
+When `traces.enabled` is false the feature is silently disabled even if `genAi.enabled` is true (no tracer to attach to).
+
+#### Span Model
+
+| Span | Kind | When |
+|---|---|---|
+| `initialize` | SERVER | Per `initialize` JSON-RPC call |
+| `list_tools` | SERVER | Per `tools/list` call |
+| `execute_tool <toolName>` | SERVER | Per `tools/call` |
+| `mcp.upstream <toolName>` | CLIENT | Per backend attempt (one per failover try) |
+
+Incoming `traceparent` headers are honoured (W3C context extraction), and outgoing requests to backends carry an injected `traceparent` so backend traces stitch together with the gateway span.
+
+#### Attributes
+
+Standard GenAI semconv:
+
+| Attribute | Values |
+|---|---|
+| `gen_ai.system` | `mcp` |
+| `gen_ai.operation.name` | `initialize`, `list_tools`, `execute_tool` |
+| `gen_ai.tool.name` | The MCP tool name |
+| `gen_ai.tool.call.id` | The JSON-RPC `id` of the request |
+| `gen_ai.tool.type` | `function` (synthetic tool) or `mcp_server` (passthrough) |
+
+CAPI extensions (no stable semconv yet):
+
+| Attribute | Description |
+|---|---|
+| `mcp.session.id` | Session ID returned by `initialize` |
+| `mcp.protocol.version` | MCP protocol version negotiated |
+| `mcp.attempt` | Failover attempt index on `mcp.upstream` spans (1-based) |
+| `mcp.tools.count` | Number of tools returned (on `list_tools` only) |
+| `capi.outcome` | One of: `success`, `parse_error`, `invalid_request`, `unauthorized`, `policy_denied`, `tool_not_found`, `no_backend`, `backend_failed`, `timeout`, `interrupted`, `error` |
+| `http.response.status_code` | Backend HTTP status (on `mcp.upstream` spans) |
+| `url.full` | Backend URL (on `mcp.upstream` spans) |
+
+The `capi.outcome` attribute is the recommended primary group-by key for dashboards — it cleanly separates client errors (`tool_not_found`, `policy_denied`), backend errors (`backend_failed`, `timeout`), and successes.
+
+#### Example Use Cases
+
+- **Cost/latency dashboards** — group `execute_tool` span duration by `gen_ai.tool.name` to see which tools agents are calling most and where they are slowest.
+- **Tool-poisoning detection** — alert on a sudden spike in `tool_not_found` outcomes from a specific session.
+- **Backend reliability** — failover visibility comes for free: a `tool_call` parent with three `mcp.upstream` children where the first two ended `ERROR` is exactly what you want to see.
+- **End-to-end traces** — because `traceparent` is propagated, you can follow an LLM-issued tool call all the way through CAPI into the backend service and back, in a single trace view.
 
 ### Threading Model
 
@@ -294,6 +367,104 @@ Register your service in Consul with `mcp-*` metadata tags. The service itself d
 ```
 
 With `mcp-toolPrefix: "orders"`, the tools are exposed as `orders.get`, `orders.create`, and `orders.search`. When an agent calls `orders.get` with `{"orderId": "12345"}`, CAPI POSTs `{"orderId": "12345"}` to `http://10.0.1.50:8080/api`.
+
+### Auto-Promoting from OpenAPI
+
+If your service already publishes an OpenAPI spec, you do not need to hand-author `mcp-tools-*` tags for every operation — set `mcp-from-openapi: "true"` and CAPI will publish every operation in the spec as an MCP tool, with `inputSchema` synthesized from the OpenAPI parameters and request body.
+
+**Example service registration:**
+
+```json
+{
+  "ID": "order-service-1",
+  "Name": "order-service",
+  "Address": "10.0.1.50",
+  "Port": 8080,
+  "Meta": {
+    "scheme": "http",
+    "root-context": "/api",
+    "open-api": "http://10.0.1.50:8080/api/openapi.json",
+    "mcp-from-openapi": "true",
+    "mcp-toolPrefix": "orders",
+    "mcp-promote-exclude": "internalDebug,deleteAll"
+  }
+}
+```
+
+Given this OpenAPI fragment:
+
+```yaml
+paths:
+  /orders/{orderId}:
+    get:
+      operationId: getOrder
+      summary: Fetch a single order
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema: { type: string }
+  /orders:
+    post:
+      operationId: createOrder
+      summary: Create an order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                product:  { type: string }
+                quantity: { type: integer }
+              required: [product, quantity]
+```
+
+…CAPI publishes the following catalogue when an MCP client calls `tools/list`:
+
+```json
+{
+  "tools": [
+    {
+      "name": "orders_getOrder",
+      "description": "Fetch a single order",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "orderId": { "type": "string" }
+        },
+        "required": ["orderId"]
+      }
+    },
+    {
+      "name": "orders_createOrder",
+      "description": "Create an order",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "object",
+            "properties": {
+              "product":  { "type": "string" },
+              "quantity": { "type": "integer" }
+            },
+            "required": ["product", "quantity"]
+          }
+        },
+        "required": ["body"]
+      }
+    }
+  ]
+}
+```
+
+**Naming.** Tool names default to the operation's `operationId`. Operations without an `operationId` fall back to `<method>_<path>` (path separators replaced with `_`, e.g. `get_things_active`). The `mcp-toolPrefix` prefix is applied to all promoted tool names.
+
+**Filtering.** Use `mcp-promote-include` to whitelist a subset (`mcp-promote-include: "getOrder,listOrders"`) or `mcp-promote-exclude` to blacklist specific operations. Filters apply to the *base* name (pre-prefix). When both are set, include is applied first, then exclude.
+
+**Hybrid mode.** A service can set **both** `mcp-from-openapi: "true"` and `mcp-enabled: "true"`. In that case, OpenAPI promotion populates the tool catalogue and tag-defined tools (`mcp-tools` etc.) override individual entries on name collision — useful when you want auto-promotion as the baseline but need to fine-tune one or two tools' descriptions or schemas without touching the OpenAPI spec.
+
+**JSON Schema synthesis.** Path/query/header parameters become top-level properties of `inputSchema`; required parameters are listed in `required`. The JSON request body, if present, becomes a `body` property whose schema mirrors the OpenAPI `requestBody.content["application/json"].schema`. Cookie parameters are skipped (rarely useful for agent callers). When schema serialisation fails (rare; usually due to unresolved `$ref` cycles), CAPI falls back to `{"type":"object"}` for that operation.
 
 ### Connecting Claude Desktop or Cursor
 
