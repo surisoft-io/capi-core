@@ -351,8 +351,11 @@ CAPI automatically detects the removal on the next discovery cycle and removes t
 | `mcp-from-openapi` | `false` | When `true`, every operation in the service's `open-api` spec is auto-promoted to an MCP tool. Can be combined with `mcp-enabled` to selectively override entries. |
 | `mcp-promote-include` | — | Comma-separated `operationId`s to include when auto-promoting. Empty means all. |
 | `mcp-promote-exclude` | — | Comma-separated `operationId`s to exclude when auto-promoting. Applied after `mcp-promote-include`. |
+| `mcp-tools-{name}-signature` | — | Base64-encoded signature over the canonical manifest of this tool. Verified against the public key identified by `mcp-tools-{name}-keyid`. Only consulted when `capi.mcp.signing.mode` is `warn` or `enforce`. |
+| `mcp-tools-{name}-keyid` | — | Identifier of the signing public key (matches a Consul KV entry under `capi-mcp-trust-keys/<keyid>`). |
+| `mcp-required-signed` | `false` | When `true` (and signing is in `enforce` mode), unsigned tools from this service are dropped. In `warn` mode they pass with a log line. |
 
-See [MCP Gateway](mcp-gateway.md) for the full design, the `tools/list` / `tools/call` wire protocol, and worked examples (including OpenAPI auto-promotion).
+See [MCP Gateway](mcp-gateway.md) for the full design, the `tools/list` / `tools/call` wire protocol, and worked examples (including OpenAPI auto-promotion and signed manifests).
 
 ### Instance Targeting
 
