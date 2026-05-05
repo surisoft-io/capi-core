@@ -682,6 +682,27 @@ public class CAPIConfiguration {
             this.observability = observability;
         }
 
+        public Signing getSigning() {
+            return signing;
+        }
+        public void setSigning(Signing signing) {
+            this.signing = signing;
+        }
+
+        private Signing signing = new Signing();
+
+        public static class Signing {
+            /** off | warn | enforce */
+            private String mode = "off";
+
+            public String getMode() {
+                return mode;
+            }
+            public void setMode(String mode) {
+                this.mode = mode;
+            }
+        }
+
         public static class Observability {
             private GenAi genAi = new GenAi();
 

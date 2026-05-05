@@ -97,3 +97,8 @@ capi:
     observability:
       genAi:
         enabled: false
+    signing:
+      # off | warn | enforce
+      # Manifest signing requires consulStore.enabled=true; trust keys live under
+      # the Consul KV prefix capi-mcp-trust-keys/<keyId>.
+      mode: off

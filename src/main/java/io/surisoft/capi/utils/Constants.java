@@ -149,6 +149,15 @@ public class Constants {
     public static final String MCP_META_PROMOTE_INCLUDE = "mcp-promote-include";
     public static final String MCP_META_PROMOTE_EXCLUDE = "mcp-promote-exclude";
 
+    // Per-tool signed manifest tags. Each suffix is appended to "mcp-tools-<name>-".
+    public static final String MCP_META_TOOLS_SIGNATURE_SUFFIX = "-signature";
+    public static final String MCP_META_TOOLS_KEYID_SUFFIX = "-keyid";
+    public static final String MCP_META_REQUIRED_SIGNED = "mcp-required-signed";
+
+    // Consul KV prefix where trusted public keys for MCP manifest signing live.
+    // Each key entry is a PEM-encoded public key; the suffix after the prefix is the keyId.
+    public static final String CONSUL_CAPI_MCP_TRUST_KEYS_PREFIX = "capi-mcp-trust-keys/";
+
     // gRPC Gateway
     public static final String GRPC_SERVICE_HEADER = "x-capi-service";
 

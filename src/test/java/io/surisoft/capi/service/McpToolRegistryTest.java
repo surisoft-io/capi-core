@@ -353,4 +353,169 @@ class McpToolRegistryTest {
         api.setPaths(paths);
         return api;
     }
+
+    // ==========================================================================
+    // Signed-manifest verification tests
+    // ==========================================================================
+
+    @org.junit.jupiter.api.Nested
+    class SigningTests {
+
+        private java.security.KeyPair kp;
+        private McpTrustStore trustStore;
+        private McpToolRegistry signingRegistry;
+
+        @org.junit.jupiter.api.BeforeEach
+        void setUpSigning() throws Exception {
+            kp = java.security.KeyPairGenerator.getInstance("RSA").generateKeyPair();
+            trustStore = org.mockito.Mockito.mock(McpTrustStore.class);
+            org.mockito.Mockito.when(trustStore.get("ops-2026")).thenReturn(kp.getPublic());
+            McpManifestVerifier verifier = new McpManifestVerifier(trustStore);
+            signingRegistry = new McpToolRegistry(serviceCache);
+            signingRegistry.setManifestVerifier(verifier);
+        }
+
+        @org.junit.jupiter.api.Test
+        void offMode_skipsVerificationEntirelyEvenWithBadSig() {
+            signingRegistry.setSigningMode(McpToolRegistry.SIGNING_OFF);
+            Service svc = signedService("svc-a", "doIt", "Does it", "{\"type\":\"object\"}", "1",
+                    "AAAA-bogus", "ops-2026", false);
+            serviceCache.put("svc-a", svc);
+            assertEquals(1, signingRegistry.getAllTools().size());
+        }
+
+        @org.junit.jupiter.api.Test
+        void warnMode_validSig_admits() throws Exception {
+            signingRegistry.setSigningMode(McpToolRegistry.SIGNING_WARN);
+            String desc = "Does it";
+            String schema = "{\"type\":\"object\"}";
+            String sig = sign("svc-a", "doIt", desc, schema, "1");
+            Service svc = signedService("svc-a", "doIt", desc, schema, "1", sig, "ops-2026", false);
+            serviceCache.put("svc-a", svc);
+            assertEquals(1, signingRegistry.getAllTools().size());
+        }
+
+        @org.junit.jupiter.api.Test
+        void warnMode_tamperedDescription_stillAdmits() throws Exception {
+            signingRegistry.setSigningMode(McpToolRegistry.SIGNING_WARN);
+            String origDesc = "Does it";
+            String schema = "{\"type\":\"object\"}";
+            String sig = sign("svc-a", "doIt", origDesc, schema, "1");
+            // Operator signed origDesc; the live tag carries a tampered one.
+            Service svc = signedService("svc-a", "doIt", "TAMPERED", schema, "1", sig, "ops-2026", false);
+            serviceCache.put("svc-a", svc);
+            assertEquals(1, signingRegistry.getAllTools().size(),
+                    "warn mode should log but still admit tampered tools");
+        }
+
+        @org.junit.jupiter.api.Test
+        void enforceMode_tamperedDescription_drops() throws Exception {
+            signingRegistry.setSigningMode(McpToolRegistry.SIGNING_ENFORCE);
+            String origDesc = "Does it";
+            String schema = "{\"type\":\"object\"}";
+            String sig = sign("svc-a", "doIt", origDesc, schema, "1");
+            Service svc = signedService("svc-a", "doIt", "TAMPERED", schema, "1", sig, "ops-2026", false);
+            serviceCache.put("svc-a", svc);
+            assertEquals(0, signingRegistry.getAllTools().size(),
+                    "enforce mode should drop tampered tools");
+        }
+
+        @org.junit.jupiter.api.Test
+        void enforceMode_validSig_admits() throws Exception {
+            signingRegistry.setSigningMode(McpToolRegistry.SIGNING_ENFORCE);
+            String desc = "Does it";
+            String schema = "{\"type\":\"object\"}";
+            String sig = sign("svc-a", "doIt", desc, schema, "1");
+            Service svc = signedService("svc-a", "doIt", desc, schema, "1", sig, "ops-2026", false);
+            serviceCache.put("svc-a", svc);
+            assertEquals(1, signingRegistry.getAllTools().size());
+        }
+
+        @org.junit.jupiter.api.Test
+        void warnMode_unsignedTool_admits() {
+            signingRegistry.setSigningMode(McpToolRegistry.SIGNING_WARN);
+            // No signature/keyid tags; mcp-required-signed=false
+            Service svc = signedService("svc-a", "doIt", "Hello", "{\"type\":\"object\"}", "1",
+                    null, null, false);
+            serviceCache.put("svc-a", svc);
+            assertEquals(1, signingRegistry.getAllTools().size());
+        }
+
+        @org.junit.jupiter.api.Test
+        void enforceMode_unsignedTool_requiredSigned_drops() {
+            signingRegistry.setSigningMode(McpToolRegistry.SIGNING_ENFORCE);
+            Service svc = signedService("svc-a", "doIt", "Hello", "{\"type\":\"object\"}", "1",
+                    null, null, true);
+            serviceCache.put("svc-a", svc);
+            assertEquals(0, signingRegistry.getAllTools().size());
+        }
+
+        @org.junit.jupiter.api.Test
+        void enforceMode_unsignedTool_notRequired_admits() {
+            // mcp-required-signed=false → unsigned tools pass through even in enforce.
+            // This lets operators roll out signing incrementally.
+            signingRegistry.setSigningMode(McpToolRegistry.SIGNING_ENFORCE);
+            Service svc = signedService("svc-a", "doIt", "Hello", "{\"type\":\"object\"}", "1",
+                    null, null, false);
+            serviceCache.put("svc-a", svc);
+            assertEquals(1, signingRegistry.getAllTools().size());
+        }
+
+        @org.junit.jupiter.api.Test
+        void enforceMode_versionDrift_drops() throws Exception {
+            // Operator signed version "1"; ServiceMeta.version is now "2" in Consul.
+            signingRegistry.setSigningMode(McpToolRegistry.SIGNING_ENFORCE);
+            String desc = "Does it";
+            String schema = "{\"type\":\"object\"}";
+            String sigForV1 = sign("svc-a", "doIt", desc, schema, "1");
+            Service svc = signedService("svc-a", "doIt", desc, schema, "2", sigForV1, "ops-2026", false);
+            serviceCache.put("svc-a", svc);
+            assertEquals(0, signingRegistry.getAllTools().size());
+        }
+
+        @org.junit.jupiter.api.Test
+        void enforceMode_unknownKeyId_drops() throws Exception {
+            signingRegistry.setSigningMode(McpToolRegistry.SIGNING_ENFORCE);
+            String desc = "Does it";
+            String schema = "{\"type\":\"object\"}";
+            String sig = sign("svc-a", "doIt", desc, schema, "1");
+            Service svc = signedService("svc-a", "doIt", desc, schema, "1", sig, "no-such-key", false);
+            serviceCache.put("svc-a", svc);
+            assertEquals(0, signingRegistry.getAllTools().size());
+        }
+
+        // --- helpers ---
+
+        private Service signedService(String id, String toolName, String description,
+                                      String schema, String version,
+                                      String signature, String keyId, boolean requireSigned) {
+            Service service = createService(id);
+            ServiceMeta meta = service.getServiceMeta();
+            meta.handleUnknown(Constants.MCP_META_ENABLED, "true");
+            meta.handleUnknown(Constants.MCP_META_TOOLS, toolName);
+            meta.handleUnknown(Constants.MCP_META_PREFIX + "tools-" + toolName + "-description", description);
+            meta.handleUnknown(Constants.MCP_META_PREFIX + "tools-" + toolName + "-inputSchema", schema);
+            if (signature != null) {
+                meta.handleUnknown(Constants.MCP_META_PREFIX + "tools-" + toolName
+                        + Constants.MCP_META_TOOLS_SIGNATURE_SUFFIX, signature);
+            }
+            if (keyId != null) {
+                meta.handleUnknown(Constants.MCP_META_PREFIX + "tools-" + toolName
+                        + Constants.MCP_META_TOOLS_KEYID_SUFFIX, keyId);
+            }
+            if (requireSigned) {
+                meta.handleUnknown(Constants.MCP_META_REQUIRED_SIGNED, "true");
+            }
+            meta.setVersion(version);
+            return service;
+        }
+
+        private String sign(String svc, String name, String desc, String schema, String version) throws Exception {
+            byte[] manifest = McpManifest.canonicalize(svc, name, desc, schema, version);
+            java.security.Signature s = java.security.Signature.getInstance("SHA256withRSA");
+            s.initSign(kp.getPrivate());
+            s.update(manifest);
+            return java.util.Base64.getEncoder().encodeToString(s.sign());
+        }
+    }
 }

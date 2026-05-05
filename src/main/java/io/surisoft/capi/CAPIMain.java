@@ -28,6 +28,7 @@ public class CAPIMain {
 
     private static Logger log;
     private final CAPIConfiguration capiConfiguration;
+    private io.surisoft.capi.service.McpTrustStore mcpTrustStore;
 
     public static void main(String[] args) {
         new CAPIMain();
@@ -157,6 +158,17 @@ public class CAPIMain {
                     log.error("Consul store error: {}", e.getMessage());
                 }
             }, 0, interval, TimeUnit.MILLISECONDS);
+        }
+
+        // MCP manifest trust keys (only registered if signing is enabled)
+        if (mcpTrustStore != null) {
+            scheduler.scheduleAtFixedRate(() -> {
+                try {
+                    mcpTrustStore.process();
+                } catch (Exception e) {
+                    log.error("MCP trust store refresh error: {}", e.getMessage());
+                }
+            }, interval, interval, TimeUnit.MILLISECONDS);
         }
 
         // API key store
@@ -311,6 +323,24 @@ public class CAPIMain {
                     startup.getMcpServerClient().setMcpTracer(mcpTracer);
                 }
                 log.info("MCP GenAI tracing enabled");
+            }
+
+            String signingMode = capiConfiguration.getMcp().getSigning() != null
+                    ? capiConfiguration.getMcp().getSigning().getMode() : "off";
+            if (signingMode != null && !"off".equalsIgnoreCase(signingMode.trim())
+                    && capiConfiguration.getConsulStore() != null
+                    && capiConfiguration.getConsulStore().isEnabled()) {
+                mcpTrustStore = new io.surisoft.capi.service.McpTrustStore(
+                        capiConfiguration.getConsulStore().getEndpoint(),
+                        capiConfiguration.getConsulStore().getToken(),
+                        startup.getConsulHttpClient()
+                );
+                mcpTrustStore.process();
+                io.surisoft.capi.service.McpManifestVerifier verifier =
+                        new io.surisoft.capi.service.McpManifestVerifier(mcpTrustStore);
+                startup.getMcpToolRegistry().setManifestVerifier(verifier);
+                startup.getMcpToolRegistry().setSigningMode(signingMode);
+                log.info("MCP manifest signing mode: {} (trust keys loaded: {})", signingMode, mcpTrustStore.size());
             }
             mcpGateway.start();
             return mcpGateway;

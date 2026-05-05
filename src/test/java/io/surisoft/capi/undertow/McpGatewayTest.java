@@ -1766,6 +1766,271 @@ class McpGatewayTest {
         }
     }
 
+    // ==========================================================================
+    // OpenAPI auto-promotion (phase 2) — tools/call dispatch tests
+    // ==========================================================================
+
+    @Test
+    void promotedTool_getWithPathParam_dispatchesToBackend() throws Exception {
+        java.util.concurrent.atomic.AtomicReference<String> seenMethod = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<String> seenPath = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<String> seenQuery = new java.util.concurrent.atomic.AtomicReference<>();
+
+        int backendPort = findFreePort();
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(ex -> {
+                    seenMethod.set(ex.getRequestMethod().toString());
+                    seenPath.set(ex.getRequestPath());
+                    seenQuery.set(ex.getQueryString());
+                    ex.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+                    ex.setStatusCode(StatusCodes.OK);
+                    ex.getResponseSender().send("{\"orderId\":\"abc-123\",\"status\":\"shipped\"}");
+                }).build();
+        backend.start();
+
+        try {
+            String sessionId = initializeSession();
+            Service svc = createOpenApiPromotedService("orders", "localhost", backendPort);
+            serviceCache.put("orders", svc);
+
+            String body = objectMapper.writeValueAsString(Map.of(
+                    "jsonrpc", "2.0", "method", "tools/call", "id", 100,
+                    "params", Map.of("name", "getOrder", "arguments",
+                            Map.of("orderId", "abc-123", "verbose", "true"))
+            ));
+            HttpResponse<String> resp = sendPostWithSession("/mcp", body, sessionId);
+
+            assertEquals(200, resp.statusCode());
+            assertTrue(resp.body().contains("shipped"));
+            assertEquals("GET", seenMethod.get());
+            assertEquals("/orders/abc-123", seenPath.get());
+            assertEquals("verbose=true", seenQuery.get());
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void promotedTool_postWithBody_dispatchesToBackend() throws Exception {
+        java.util.concurrent.atomic.AtomicReference<String> seenMethod = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<String> seenPath = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<String> seenBody = new java.util.concurrent.atomic.AtomicReference<>();
+
+        int backendPort = findFreePort();
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(ex -> {
+                    seenMethod.set(ex.getRequestMethod().toString());
+                    seenPath.set(ex.getRequestPath());
+                    if (ex.isInIoThread()) {
+                        ex.dispatch(() -> {
+                            try {
+                                ex.startBlocking();
+                                seenBody.set(new String(ex.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8));
+                                ex.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+                                ex.setStatusCode(StatusCodes.OK);
+                                ex.getResponseSender().send("{\"id\":\"new-1\"}");
+                            } catch (Exception e) {
+                                ex.setStatusCode(500);
+                            }
+                        });
+                    }
+                }).build();
+        backend.start();
+
+        try {
+            String sessionId = initializeSession();
+            Service svc = createOpenApiPromotedService("orders", "localhost", backendPort);
+            serviceCache.put("orders", svc);
+
+            String body = objectMapper.writeValueAsString(Map.of(
+                    "jsonrpc", "2.0", "method", "tools/call", "id", 101,
+                    "params", Map.of("name", "createOrder", "arguments",
+                            Map.of("body", Map.of("product", "laptop", "quantity", 2)))
+            ));
+            HttpResponse<String> resp = sendPostWithSession("/mcp", body, sessionId);
+
+            assertEquals(200, resp.statusCode());
+            assertTrue(resp.body().contains("new-1"));
+            assertEquals("POST", seenMethod.get());
+            assertEquals("/orders", seenPath.get());
+            assertNotNull(seenBody.get());
+            assertTrue(seenBody.get().contains("\"product\":\"laptop\""));
+            assertTrue(seenBody.get().contains("\"quantity\":2"));
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void promotedTool_missingPathParam_returnsInvalidParams() throws Exception {
+        int backendPort = findFreePort();
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(ex -> {
+                    ex.setStatusCode(StatusCodes.OK);
+                    ex.getResponseSender().send("{}");
+                }).build();
+        backend.start();
+
+        try {
+            String sessionId = initializeSession();
+            Service svc = createOpenApiPromotedService("orders", "localhost", backendPort);
+            serviceCache.put("orders", svc);
+
+            // arguments missing the required path param "orderId"
+            String body = objectMapper.writeValueAsString(Map.of(
+                    "jsonrpc", "2.0", "method", "tools/call", "id", 102,
+                    "params", Map.of("name", "getOrder", "arguments", Map.of())
+            ));
+            HttpResponse<String> resp = sendPostWithSession("/mcp", body, sessionId);
+
+            assertEquals(200, resp.statusCode());
+            // -32602 is JSON-RPC INVALID_PARAMS
+            assertTrue(resp.body().contains("-32602"));
+            assertTrue(resp.body().contains("orderId"));
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void promotedTool_forwardsAuthorizationHeader() throws Exception {
+        java.util.concurrent.atomic.AtomicReference<String> seenAuth = new java.util.concurrent.atomic.AtomicReference<>();
+
+        int backendPort = findFreePort();
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(ex -> {
+                    var hv = ex.getRequestHeaders().get(Headers.AUTHORIZATION);
+                    if (hv != null && !hv.isEmpty()) seenAuth.set(hv.getFirst());
+                    ex.setStatusCode(StatusCodes.OK);
+                    ex.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+                    ex.getResponseSender().send("{}");
+                }).build();
+        backend.start();
+
+        try {
+            String sessionId = initializeSession();
+            Service svc = createOpenApiPromotedService("orders", "localhost", backendPort);
+            serviceCache.put("orders", svc);
+
+            String body = objectMapper.writeValueAsString(Map.of(
+                    "jsonrpc", "2.0", "method", "tools/call", "id", 103,
+                    "params", Map.of("name", "getOrder", "arguments", Map.of("orderId", "x"))
+            ));
+
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(new URI("http://localhost:" + port + "/mcp"))
+                    .header("Content-Type", "application/json")
+                    .header("Mcp-Session-Id", sessionId)
+                    .header("Authorization", "Bearer e2e-test-token")
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            HttpResponse<String> resp = HttpClient.newHttpClient().send(req, HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(200, resp.statusCode());
+            assertEquals("Bearer e2e-test-token", seenAuth.get());
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void promotedTool_collidesWithTagDefined_tagDefinedWins() throws Exception {
+        // Backend is shared between promoted and tag-defined paths
+        java.util.concurrent.atomic.AtomicReference<String> seenPath = new java.util.concurrent.atomic.AtomicReference<>();
+        int backendPort = findFreePort();
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(ex -> {
+                    seenPath.set(ex.getRequestPath());
+                    ex.setStatusCode(StatusCodes.OK);
+                    ex.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+                    ex.getResponseSender().send("{\"ok\":true}");
+                }).build();
+        backend.start();
+
+        try {
+            String sessionId = initializeSession();
+            // Both flags + tag-defined "getOrder" colliding with the promoted one
+            Service svc = createOpenApiPromotedService("orders", "localhost", backendPort);
+            svc.getServiceMeta().handleUnknown("mcp-enabled", "true");
+            svc.getServiceMeta().handleUnknown("mcp-tools", "getOrder");
+            serviceCache.put("orders", svc);
+
+            String body = objectMapper.writeValueAsString(Map.of(
+                    "jsonrpc", "2.0", "method", "tools/call", "id", 104,
+                    "params", Map.of("name", "getOrder", "arguments", Map.of("orderId", "x"))
+            ));
+            HttpResponse<String> resp = sendPostWithSession("/mcp", body, sessionId);
+
+            assertEquals(200, resp.statusCode());
+            // Tag-defined tool POSTs to root, doesn't substitute path templates
+            assertEquals("/", seenPath.get());
+        } finally {
+            backend.stop();
+        }
+    }
+
+    private Service createOpenApiPromotedService(String id, String hostname, int backendPort) {
+        Service service = new Service();
+        service.setId(id);
+        service.setName(id);
+        ServiceMeta meta = new ServiceMeta();
+        meta.handleUnknown("mcp-from-openapi", "true");
+        meta.setScheme("http");
+        service.setServiceMeta(meta);
+
+        Mapping mapping = new Mapping();
+        mapping.setHostname(hostname);
+        mapping.setPort(backendPort);
+        mapping.setRootContext("/");
+        service.setMappingList(Set.of(mapping));
+
+        // Build a small OpenAPI spec inline so we don't need to fetch it via HTTP.
+        io.swagger.v3.oas.models.OpenAPI api = new io.swagger.v3.oas.models.OpenAPI();
+        io.swagger.v3.oas.models.Paths paths = new io.swagger.v3.oas.models.Paths();
+
+        // GET /orders/{orderId}
+        io.swagger.v3.oas.models.Operation getOp = new io.swagger.v3.oas.models.Operation();
+        getOp.setOperationId("getOrder");
+        getOp.setSummary("Fetch an order");
+        io.swagger.v3.oas.models.parameters.Parameter idParam = new io.swagger.v3.oas.models.parameters.Parameter();
+        idParam.setName("orderId");
+        idParam.setIn("path");
+        idParam.setRequired(true);
+        idParam.setSchema(new io.swagger.v3.oas.models.media.StringSchema());
+        getOp.addParametersItem(idParam);
+        io.swagger.v3.oas.models.PathItem byId = new io.swagger.v3.oas.models.PathItem();
+        byId.setGet(getOp);
+        paths.addPathItem("/orders/{orderId}", byId);
+
+        // POST /orders   body: {product, quantity}
+        io.swagger.v3.oas.models.Operation postOp = new io.swagger.v3.oas.models.Operation();
+        postOp.setOperationId("createOrder");
+        postOp.setSummary("Create an order");
+        io.swagger.v3.oas.models.media.ObjectSchema bodySchema = new io.swagger.v3.oas.models.media.ObjectSchema();
+        bodySchema.addProperty("product", new io.swagger.v3.oas.models.media.StringSchema());
+        bodySchema.addProperty("quantity", new io.swagger.v3.oas.models.media.IntegerSchema());
+        io.swagger.v3.oas.models.media.MediaType json = new io.swagger.v3.oas.models.media.MediaType();
+        json.setSchema(bodySchema);
+        io.swagger.v3.oas.models.media.Content content = new io.swagger.v3.oas.models.media.Content();
+        content.addMediaType("application/json", json);
+        io.swagger.v3.oas.models.parameters.RequestBody rb = new io.swagger.v3.oas.models.parameters.RequestBody();
+        rb.setRequired(true);
+        rb.setContent(content);
+        postOp.setRequestBody(rb);
+        io.swagger.v3.oas.models.PathItem coll = new io.swagger.v3.oas.models.PathItem();
+        coll.setPost(postOp);
+        paths.addPathItem("/orders", coll);
+
+        api.setPaths(paths);
+        service.setOpenAPI(api);
+        return service;
+    }
+
     private Service createMcpServiceWithBackend(String id, String toolName, String hostname, int backendPort) {
         Service service = new Service();
         service.setId(id);
