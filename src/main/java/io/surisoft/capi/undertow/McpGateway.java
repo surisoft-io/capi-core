@@ -12,6 +12,7 @@ import io.surisoft.capi.service.McpServerClient;
 import io.surisoft.capi.service.McpSessionStore;
 import io.surisoft.capi.service.McpToolRegistry;
 import io.surisoft.capi.service.OpaService;
+import io.surisoft.capi.service.OpenApiCallBuilder;
 import io.surisoft.capi.tracer.McpTracer;
 import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.HttpUtils;
@@ -53,6 +54,7 @@ public class McpGateway implements AutoCloseable {
     private final CAPIConfiguration configuration;
     private final McpBackendLoadBalancer loadBalancer;
     private final McpServerClient mcpServerClient;
+    private final OpenApiCallBuilder openApiCallBuilder = new OpenApiCallBuilder();
     private McpTracer mcpTracer;
     private Undertow server;
 
@@ -372,6 +374,8 @@ public class McpGateway implements AutoCloseable {
             Object arguments = params.get("arguments");
             if (tool.isMcpServer() && mcpServerClient != null) {
                 handleMcpServerToolCall(exchange, request, tool, service, arguments, span);
+            } else if (tool.isOpenApiPromoted()) {
+                handleOpenApiToolCall(exchange, request, backendUrls, tool, arguments, span);
             } else if (isStreamingRequest(tool, exchange)) {
                 handleStreamingToolCall(exchange, request, backendUrls.get(0), tool, arguments, span);
             } else {
@@ -526,6 +530,102 @@ public class McpGateway implements AutoCloseable {
         }
 
         log.error("All backends failed for tool {}", tool.getName(), lastException);
+        if (mcpTracer != null) mcpTracer.setOutcome(parentSpan, Constants.CAPI_OUTCOME_BACKEND_FAILED);
+        sendJsonRpc(exchange, StatusCodes.OK,
+                JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR,
+                        "All backends failed for tool: " + tool.getName()));
+    }
+
+    @SuppressWarnings("unchecked")
+    private void handleOpenApiToolCall(HttpServerExchange exchange, JsonRpcRequest request,
+                                       List<String> backendUrls, McpTool tool, Object arguments, Span parentSpan) {
+        int timeout = tool.getTimeout() > 0 ? tool.getTimeout() : configuration.getMcp().getToolCallTimeout();
+
+        Map<String, Object> argMap = arguments instanceof Map ? new LinkedHashMap<>((Map<String, Object>) arguments) : new LinkedHashMap<>();
+        String forwardedAuth = exchange.getRequestHeaders().contains(Headers.AUTHORIZATION)
+                ? exchange.getRequestHeaders().get(Headers.AUTHORIZATION).getFirst()
+                : null;
+
+        Exception lastException = null;
+        int attempt = 0;
+        for (String backendUrl : backendUrls) {
+            attempt++;
+            Span attemptSpan = (mcpTracer != null)
+                    ? mcpTracer.startUpstreamSpan(parentSpan, backendUrl, tool.getName(), attempt)
+                    : null;
+            Scope attemptScope = (attemptSpan != null) ? attemptSpan.makeCurrent() : null;
+            try {
+                OpenApiCallBuilder.Built built = openApiCallBuilder.build(
+                        backendUrl, tool.getHttpMethod(), tool.getHttpPathTemplate(), argMap);
+
+                HttpRequest.Builder builder = HttpRequest.newBuilder()
+                        .uri(built.getUri())
+                        .timeout(Duration.ofMillis(timeout))
+                        .header("Accept", APPLICATION_JSON);
+
+                if (built.hasBody()) {
+                    builder.header("Content-Type", APPLICATION_JSON);
+                    builder.method(built.getMethod(), HttpRequest.BodyPublishers.ofString(built.getBody()));
+                } else {
+                    builder.method(built.getMethod(), HttpRequest.BodyPublishers.noBody());
+                }
+                if (forwardedAuth != null) {
+                    builder.header("Authorization", forwardedAuth);
+                }
+                if (mcpTracer != null) mcpTracer.injectContext(attemptSpan, builder);
+
+                HttpResponse<String> backendResponse = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+                loadBalancer.reportSuccess(backendUrl);
+                if (mcpTracer != null) mcpTracer.setHttpStatus(attemptSpan, backendResponse.statusCode());
+
+                if (backendResponse.statusCode() >= 200 && backendResponse.statusCode() < 300) {
+                    Map<String, Object> content = Map.of("content",
+                            List.of(Map.of("type", "text", "text", backendResponse.body())));
+                    if (mcpTracer != null) mcpTracer.setOutcome(parentSpan, Constants.CAPI_OUTCOME_SUCCESS);
+                    sendJsonRpc(exchange, StatusCodes.OK, JsonRpcResponse.success(request.getId(), content));
+                } else {
+                    if (mcpTracer != null) mcpTracer.setOutcome(parentSpan, Constants.CAPI_OUTCOME_BACKEND_FAILED);
+                    sendJsonRpc(exchange, StatusCodes.OK,
+                            JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR,
+                                    "Backend returned status " + backendResponse.statusCode(),
+                                    Map.of("status", backendResponse.statusCode(), "body", backendResponse.body())));
+                }
+                return;
+            } catch (OpenApiCallBuilder.OpenApiCallException e) {
+                // Bad caller input — fail fast, no failover.
+                if (mcpTracer != null) {
+                    mcpTracer.recordError(attemptSpan, e);
+                    mcpTracer.setOutcome(parentSpan, Constants.CAPI_OUTCOME_INVALID_REQUEST);
+                }
+                sendJsonRpc(exchange, StatusCodes.OK,
+                        JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INVALID_PARAMS, e.getMessage()));
+                return;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                if (mcpTracer != null) {
+                    mcpTracer.recordError(attemptSpan, e);
+                    mcpTracer.setOutcome(parentSpan, Constants.CAPI_OUTCOME_INTERRUPTED);
+                }
+                sendJsonRpc(exchange, StatusCodes.OK,
+                        JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR, "Tool call interrupted"));
+                return;
+            } catch (java.io.IOException e) {
+                log.warn("Backend {} failed for promoted tool {}: {}", backendUrl, tool.getName(), e.getMessage());
+                loadBalancer.reportFailure(backendUrl);
+                if (mcpTracer != null) mcpTracer.recordError(attemptSpan, e);
+                lastException = e;
+            } catch (Exception e) {
+                log.error("Unexpected error calling backend {} for promoted tool {}", backendUrl, tool.getName(), e);
+                loadBalancer.reportFailure(backendUrl);
+                if (mcpTracer != null) mcpTracer.recordError(attemptSpan, e);
+                lastException = e;
+            } finally {
+                if (attemptScope != null) attemptScope.close();
+                if (attemptSpan != null) attemptSpan.end();
+            }
+        }
+
+        log.error("All backends failed for promoted tool {}", tool.getName(), lastException);
         if (mcpTracer != null) mcpTracer.setOutcome(parentSpan, Constants.CAPI_OUTCOME_BACKEND_FAILED);
         sendJsonRpc(exchange, StatusCodes.OK,
                 JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR,

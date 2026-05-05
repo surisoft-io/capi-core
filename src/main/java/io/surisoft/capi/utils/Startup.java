@@ -415,6 +415,10 @@ public class Startup {
         return consulStore;
     }
 
+    public HttpClient getConsulHttpClient() {
+        return consulHttpClient;
+    }
+
     public @Nullable ApiKeyStore getApiKeyStore() {
         return apiKeyStore;
     }

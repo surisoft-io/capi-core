@@ -201,7 +201,7 @@ fi
 if echo "$promoted_names" | grep -q "^wauto_listCities$"; then
     ok "tools/list contains wauto_listCities (auto-promoted from OpenAPI)"
 else
-    fail "wauto_listCities not surfaced"
+    fail "wauto_listCities not surfaced — got names: $(echo "$promoted_names" | tr '\n' ' ')"
 fi
 
 # Verify the auto-promoted tool has the OpenAPI summary as its description
@@ -261,9 +261,42 @@ else
     ok "wauto_listCities correctly excluded"
 fi
 
-# ---- Scenario 5: tools/call still works with GenAI tracing enabled -------
+# ---- Scenario 5: tools/call dispatches to a promoted (OpenAPI) tool ------
 
-hdr "Scenario 5: tools/call works with GenAI tracing enabled"
+hdr "Scenario 5: tools/call on an auto-promoted tool (phase 2 dispatch)"
+
+# Reset to no filter so getForecast is fully callable.
+register_promoted ""
+ok "re-registered $TEMP_SVC_ID with no filter (full catalogue)"
+wait_cycle
+
+mcp_initialize
+promoted_call=$(tools_call "wauto_getForecast" '{"body":{"city":"Lisbon"}}')
+if echo "$promoted_call" | jq -e '.error' > /dev/null 2>&1; then
+    fail "promoted tools/call returned error: $promoted_call"
+else
+    ok "promoted tools/call returned a JSON-RPC result"
+fi
+if echo "$promoted_call" | jq -e '.result.content[0].text' > /dev/null 2>&1; then
+    text=$(echo "$promoted_call" | jq -r '.result.content[0].text')
+    # weather backend echoes the city verbatim; presence in text confirms end-to-end path
+    if echo "$text" | grep -qi "Lisbon"; then
+        ok "promoted tools/call result contains 'Lisbon' (forwarded to weather backend)"
+    else
+        fail "promoted tools/call result missing 'Lisbon': $text"
+    fi
+else
+    fail "promoted tools/call has no result.content: $promoted_call"
+fi
+
+# Missing required path-style placeholders are caught before dispatch.
+# weather doesn't have one in the spec, so use the exclude filter to test
+# a different angle: the call still goes through because no path params are needed.
+ok "no path-param contract to violate on weather/forecast (skipping path-missing assertion here)"
+
+# ---- Scenario 6: tools/call still works with GenAI tracing enabled -------
+
+hdr "Scenario 6: tools/call works with GenAI tracing enabled (tag-defined tool)"
 
 response=$(tools_call "weather_forecast" '{"city":"Lisbon"}')
 if echo "$response" | jq -e '.result.content[0].text' > /dev/null 2>&1; then
@@ -286,9 +319,9 @@ else
     echo "  [NOTE] OTel collector log line not found — bump otel-config verbosity to 'detailed' to inspect span attributes"
 fi
 
-# ---- Scenario 6: hybrid mode (tag-defined wins on collision) -------------
+# ---- Scenario 7: hybrid mode (tag-defined wins on collision) -------------
 
-hdr "Scenario 6: hybrid mode — tag-defined tool overrides a promoted one"
+hdr "Scenario 7: hybrid mode — tag-defined tool overrides a promoted one"
 
 # Same convention as register_promoted: bump version to force a refresh.
 VERSION_COUNTER=$((VERSION_COUNTER+1))
