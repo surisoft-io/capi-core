@@ -13,7 +13,7 @@ import io.surisoft.capi.oidc.Oauth2Constants;
 import io.surisoft.capi.schema.CapiRestError;
 import io.surisoft.capi.schema.OpaResult;
 import io.surisoft.capi.schema.Service;
-import io.surisoft.capi.service.OpaService;
+import io.surisoft.capi.service.OpaWasmService;
 import io.undertow.server.HttpServerExchange;
 import io.undertow.util.HttpString;
 import jakarta.annotation.Nullable;
@@ -241,11 +241,11 @@ public class HttpUtils {
         return value;
     }
 
-    public boolean isAuthorized(String accessToken, String contextPath, Service service, OpaService opaService) {
+    public boolean isAuthorized(String accessToken, String contextPath, Service service, OpaWasmService opaWasmService) {
         try {
-            if(service.getServiceMeta().getOpaRego() != null && opaService != null) {
-                OpaResult opaResult = opaService.callOpa(service.getServiceMeta().getOpaRego(), accessToken, true);
-                if(!opaResult.isAllowed()) {
+            if(service.getServiceMeta().getOpaRego() != null && opaWasmService != null && opaWasmService.isReady(service.getServiceMeta().getOpaRego()) ) {
+                OpaResult opaResult = opaWasmService.evaluate(service.getServiceMeta().getOpaRego(), accessToken, true);
+                if (opaResult == null || !opaResult.isAllowed()) {
                     return false;
                 }
             } else {

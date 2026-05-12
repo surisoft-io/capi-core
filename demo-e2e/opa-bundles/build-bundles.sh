@@ -12,8 +12,14 @@ mkdir -p "$OUTPUT_DIR"
 for rego in "$POLICY_DIR"/*.rego; do
     name=$(basename "$rego" .rego)
     package_path="capi/${name}/allow"
-    echo "Building Wasm bundle: $name (entrypoint: $package_path)"
-    opa build -t wasm -e "$package_path" "$rego" -o "$OUTPUT_DIR/${name}.tar.gz"
+    data_file="$POLICY_DIR/${name}.json"
+    if [ -f "$data_file" ]; then
+        echo "Building Wasm bundle: $name (entrypoint: $package_path, data: ${name}.json)"
+        opa build -t wasm -e "$package_path" "$rego" "$data_file" -o "$OUTPUT_DIR/${name}.tar.gz"
+    else
+        echo "Building Wasm bundle: $name (entrypoint: $package_path, no data)"
+        opa build -t wasm -e "$package_path" "$rego" -o "$OUTPUT_DIR/${name}.tar.gz"
+    fi
     echo "  -> ${name}.tar.gz ($(wc -c < "$OUTPUT_DIR/${name}.tar.gz") bytes)"
 done
 

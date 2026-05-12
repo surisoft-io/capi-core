@@ -448,10 +448,10 @@ class SmallPojosTest {
     }
 
     @Test
-    void capiInfo_opaEndpoint() {
+    void capiInfo_opaWasmBundleUrl() {
         CapiInfo info = new CapiInfo();
-        info.setOpaEndpoint("http://opa:8181/v1/data");
-        assertEquals("http://opa:8181/v1/data", info.getOpaEndpoint());
+        info.setOpaWasmBundleUrl("http://opa-bundle-server:8080/bundles/");
+        assertEquals("http://opa-bundle-server:8080/bundles/", info.getOpaWasmBundleUrl());
     }
 
     @Test
@@ -522,7 +522,7 @@ class SmallPojosTest {
         info.setOauth2Enabled(true);
         info.setOauth2Endpoint("http://auth.example.com");
         info.setOpaEnabled(false);
-        info.setOpaEndpoint(null);
+        info.setOpaWasmBundleUrl(null);
         info.setConsulEnabled(true);
         info.setConsulHosts(List.of("consul-1:8500"));
         info.setConsulTimerInterval(10000);
@@ -540,7 +540,7 @@ class SmallPojosTest {
         assertTrue(info.isOauth2Enabled());
         assertEquals("http://auth.example.com", info.getOauth2Endpoint());
         assertFalse(info.isOpaEnabled());
-        assertNull(info.getOpaEndpoint());
+        assertNull(info.getOpaWasmBundleUrl());
         assertTrue(info.isConsulEnabled());
         assertEquals(List.of("consul-1:8500"), info.getConsulHosts());
         assertEquals(10000, info.getConsulTimerInterval());
@@ -562,7 +562,7 @@ class SmallPojosTest {
         assertFalse(info.isOauth2Enabled());
         assertNull(info.getOauth2Endpoint());
         assertFalse(info.isOpaEnabled());
-        assertNull(info.getOpaEndpoint());
+        assertNull(info.getOpaWasmBundleUrl());
         assertFalse(info.isConsulEnabled());
         assertNull(info.getConsulHosts());
         assertEquals(0, info.getConsulTimerInterval());

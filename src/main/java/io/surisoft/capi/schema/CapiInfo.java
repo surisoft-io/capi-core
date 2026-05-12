@@ -17,7 +17,7 @@ public class CapiInfo {
     private String oauth2Endpoint;
     private String oauth2CookieName;
     private boolean opaEnabled;
-    private String opaEndpoint;
+    private String opaWasmBundleUrl;
     private boolean consulEnabled;
     private List<String> consulHosts;
     private int consulTimerInterval;
@@ -104,12 +104,12 @@ public class CapiInfo {
         this.opaEnabled = opaEnabled;
     }
 
-    public String getOpaEndpoint() {
-        return opaEndpoint;
+    public String getOpaWasmBundleUrl() {
+        return opaWasmBundleUrl;
     }
 
-    public void setOpaEndpoint(String opaEndpoint) {
-        this.opaEndpoint = opaEndpoint;
+    public void setOpaWasmBundleUrl(String opaWasmBundleUrl) {
+        this.opaWasmBundleUrl = opaWasmBundleUrl;
     }
 
     public boolean isConsulEnabled() {

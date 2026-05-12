@@ -57,8 +57,6 @@ public class Startup {
     @Nullable
     private io.opentelemetry.api.trace.Tracer openTelemetryTracer;
     @Nullable
-    private OpaService opaService;
-    @Nullable
     private OpaWasmService opaWasmService;
     @Nullable
     private WebsocketUtils websocketUtils;
@@ -111,7 +109,7 @@ public class Startup {
         createRouteProcessors();
         startRouteUtils();
         startServiceUtils();
-        startOpaService();
+        startOpaWasmService();
         startConsulCatalogService();
 
         if(configuration.getConsulStore().isEnabled()) {
@@ -187,7 +185,6 @@ public class Startup {
         HttpClient client = consulHttpClient;
         if (consulStore != null) consulStore.setHttpClient(client);
         if (consulCatalogService != null) consulCatalogService.setHttpClient(client);
-        if (opaService != null) opaService.setHttpClient(client);
         if (opaWasmService != null) opaWasmService.setHttpClient(client);
         if (apiKeyStore != null) apiKeyStore.setHttpClient(client);
         log.info("Consul HttpClient rebuilt with updated SSLContext and re-injected into consumers");
@@ -334,18 +331,16 @@ public class Startup {
         }
     }
 
-    private void startOpaService() {
+    private void startOpaWasmService() {
         if(configuration.getOpa().isEnabled()) {
-            opaService = new OpaService(configuration.getOpa().getEndpoint(), consulHttpClient);
-            if (configuration.getOpa().isWasmEnabled() && configuration.getOpa().getWasmBundleUrl() != null) {
+            if (configuration.getOpa().getWasmBundleUrl() != null) {
                 log.info("OPA Wasm enabled, bundle URL: {}, pool size: {}",
                         configuration.getOpa().getWasmBundleUrl(),
                         configuration.getOpa().getWasmPoolSize());
                 opaWasmService = new OpaWasmService(
                         configuration.getOpa().getWasmBundleUrl(),
                         configuration.getOpa().getWasmPoolSize(),
-                        consulHttpClient,
-                        opaService
+                        consulHttpClient
                 );
             }
         }
@@ -425,10 +420,6 @@ public class Startup {
 
     public @Nullable io.opentelemetry.api.trace.Tracer getOpenTelemetryTracer() {
         return openTelemetryTracer;
-    }
-
-    public @Nullable OpaService getOpaService() {
-        return opaService;
     }
 
     public @Nullable OpaWasmService getOpaWasmService() {

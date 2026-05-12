@@ -175,6 +175,10 @@ public class Constants {
     public static final String GEN_AI_OPERATION_INITIALIZE = "initialize";
     public static final String GEN_AI_OPERATION_LIST_TOOLS = "list_tools";
     public static final String GEN_AI_OPERATION_EXECUTE_TOOL = "execute_tool";
+    public static final String GEN_AI_OPERATION_LIST_RESOURCES = "list_resources";
+    public static final String GEN_AI_OPERATION_READ_RESOURCE = "read_resource";
+    public static final String GEN_AI_OPERATION_LIST_PROMPTS = "list_prompts";
+    public static final String GEN_AI_OPERATION_GET_PROMPT = "get_prompt";
     public static final String GEN_AI_TOOL_NAME = "gen_ai.tool.name";
     public static final String GEN_AI_TOOL_CALL_ID = "gen_ai.tool.call.id";
     public static final String GEN_AI_TOOL_TYPE = "gen_ai.tool.type";
@@ -192,6 +196,8 @@ public class Constants {
     public static final String CAPI_OUTCOME_UNAUTHORIZED = "unauthorized";
     public static final String CAPI_OUTCOME_POLICY_DENIED = "policy_denied";
     public static final String CAPI_OUTCOME_TOOL_NOT_FOUND = "tool_not_found";
+    public static final String CAPI_OUTCOME_RESOURCE_NOT_FOUND = "resource_not_found";
+    public static final String CAPI_OUTCOME_PROMPT_NOT_FOUND = "prompt_not_found";
     public static final String CAPI_OUTCOME_NO_BACKEND = "no_backend";
     public static final String CAPI_OUTCOME_BACKEND_FAILED = "backend_failed";
     public static final String CAPI_OUTCOME_TIMEOUT = "timeout";

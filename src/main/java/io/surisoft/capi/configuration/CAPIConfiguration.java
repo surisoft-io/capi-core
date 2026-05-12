@@ -372,18 +372,12 @@ public class CAPIConfiguration {
 
     public static class Opa {
         private boolean enabled;
-        private String endpoint;
-        private boolean wasmEnabled;
         private String wasmBundleUrl;
         private int wasmBundlePollIntervalSeconds = 60;
         private int wasmPoolSize = 10;
 
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean enabled) { this.enabled = enabled; }
-        public String getEndpoint() { return endpoint; }
-        public void setEndpoint(String endpoint) { this.endpoint = endpoint; }
-        public boolean isWasmEnabled() { return wasmEnabled; }
-        public void setWasmEnabled(boolean wasmEnabled) { this.wasmEnabled = wasmEnabled; }
         public String getWasmBundleUrl() { return wasmBundleUrl; }
         public void setWasmBundleUrl(String wasmBundleUrl) { this.wasmBundleUrl = wasmBundleUrl; }
         public int getWasmBundlePollIntervalSeconds() { return wasmBundlePollIntervalSeconds; }

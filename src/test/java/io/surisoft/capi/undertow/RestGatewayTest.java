@@ -4,7 +4,7 @@ import io.surisoft.capi.exception.AuthorizationException;
 import io.surisoft.capi.processor.ThrottleProcessor;
 import io.surisoft.capi.schema.*;
 import io.surisoft.capi.service.consul.ConsulCatalogService;
-import io.surisoft.capi.service.OpaService;
+import io.surisoft.capi.service.OpaWasmService;
 import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.HttpUtils;
 import io.surisoft.capi.utils.WebsocketUtils;
@@ -879,7 +879,7 @@ class RestGatewayTest {
         assertEquals(200, resp.statusCode());
     }
 
-    // === OPA async path ===
+    // === OPA wasm path ===
 
     @Test
     void opaService_denied_returns403() throws Exception {
@@ -890,14 +890,14 @@ class RestGatewayTest {
 
         when(httpUtils.processAuthorizationAccessToken(any(io.undertow.server.HttpServerExchange.class))).thenReturn("opa-token");
 
-        OpaService opaService = mock(OpaService.class);
+        OpaWasmService opaWasmService = mock(OpaWasmService.class);
         OpaResult denied = new OpaResult();
         denied.setResult(false);
-        when(opaService.callOpaAsync("my-rego-policy", "opa-token", true))
-                .thenReturn(CompletableFuture.completedFuture(denied));
+        when(opaWasmService.isReady("my-rego-policy")).thenReturn(true);
+        when(opaWasmService.evaluate("my-rego-policy", "opa-token", true)).thenReturn(denied);
 
         runningGateway = createGateway(port);
-        runningGateway.setOpaService(opaService);
+        runningGateway.setOpaWasmService(opaWasmService);
         runningGateway.runProxy();
 
         HttpResponse<String> resp = HttpClient.newHttpClient().send(
@@ -919,14 +919,14 @@ class RestGatewayTest {
 
         when(httpUtils.processAuthorizationAccessToken(any(io.undertow.server.HttpServerExchange.class))).thenReturn("opa-token");
 
-        OpaService opaService = mock(OpaService.class);
+        OpaWasmService opaWasmService = mock(OpaWasmService.class);
         OpaResult allowed = new OpaResult();
         allowed.setResult(true);
-        when(opaService.callOpaAsync("my-rego-policy", "opa-token", true))
-                .thenReturn(CompletableFuture.completedFuture(allowed));
+        when(opaWasmService.isReady("my-rego-policy")).thenReturn(true);
+        when(opaWasmService.evaluate("my-rego-policy", "opa-token", true)).thenReturn(allowed);
 
         runningGateway = createGateway(port);
-        runningGateway.setOpaService(opaService);
+        runningGateway.setOpaWasmService(opaWasmService);
         runningGateway.runProxy();
 
         HttpResponse<String> resp = HttpClient.newHttpClient().send(
@@ -948,9 +948,9 @@ class RestGatewayTest {
 
         when(httpUtils.processAuthorizationAccessToken(any(io.undertow.server.HttpServerExchange.class))).thenReturn(null);
 
-        OpaService opaService = mock(OpaService.class);
+        OpaWasmService opaWasmService = mock(OpaWasmService.class);
         runningGateway = createGateway(port);
-        runningGateway.setOpaService(opaService);
+        runningGateway.setOpaWasmService(opaWasmService);
         runningGateway.runProxy();
 
         HttpResponse<String> resp = HttpClient.newHttpClient().send(

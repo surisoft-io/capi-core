@@ -62,7 +62,7 @@ class StartupTest {
         startup = new Startup(configuration);
         startup.start();
 
-        assertNull(startup.getOpaService());
+        assertNull(startup.getOpaWasmService());
     }
 
     @Test
@@ -158,13 +158,13 @@ class StartupTest {
     void start_withOpaEnabled() {
         CAPIConfiguration.Opa opa = new CAPIConfiguration.Opa();
         opa.setEnabled(true);
-        opa.setEndpoint("http://opa:8181");
+        opa.setWasmBundleUrl("http://opa-bundle-server:8080/bundles/");
         configuration.setOpa(opa);
 
         startup = new Startup(configuration);
         startup.start();
 
-        assertNotNull(startup.getOpaService());
+        assertNotNull(startup.getOpaWasmService());
     }
 
     @Test
@@ -301,7 +301,7 @@ class StartupTest {
         assertNull(startup.getOauth2Provider());
         assertNotNull(startup.getWebsocketUtils());
         assertNull(startup.getConsulStore());
-        assertNull(startup.getOpaService());
+        assertNull(startup.getOpaWasmService());
         assertNull(startup.getCapiTrustManager());
         assertNull(startup.getUndertowSslContext());
     }

@@ -1,11 +1,10 @@
 package capi.manager_or_admin
 
-default allow = false
+import rego.v1
+
+default allow := false
 
 allow if {
-    input.realm_access.roles[_] == "admin"
-}
-
-allow if {
-    input.realm_access.roles[_] == "manager"
+    some role in input.realm_access.roles
+    role in data.capi.manager_or_admin.allowed_roles
 }

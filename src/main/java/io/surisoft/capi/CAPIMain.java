@@ -223,7 +223,6 @@ public class CAPIMain {
                     allowedHeaders,
                     cookieName
             );
-            if (startup.getOpaService() != null) gateway.setOpaService(startup.getOpaService());
             if (startup.getOpaWasmService() != null) gateway.setOpaWasmService(startup.getOpaWasmService());
             if (startup.getThrottleProcessor() != null) gateway.setThrottleProcessor(startup.getThrottleProcessor());
             if (startup.getApiKeyCache() != null) gateway.setApiKeyCache(startup.getApiKeyCache());
@@ -302,13 +301,28 @@ public class CAPIMain {
                     startup.getUndertowSslContext(),
                     startup.getMcpToolRegistry(),
                     startup.getHttpUtils(),
-                    startup.getOpaService(),
+                    startup.getOpaWasmService(),
                     mcpHttpClient,
                     startup.getMcpSessionStore(),
                     capiConfiguration,
                     loadBalancer,
                     startup.getMcpServerClient()
             );
+            // Resources / Prompts passthrough — only meaningful when at least one
+            // upstream MCP server is registered (mcp-type=server). Wiring here is
+            // unconditional; the registries return empty when no such service exists.
+            if (startup.getMcpServerClient() != null && startup.getServiceCache() != null) {
+                io.surisoft.capi.service.McpResourceRegistry resourceRegistry =
+                        new io.surisoft.capi.service.McpResourceRegistry(
+                                startup.getServiceCache(), startup.getMcpServerClient());
+                resourceRegistry.setDefaultTimeoutMs(capiConfiguration.getMcp().getMcpServerDiscoveryTimeoutMs());
+                io.surisoft.capi.service.McpPromptRegistry promptRegistry =
+                        new io.surisoft.capi.service.McpPromptRegistry(
+                                startup.getServiceCache(), startup.getMcpServerClient());
+                promptRegistry.setDefaultTimeoutMs(capiConfiguration.getMcp().getMcpServerDiscoveryTimeoutMs());
+                mcpGateway.setResourceRegistry(resourceRegistry);
+                mcpGateway.setPromptRegistry(promptRegistry);
+            }
             if (startup.getOpenTelemetryTracer() != null
                     && capiConfiguration.getMcp().getObservability() != null
                     && capiConfiguration.getMcp().getObservability().getGenAi() != null

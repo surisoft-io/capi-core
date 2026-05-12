@@ -8,10 +8,12 @@ import io.surisoft.capi.configuration.CAPIConfiguration;
 import io.surisoft.capi.exception.AuthorizationException;
 import io.surisoft.capi.schema.*;
 import io.surisoft.capi.service.McpBackendLoadBalancer;
+import io.surisoft.capi.service.McpPromptRegistry;
+import io.surisoft.capi.service.McpResourceRegistry;
 import io.surisoft.capi.service.McpServerClient;
 import io.surisoft.capi.service.McpSessionStore;
 import io.surisoft.capi.service.McpToolRegistry;
-import io.surisoft.capi.service.OpaService;
+import io.surisoft.capi.service.OpaWasmService;
 import io.surisoft.capi.service.OpenApiCallBuilder;
 import io.surisoft.capi.tracer.McpTracer;
 import io.surisoft.capi.utils.Constants;
@@ -48,33 +50,35 @@ public class McpGateway implements AutoCloseable {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final McpToolRegistry toolRegistry;
     private final HttpUtils httpUtils;
-    private final OpaService opaService;
     private final HttpClient httpClient;
     private final McpSessionStore sessionStore;
     private final CAPIConfiguration configuration;
     private final McpBackendLoadBalancer loadBalancer;
     private final McpServerClient mcpServerClient;
+    private final OpaWasmService opaWasmService;
     private final OpenApiCallBuilder openApiCallBuilder = new OpenApiCallBuilder();
     private McpTracer mcpTracer;
+    private McpResourceRegistry resourceRegistry;
+    private McpPromptRegistry promptRegistry;
     private Undertow server;
 
     public McpGateway(int port,
                       SSLContext sslContext,
                       McpToolRegistry toolRegistry,
                       HttpUtils httpUtils,
-                      OpaService opaService,
+                      OpaWasmService opaWasmService,
                       HttpClient httpClient,
                       McpSessionStore sessionStore,
                       CAPIConfiguration configuration,
                       McpBackendLoadBalancer loadBalancer) {
-        this(port, sslContext, toolRegistry, httpUtils, opaService, httpClient, sessionStore, configuration, loadBalancer, null);
+        this(port, sslContext, toolRegistry, httpUtils, opaWasmService, httpClient, sessionStore, configuration, loadBalancer, null);
     }
 
     public McpGateway(int port,
                       SSLContext sslContext,
                       McpToolRegistry toolRegistry,
                       HttpUtils httpUtils,
-                      OpaService opaService,
+                      OpaWasmService opaWasmService,
                       HttpClient httpClient,
                       McpSessionStore sessionStore,
                       CAPIConfiguration configuration,
@@ -84,7 +88,7 @@ public class McpGateway implements AutoCloseable {
         this.sslContext = sslContext;
         this.toolRegistry = toolRegistry;
         this.httpUtils = httpUtils;
-        this.opaService = opaService;
+        this.opaWasmService = opaWasmService;
         this.httpClient = httpClient;
         this.sessionStore = sessionStore;
         this.configuration = configuration;
@@ -94,6 +98,14 @@ public class McpGateway implements AutoCloseable {
 
     public void setMcpTracer(McpTracer mcpTracer) {
         this.mcpTracer = mcpTracer;
+    }
+
+    public void setResourceRegistry(McpResourceRegistry resourceRegistry) {
+        this.resourceRegistry = resourceRegistry;
+    }
+
+    public void setPromptRegistry(McpPromptRegistry promptRegistry) {
+        this.promptRegistry = promptRegistry;
     }
 
     public void start() {
@@ -179,6 +191,18 @@ public class McpGateway implements AutoCloseable {
                 case "tools/call":
                     handleToolsCall(exchange, request);
                     break;
+                case "resources/list":
+                    handleResourcesList(exchange, request);
+                    break;
+                case "resources/read":
+                    handleResourcesRead(exchange, request);
+                    break;
+                case "prompts/list":
+                    handlePromptsList(exchange, request);
+                    break;
+                case "prompts/get":
+                    handlePromptsGet(exchange, request);
+                    break;
                 case "ping":
                     handlePing(exchange, request);
                     break;
@@ -237,6 +261,12 @@ public class McpGateway implements AutoCloseable {
             result.put("protocolVersion", Constants.MCP_PROTOCOL_VERSION);
             Map<String, Object> capabilities = new LinkedHashMap<>();
             capabilities.put("tools", Map.of("listChanged", false));
+            if (resourceRegistry != null) {
+                capabilities.put("resources", Map.of("listChanged", false, "subscribe", false));
+            }
+            if (promptRegistry != null) {
+                capabilities.put("prompts", Map.of("listChanged", false));
+            }
             result.put("capabilities", capabilities);
             result.put("serverInfo", Map.of("name", Constants.MCP_SERVER_NAME, "version", configuration.getVersion()));
 
@@ -431,7 +461,8 @@ public class McpGateway implements AutoCloseable {
     }
 
     private boolean isOpaAllowed(HttpServerExchange exchange, Service service) {
-        if (opaService == null || service.getServiceMeta().getOpaRego() == null) {
+        String opaRego = service.getServiceMeta().getOpaRego();
+        if (opaWasmService == null || opaRego == null) {
             return true;
         }
         String accessToken = null;
@@ -443,7 +474,7 @@ public class McpGateway implements AutoCloseable {
         if (accessToken == null) {
             return true;
         }
-        OpaResult opaResult = opaService.callOpa(service.getServiceMeta().getOpaRego(), accessToken, true);
+        OpaResult opaResult = opaWasmService.evaluate(opaRego, accessToken, true);
         return opaResult != null && opaResult.isAllowed();
     }
 
@@ -701,6 +732,231 @@ public class McpGateway implements AutoCloseable {
     private void handlePing(HttpServerExchange exchange, JsonRpcRequest request) {
         sendJsonRpc(exchange, StatusCodes.OK,
                 JsonRpcResponse.success(request.getId(), Map.of()));
+    }
+
+    // -----------------------------------------------------------------------
+    // Resources / Prompts (passthrough to mcp-type=server backends only)
+    // -----------------------------------------------------------------------
+
+    private void handleResourcesList(HttpServerExchange exchange, JsonRpcRequest request) {
+        Span span = (mcpTracer != null)
+                ? mcpTracer.startServerSpan(exchange, Constants.GEN_AI_OPERATION_LIST_RESOURCES)
+                : null;
+        Scope scope = (span != null) ? span.makeCurrent() : null;
+        try {
+            if (mcpTracer != null) mcpTracer.setToolCallId(span, request.getId());
+            McpSession session = validateSession(exchange, request);
+            if (session == null) {
+                if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_INVALID_REQUEST);
+                return;
+            }
+            if (resourceRegistry == null) {
+                sendJsonRpc(exchange, StatusCodes.OK,
+                        JsonRpcResponse.success(request.getId(), Map.of("resources", List.of())));
+                if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_SUCCESS);
+                return;
+            }
+            List<Map<String, Object>> resources = resourceRegistry.getAllResources();
+            if (span != null) span.setAttribute("mcp.resources.count", resources.size());
+            if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_SUCCESS);
+            sendJsonRpc(exchange, StatusCodes.OK,
+                    JsonRpcResponse.success(request.getId(), Map.of("resources", resources)));
+        } catch (RuntimeException t) {
+            if (mcpTracer != null) {
+                mcpTracer.recordError(span, t);
+                mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_ERROR);
+            }
+            throw t;
+        } finally {
+            if (scope != null) scope.close();
+            if (span != null) span.end();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void handleResourcesRead(HttpServerExchange exchange, JsonRpcRequest request) {
+        Span span = (mcpTracer != null)
+                ? mcpTracer.startServerSpan(exchange, Constants.GEN_AI_OPERATION_READ_RESOURCE)
+                : null;
+        Scope scope = (span != null) ? span.makeCurrent() : null;
+        try {
+            if (mcpTracer != null) mcpTracer.setToolCallId(span, request.getId());
+            McpSession session = validateSession(exchange, request);
+            if (session == null) {
+                if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_INVALID_REQUEST);
+                return;
+            }
+            if (resourceRegistry == null) {
+                if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_RESOURCE_NOT_FOUND);
+                sendJsonRpc(exchange, StatusCodes.OK,
+                        JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INVALID_PARAMS, "Resources not enabled"));
+                return;
+            }
+            Map<String, Object> params;
+            try {
+                params = (Map<String, Object>) request.getParams();
+            } catch (ClassCastException e) {
+                params = null;
+            }
+            String uri = params != null ? (String) params.get("uri") : null;
+            if (uri == null || uri.isEmpty()) {
+                if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_INVALID_REQUEST);
+                sendJsonRpc(exchange, StatusCodes.OK,
+                        JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INVALID_PARAMS, "Missing 'uri' param"));
+                return;
+            }
+            if (span != null) span.setAttribute("mcp.resource.uri", uri);
+
+            McpResourceRegistry.Resolved resolved = resourceRegistry.resolveResourceByUri(uri);
+            if (resolved == null) {
+                if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_RESOURCE_NOT_FOUND);
+                sendJsonRpc(exchange, StatusCodes.OK,
+                        JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INVALID_PARAMS, "Resource not found: " + uri));
+                return;
+            }
+            int timeout = configuration.getMcp().getToolCallTimeout();
+            try {
+                Object result = resourceRegistry.readResource(resolved, timeout);
+                if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_SUCCESS);
+                sendJsonRpc(exchange, StatusCodes.OK, JsonRpcResponse.success(request.getId(), result));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                if (mcpTracer != null) {
+                    mcpTracer.recordError(span, e);
+                    mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_INTERRUPTED);
+                }
+                sendJsonRpc(exchange, StatusCodes.OK,
+                        JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR, "resources/read interrupted"));
+            } catch (Exception e) {
+                log.warn("resources/read failed for {}: {}", uri, e.getMessage());
+                if (mcpTracer != null) {
+                    mcpTracer.recordError(span, e);
+                    mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_BACKEND_FAILED);
+                }
+                sendJsonRpc(exchange, StatusCodes.OK,
+                        JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR, "resources/read failed"));
+            }
+        } catch (RuntimeException t) {
+            if (mcpTracer != null) {
+                mcpTracer.recordError(span, t);
+                mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_ERROR);
+            }
+            throw t;
+        } finally {
+            if (scope != null) scope.close();
+            if (span != null) span.end();
+        }
+    }
+
+    private void handlePromptsList(HttpServerExchange exchange, JsonRpcRequest request) {
+        Span span = (mcpTracer != null)
+                ? mcpTracer.startServerSpan(exchange, Constants.GEN_AI_OPERATION_LIST_PROMPTS)
+                : null;
+        Scope scope = (span != null) ? span.makeCurrent() : null;
+        try {
+            if (mcpTracer != null) mcpTracer.setToolCallId(span, request.getId());
+            McpSession session = validateSession(exchange, request);
+            if (session == null) {
+                if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_INVALID_REQUEST);
+                return;
+            }
+            if (promptRegistry == null) {
+                sendJsonRpc(exchange, StatusCodes.OK,
+                        JsonRpcResponse.success(request.getId(), Map.of("prompts", List.of())));
+                if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_SUCCESS);
+                return;
+            }
+            List<Map<String, Object>> prompts = promptRegistry.getAllPrompts();
+            if (span != null) span.setAttribute("mcp.prompts.count", prompts.size());
+            if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_SUCCESS);
+            sendJsonRpc(exchange, StatusCodes.OK,
+                    JsonRpcResponse.success(request.getId(), Map.of("prompts", prompts)));
+        } catch (RuntimeException t) {
+            if (mcpTracer != null) {
+                mcpTracer.recordError(span, t);
+                mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_ERROR);
+            }
+            throw t;
+        } finally {
+            if (scope != null) scope.close();
+            if (span != null) span.end();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void handlePromptsGet(HttpServerExchange exchange, JsonRpcRequest request) {
+        Span span = (mcpTracer != null)
+                ? mcpTracer.startServerSpan(exchange, Constants.GEN_AI_OPERATION_GET_PROMPT)
+                : null;
+        Scope scope = (span != null) ? span.makeCurrent() : null;
+        try {
+            if (mcpTracer != null) mcpTracer.setToolCallId(span, request.getId());
+            McpSession session = validateSession(exchange, request);
+            if (session == null) {
+                if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_INVALID_REQUEST);
+                return;
+            }
+            if (promptRegistry == null) {
+                if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_PROMPT_NOT_FOUND);
+                sendJsonRpc(exchange, StatusCodes.OK,
+                        JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INVALID_PARAMS, "Prompts not enabled"));
+                return;
+            }
+            Map<String, Object> params;
+            try {
+                params = (Map<String, Object>) request.getParams();
+            } catch (ClassCastException e) {
+                params = null;
+            }
+            String name = params != null ? (String) params.get("name") : null;
+            Object arguments = params != null ? params.get("arguments") : null;
+            if (name == null || name.isEmpty()) {
+                if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_INVALID_REQUEST);
+                sendJsonRpc(exchange, StatusCodes.OK,
+                        JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INVALID_PARAMS, "Missing 'name' param"));
+                return;
+            }
+            if (span != null) span.setAttribute("mcp.prompt.name", name);
+
+            McpPromptRegistry.Resolved resolved = promptRegistry.resolvePromptByName(name);
+            if (resolved == null) {
+                if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_PROMPT_NOT_FOUND);
+                sendJsonRpc(exchange, StatusCodes.OK,
+                        JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INVALID_PARAMS, "Prompt not found: " + name));
+                return;
+            }
+            int timeout = configuration.getMcp().getToolCallTimeout();
+            try {
+                Object result = promptRegistry.getPrompt(resolved, arguments, timeout);
+                if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_SUCCESS);
+                sendJsonRpc(exchange, StatusCodes.OK, JsonRpcResponse.success(request.getId(), result));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                if (mcpTracer != null) {
+                    mcpTracer.recordError(span, e);
+                    mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_INTERRUPTED);
+                }
+                sendJsonRpc(exchange, StatusCodes.OK,
+                        JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR, "prompts/get interrupted"));
+            } catch (Exception e) {
+                log.warn("prompts/get failed for {}: {}", name, e.getMessage());
+                if (mcpTracer != null) {
+                    mcpTracer.recordError(span, e);
+                    mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_BACKEND_FAILED);
+                }
+                sendJsonRpc(exchange, StatusCodes.OK,
+                        JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR, "prompts/get failed"));
+            }
+        } catch (RuntimeException t) {
+            if (mcpTracer != null) {
+                mcpTracer.recordError(span, t);
+                mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_ERROR);
+            }
+            throw t;
+        } finally {
+            if (scope != null) scope.close();
+            if (span != null) span.end();
+        }
     }
 
     private McpSession validateSession(HttpServerExchange exchange, JsonRpcRequest request) {

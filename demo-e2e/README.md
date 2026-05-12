@@ -26,7 +26,8 @@ Wait ~60 seconds for Keycloak to initialize and all one-shot containers to compl
 |-----------|-------|---------|-------|
 | consul | hashicorp/consul:1.22 | Service discovery + KV | 8500 |
 | keycloak | keycloak:26.1 | OIDC provider | 8080 |
-| opa | openpolicyagent/opa:1.4.2 | Policy engine | 8181 |
+| opa-bundle-builder | alpine:latest | Compiles rego policies to wasm bundles (one-shot) | - |
+| opa-bundle-server | nginx:alpine | Serves wasm bundles to CAPI | 8080 (internal) |
 | opensearch | opensearch:2.19.1 | Trace storage (security enabled) | 9200 |
 | opensearch-dashboards | opensearch-dashboards:2.19.1 | Trace visualization | /dashboards |
 | otel-collector | otel-collector-contrib | OpenTelemetry traces | 4317, 4318 |
@@ -164,7 +165,7 @@ All passwords and secrets are externalized to a `.env` file (gitignored). Copy `
 3. **Access Matrix** — Visual grid: services vs users with expected ALLOW/DENY
 4. **WebSocket Tab** — Live feed of WebSocket pings with connect/disconnect
 5. **SSE Tab** — Live Server-Sent Events stream with type filtering
-6. **MCP Tab** — Interactive MCP testing: Initialize session, List Tools, Call Tool with JSON args
+6. **MCP Tab** — Interactive MCP testing: Initialize session, List Tools, Call Tool with JSON args. Capability badges show live feature flags (tool count, sessions, OpenAPI promotion, GenAI tracing, signing mode) pulled from `/admin/info/mcp`. Expandable "Tool catalog" panel pulls `/admin/info/mcp/tools` to show each tool's kind (REST tag-defined / OpenAPI-promoted with method+path / MCP Server passthrough) and streaming flag — metadata that the spec-compliant `tools/list` response strips.
 7. **gRPC Tab** — Call `greeter.Greeter/SayHello` through CAPI's gRPC gateway via BFF bridge
 8. **Load Test** — Select services, concurrency, total requests; real-time 200/401/403/429 counters
 9. **Request Log** — All requests logged with filterable status codes

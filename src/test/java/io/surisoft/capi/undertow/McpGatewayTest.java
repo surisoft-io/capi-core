@@ -15,10 +15,13 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import io.surisoft.capi.service.OpaService;
+import io.surisoft.capi.service.OpaWasmService;
 import io.undertow.Undertow;
 import io.undertow.util.Headers;
 import io.undertow.util.StatusCodes;
+
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.net.ServerSocket;
 import java.net.URI;
@@ -524,7 +527,7 @@ class McpGatewayTest {
 
     @Test
     void toolsCall_withOpaService_noOpaRego_allowed() throws Exception {
-        // McpGateway with a non-null OpaService but service without opaRego → OPA skipped
+        // McpGateway with a non-null OpaWasmService but service without opaRego → OPA skipped
         int opaPort = findFreePort();
         int backendPort = findFreePort();
 
@@ -556,11 +559,11 @@ class McpGatewayTest {
             oauth2.setEnabled(false);
             opaConfig.setOauth2(oauth2);
 
-            OpaService opaService = new OpaService("http://localhost:9999", HttpClient.newHttpClient());
+            OpaWasmService opaWasmService = mock(OpaWasmService.class);
 
             try (McpGateway opaGw = new McpGateway(opaPort, null,
                     new McpToolRegistry(opaSvcCache), new HttpUtils(null, null),
-                    opaService, HttpClient.newHttpClient(), new LocalMcpSessionStore(opaSessCache), opaConfig,
+                    opaWasmService, HttpClient.newHttpClient(), new LocalMcpSessionStore(opaSessCache), opaConfig,
                     new McpBackendLoadBalancer(30000))) {
 
                 opaGw.start();
@@ -601,18 +604,7 @@ class McpGatewayTest {
 
     @Test
     void toolsCall_withOpaService_opaDenies_returnsAccessDenied() throws Exception {
-        // Mock OPA server that returns deny
-        int opaServerPort = findFreePort();
         int gatewayPort = findFreePort();
-
-        Undertow opaBackend = Undertow.builder()
-                .addHttpListener(opaServerPort, "0.0.0.0")
-                .setHandler(exchange -> {
-                    exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
-                    exchange.setStatusCode(StatusCodes.OK);
-                    exchange.getResponseSender().send("{\"result\":false}");
-                }).build();
-        opaBackend.start();
 
         try (Cache<String, Service> opaSvcCache = new Cache2kBuilder<String, Service>() {}
                 .name("testOpaDenySvc-" + System.currentTimeMillis())
@@ -633,12 +625,16 @@ class McpGatewayTest {
             oauth2.setEnabled(false);
             opaConfig.setOauth2(oauth2);
 
-            OpaService opaService = new OpaService("http://localhost:" + opaServerPort, HttpClient.newHttpClient());
+            OpaWasmService opaWasmService = mock(OpaWasmService.class);
+            OpaResult denied = new OpaResult();
+            denied.setResult(false);
+            when(opaWasmService.evaluate("test-policy", "test-token-12345", true)).thenReturn(denied);
+
             HttpUtils opaHttpUtils = new HttpUtils(null, null);
 
             try (McpGateway opaGw = new McpGateway(gatewayPort, null,
                     new McpToolRegistry(opaSvcCache), opaHttpUtils,
-                    opaService, HttpClient.newHttpClient(), new LocalMcpSessionStore(opaSessCache), opaConfig,
+                    opaWasmService, HttpClient.newHttpClient(), new LocalMcpSessionStore(opaSessCache), opaConfig,
                     new McpBackendLoadBalancer(30000))) {
 
                 opaGw.start();
@@ -675,8 +671,6 @@ class McpGatewayTest {
                 assertEquals(200, response.statusCode());
                 assertTrue(response.body().contains("Access denied by policy") || response.body().contains("-32000"));
             }
-        } finally {
-            opaBackend.stop();
         }
     }
 
