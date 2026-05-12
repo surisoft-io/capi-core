@@ -1,15 +1,10 @@
 package capi.allow_all
 
-default allow = false
+import rego.v1
+
+default allow := false
 
 allow if {
-    input.realm_access.roles[_] == "admin"
-}
-
-allow if {
-    input.realm_access.roles[_] == "manager"
-}
-
-allow if {
-    input.realm_access.roles[_] == "viewer"
+    some role in input.realm_access.roles
+    role in data.capi.allow_all.allowed_roles
 }

@@ -1,0 +1,7 @@
+{
+  "capi": {
+    "admin_only": {
+      "allowed_roles": ["admin"]
+    }
+  }
+}

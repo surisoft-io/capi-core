@@ -134,6 +134,68 @@ TOOL_HANDLERS = {
     "statistics": handle_statistics,
 }
 
+# ---- Resources ---------------------------------------------------------------
+
+RESOURCES = [
+    {
+        "uri": "math://reference/operators",
+        "name": "Operator reference",
+        "description": "Quick reference for supported math operators and functions.",
+        "mimeType": "text/markdown",
+    },
+    {
+        "uri": "math://reference/units",
+        "name": "Unit conversion table",
+        "description": "Supported source and target units for math_convert.",
+        "mimeType": "text/markdown",
+    },
+]
+
+RESOURCE_CONTENT = {
+    "math://reference/operators": (
+        "# Math operators\n\n"
+        "- `+ - * /` arithmetic\n"
+        "- `**` exponent\n"
+        "- `sqrt(x)`, `sin(x)`, `cos(x)`, `tan(x)`, `log(x)`\n"
+        "- constants: `pi`, `e`\n"
+    ),
+    "math://reference/units": (
+        "# Supported units\n\n"
+        "- length: `km`, `miles`\n"
+        "- mass: `kg`, `lbs`\n"
+        "- temperature: `celsius`, `fahrenheit`\n"
+        "- volume: `liters`, `gallons`\n"
+    ),
+}
+
+# ---- Prompts -----------------------------------------------------------------
+
+PROMPTS = [
+    {
+        "name": "explain_calculation",
+        "description": "Ask the model to explain how to compute a math expression step by step.",
+        "arguments": [
+            {"name": "expression", "description": "The expression to explain", "required": True}
+        ],
+    },
+]
+
+def render_prompt(name, arguments):
+    if name == "explain_calculation":
+        expression = (arguments or {}).get("expression", "<missing>")
+        return {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": {
+                        "type": "text",
+                        "text": f"Explain step by step how to compute the expression: {expression}",
+                    },
+                }
+            ]
+        }
+    return None
+
 
 class McpHandler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -146,7 +208,11 @@ class McpHandler(BaseHTTPRequestHandler):
         if method == "initialize":
             result = {
                 "protocolVersion": "2025-03-26",
-                "capabilities": {"tools": {"listChanged": False}},
+                "capabilities": {
+                    "tools": {"listChanged": False},
+                    "resources": {"listChanged": False, "subscribe": False},
+                    "prompts": {"listChanged": False},
+                },
                 "serverInfo": {"name": "math-mcp-server", "version": "1.0.0"}
             }
             self.send_jsonrpc(req_id, result, headers={"Mcp-Session-Id": SESSION_ID})
@@ -169,6 +235,33 @@ class McpHandler(BaseHTTPRequestHandler):
             else:
                 result = {"content": [{"type": "text", "text": f"Unknown tool: {tool_name}"}], "isError": True}
             self.send_jsonrpc(req_id, result)
+
+        elif method == "resources/list":
+            self.send_jsonrpc(req_id, {"resources": RESOURCES})
+
+        elif method == "resources/read":
+            params = body.get("params", {})
+            uri = params.get("uri")
+            text = RESOURCE_CONTENT.get(uri)
+            if text is None:
+                self.send_error_jsonrpc(req_id, -32602, f"Resource not found: {uri}")
+            else:
+                self.send_jsonrpc(req_id, {
+                    "contents": [{"uri": uri, "mimeType": "text/markdown", "text": text}]
+                })
+
+        elif method == "prompts/list":
+            self.send_jsonrpc(req_id, {"prompts": PROMPTS})
+
+        elif method == "prompts/get":
+            params = body.get("params", {})
+            name = params.get("name")
+            arguments = params.get("arguments")
+            rendered = render_prompt(name, arguments)
+            if rendered is None:
+                self.send_error_jsonrpc(req_id, -32602, f"Prompt not found: {name}")
+            else:
+                self.send_jsonrpc(req_id, rendered)
 
         elif method == "ping":
             self.send_jsonrpc(req_id, {})

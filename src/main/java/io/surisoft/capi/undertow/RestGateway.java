@@ -11,7 +11,6 @@ import io.surisoft.capi.schema.ApiKeyEntry;
 import io.surisoft.capi.schema.ApiKeyStoreEntry;
 import io.surisoft.capi.schema.RestClient;
 import io.surisoft.capi.schema.Service;
-import io.surisoft.capi.service.OpaService;
 import io.surisoft.capi.service.OpaWasmService;
 import io.surisoft.capi.tracer.CapiTracer;
 import io.surisoft.capi.utils.Constants;
@@ -50,8 +49,6 @@ public class RestGateway {
     private final String oauth2CookieName;
     private final SSLContext sslContext;
 
-    @Nullable
-    private OpaService opaService;
     @Nullable
     private OpaWasmService opaWasmService;
     @Nullable
@@ -95,10 +92,6 @@ public class RestGateway {
         managedHeaders.put("Access-Control-Allow-Headers", StringUtils.join(accessControlAllowHeaders, ","));
 
         httpErrorHandler = new HttpErrorHandler(httpUtils);
-    }
-
-    public void setOpaService(@Nullable OpaService opaService) {
-        this.opaService = opaService;
     }
 
     public void setThrottleProcessor(@Nullable ThrottleProcessor throttleProcessor) {
@@ -282,17 +275,8 @@ public class RestGateway {
                 apiKeyAuthenticated = !exchange.getRequestHeaders().contains(Constants.AUTHORIZATION_HEADER);
             }
 
-            // 2. OAuth2 / Subscription check
-            if (restClient.isSecured() && !apiKeyAuthenticated) {
-                String authResult = checkAuthorization(exchange, restClient);
-                if (authResult != null) {
-                    httpErrorHandler.sendError(exchange, 403, authResult);
-                    return;
-                }
-            }
-
             // 3. OPA policy check
-            if (restClient.getOpaRego() != null && opaService != null) {
+            if (restClient.getOpaRego() != null) {
                 try {
                     String accessToken = httpUtils.processAuthorizationAccessToken(exchange);
                     if (accessToken == null) {
@@ -314,55 +298,24 @@ public class RestGateway {
                             httpErrorHandler.sendError(exchange, 403, "Access denied by policy");
                             return;
                         }
-                        // Wasm passed — fall through to throttle check and proxy below
                     } else {
-                        // Fallback: async HTTP call to OPA server
-                        final RestClient fc = restClient;
-                        final String fcId = restClientId;
-                        exchange.dispatch(SameThreadExecutor.INSTANCE, () -> {
-                            opaService.callOpaAsync(fc.getOpaRego(), accessToken, true)
-                                    .thenAccept(opaResult -> {
-                                        exchange.dispatch(SameThreadExecutor.INSTANCE, () -> {
-                                            try {
-                                                if (opaResult == null || !opaResult.isAllowed()) {
-                                                    httpErrorHandler.sendError(exchange, 403, "Access denied by policy");
-                                                    return;
-                                                }
-                                                if (fc.isThrottle() && throttleProcessor != null) {
-                                                    Service svc = serviceCache.get(fc.getCanonicalServiceId());
-                                                    if (svc != null && !throttleProcessor.canContinue(svc, null, false, -1, -1)) {
-                                                        httpErrorHandler.sendError(exchange, 429, "Too Many requests");
-                                                        return;
-                                                    }
-                                                }
-                                                httpUtils.propagateAuthorization(exchange);
-                                                if (fc.isKeepGroup()) {
-                                                    exchange.getRequestHeaders().put(HttpString.tryFromString(Constants.CAPI_GROUP_HEADER), fc.getServiceId());
-                                                }
-                                                String fwdPath = normalizePathForForwarding(fc, exchange.getRequestURI());
-                                                exchange.setRequestURI(fwdPath);
-                                                exchange.setRelativePath(fwdPath);
-                                                proxyWithTracing(exchange, fc, exchange.getRequestPath());
-                                            } catch (Exception e) {
-                                                log.error("OPA proxy error: {}", e.getMessage(), e);
-                                                if (!exchange.isResponseStarted()) httpErrorHandler.sendError(exchange, 502, "Gateway error");
-                                            }
-                                        });
-                                    })
-                                    .exceptionally(ex -> {
-                                        exchange.dispatch(SameThreadExecutor.INSTANCE, () -> {
-                                            log.error("OPA async call failed: {}", ex.getMessage(), ex);
-                                            if (!exchange.isResponseStarted()) {
-                                                httpErrorHandler.sendError(exchange, 502, "Policy evaluation failed");
-                                            }
-                                        });
-                                        return null;
-                                    });
-                        });
+                        // Wasm policy pool not loaded yet (cold start, bundle server unreachable,
+                        // policy load threw). Fail closed and tell well-behaved clients to retry.
+                        exchange.getResponseHeaders().put(Headers.RETRY_AFTER, "1");
+                        httpErrorHandler.sendError(exchange, 503, "Policy engine not ready");
                         return;
                     }
                 } catch (AuthorizationException e) {
                     httpErrorHandler.sendError(exchange, 403, e.getMessage());
+                    return;
+                }
+            }
+
+            // 2. OAuth2 / Subscription check
+            if (restClient.isSecured() && !apiKeyAuthenticated) {
+                String authResult = checkAuthorization(exchange, restClient);
+                if (authResult != null) {
+                    httpErrorHandler.sendError(exchange, 403, authResult);
                     return;
                 }
             }
@@ -526,7 +479,7 @@ public class RestGateway {
                             String serviceKey = restClient.getCanonicalServiceId();
                             Service service = serviceCache.get(serviceKey);
                             if (service != null) {
-                                if (!httpUtils.isAuthorized(accessToken, serviceKey, service, opaService)) {
+                                if (!httpUtils.isAuthorized(accessToken, serviceKey, service, opaWasmService)) {
                                     return "Invalid authentication";
                                 }
                             } else {

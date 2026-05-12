@@ -50,10 +50,10 @@ public class Info {
             }
         }
 
-        // OPA
+        // OPA (wasm-only path)
         if(configuration.getOpa() != null) {
             capiInfo.setOpaEnabled(configuration.getOpa().isEnabled());
-            capiInfo.setOpaEndpoint(configuration.getOpa().getEndpoint());
+            capiInfo.setOpaWasmBundleUrl(configuration.getOpa().getWasmBundleUrl());
         }
 
         // Consul

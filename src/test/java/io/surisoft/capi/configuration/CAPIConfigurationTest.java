@@ -483,17 +483,17 @@ class CAPIConfigurationTest {
     }
 
     @Test
-    void opa_getEndpoint_returnsNull_byDefault() {
+    void opa_getWasmBundleUrl_returnsNull_byDefault() {
         CAPIConfiguration.Opa opa = new CAPIConfiguration.Opa();
-        assertNull(opa.getEndpoint());
+        assertNull(opa.getWasmBundleUrl());
     }
 
     @Test
-    void opa_endpoint() {
+    void opa_wasmBundleUrl() {
         CAPIConfiguration.Opa opa = new CAPIConfiguration.Opa();
-        assertNull(opa.getEndpoint());
-        opa.setEndpoint("http://opa:8181/v1/data");
-        assertEquals("http://opa:8181/v1/data", opa.getEndpoint());
+        assertNull(opa.getWasmBundleUrl());
+        opa.setWasmBundleUrl("http://opa-bundle-server:8080/bundles/");
+        assertEquals("http://opa-bundle-server:8080/bundles/", opa.getWasmBundleUrl());
     }
 
     // --- LoggingTraces nested class ---

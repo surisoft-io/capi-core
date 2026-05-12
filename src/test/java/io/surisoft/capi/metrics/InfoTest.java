@@ -129,13 +129,13 @@ class InfoTest {
     void getInfo_opaConfig() {
         CAPIConfiguration.Opa opa = new CAPIConfiguration.Opa();
         opa.setEnabled(true);
-        opa.setEndpoint("http://opa:8181");
+        opa.setWasmBundleUrl("http://opa-bundle-server:8080/bundles/");
         configuration.setOpa(opa);
 
         CapiInfo capiInfo = new Info(configuration, 0).getInfo();
 
         assertTrue(capiInfo.isOpaEnabled());
-        assertEquals("http://opa:8181", capiInfo.getOpaEndpoint());
+        assertEquals("http://opa-bundle-server:8080/bundles/", capiInfo.getOpaWasmBundleUrl());
     }
 
     @Test

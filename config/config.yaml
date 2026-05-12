@@ -52,8 +52,6 @@ capi:
       - https://localhost:8080/keycloak/realms/capi/protocol/openid-connect/certs
   opa:
     enabled: false
-    endpoint: http://localhost:8181
-    wasmEnabled: false
     wasmBundleUrl:
     wasmBundlePollIntervalSeconds: 60
     wasmPoolSize: 10

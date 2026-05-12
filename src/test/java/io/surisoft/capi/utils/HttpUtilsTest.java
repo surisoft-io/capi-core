@@ -10,7 +10,7 @@ import io.surisoft.capi.schema.CapiRestError;
 import io.surisoft.capi.schema.OpaResult;
 import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.schema.ServiceMeta;
-import io.surisoft.capi.service.OpaService;
+import io.surisoft.capi.service.OpaWasmService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -508,33 +508,35 @@ class HttpUtilsTest {
 
     @Test
     void isAuthorized_withOpaAllowed_returnsTrue() throws IOException {
-        OpaService opaService = mock(OpaService.class);
+        OpaWasmService opaWasmService = mock(OpaWasmService.class);
         OpaResult opaResult = new OpaResult();
         opaResult.setResult(true);
-        when(opaService.callOpa("my-rego", "token", true)).thenReturn(opaResult);
+        when(opaWasmService.isReady("my-rego")).thenReturn(true);
+        when(opaWasmService.evaluate("my-rego", "token", true)).thenReturn(opaResult);
 
         Service service = new Service();
         ServiceMeta meta = new ServiceMeta();
         meta.setOpaRego("my-rego");
         service.setServiceMeta(meta);
 
-        boolean result = httpUtils.isAuthorized("token", "/ctx", service, opaService);
+        boolean result = httpUtils.isAuthorized("token", "/ctx", service, opaWasmService);
         assertTrue(result);
     }
 
     @Test
     void isAuthorized_withOpaDenied_returnsFalse() throws IOException {
-        OpaService opaService = mock(OpaService.class);
+        OpaWasmService opaWasmService = mock(OpaWasmService.class);
         OpaResult opaResult = new OpaResult();
         opaResult.setResult(false);
-        when(opaService.callOpa("my-rego", "token", true)).thenReturn(opaResult);
+        when(opaWasmService.isReady("my-rego")).thenReturn(true);
+        when(opaWasmService.evaluate("my-rego", "token", true)).thenReturn(opaResult);
 
         Service service = new Service();
         ServiceMeta meta = new ServiceMeta();
         meta.setOpaRego("my-rego");
         service.setServiceMeta(meta);
 
-        boolean result = httpUtils.isAuthorized("token", "/ctx", service, opaService);
+        boolean result = httpUtils.isAuthorized("token", "/ctx", service, opaWasmService);
         assertFalse(result);
     }
 

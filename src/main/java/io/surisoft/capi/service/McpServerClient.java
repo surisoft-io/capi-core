@@ -127,6 +127,181 @@ public class McpServerClient {
         backendSessions.keySet().removeIf(id -> !activeServiceIds.contains(id));
     }
 
+    /**
+     * Forward a generic MCP JSON-RPC call (resources/list, resources/read,
+     * prompts/list, prompts/get) to one of the service's backends, with
+     * load-balanced replica failover and session re-init on session errors.
+     *
+     * <p>Used by {@link McpResourceRegistry} and {@link McpPromptRegistry}
+     * for fan-out, and by {@link io.surisoft.capi.undertow.McpGateway} for
+     * routed read/get calls. Tool dispatch keeps using {@link #forwardToolCall}
+     * so its existing behaviour is untouched.
+     *
+     * @param service     the upstream MCP server service
+     * @param method      the JSON-RPC method to invoke (e.g. "resources/list")
+     * @param params      JSON-RPC params (may be null)
+     * @param spanLabel   short label used as the upstream span name suffix
+     * @param timeout     per-call timeout in ms
+     * @return the unwrapped {@code result} object from the JSON-RPC response,
+     *         or null when the upstream returns an empty response
+     */
+    @SuppressWarnings("unchecked")
+    public Object forwardJsonRpc(Service service, String method, Object params, String spanLabel, int timeout) throws Exception {
+        String serviceId = service.getId();
+        List<String> backendUrls = loadBalancer.getOrderedBackendUrls(service);
+        if (backendUrls.isEmpty()) {
+            throw new RuntimeException("No backend URLs available for service: " + serviceId);
+        }
+
+        Map<String, Object> jsonRpcRequest = new LinkedHashMap<>();
+        jsonRpcRequest.put("jsonrpc", "2.0");
+        jsonRpcRequest.put("method", method);
+        jsonRpcRequest.put("id", UUID.randomUUID().toString());
+        if (params != null) jsonRpcRequest.put("params", params);
+        String requestBody = objectMapper.writeValueAsString(jsonRpcRequest);
+
+        Exception lastException = null;
+        int attempt = 0;
+        for (String backendUrl : backendUrls) {
+            attempt++;
+            Span attemptSpan = (mcpTracer != null)
+                    ? mcpTracer.startUpstreamSpan(null, backendUrl, spanLabel, attempt)
+                    : null;
+            Scope attemptScope = (attemptSpan != null) ? attemptSpan.makeCurrent() : null;
+            try {
+                McpBackendSession session = backendSessions.get(serviceId);
+                if (session == null || !session.initialized) {
+                    session = initializeBackendSession(backendUrl, timeout);
+                    if (session == null) {
+                        loadBalancer.reportFailure(backendUrl);
+                        lastException = new RuntimeException("Failed to initialize MCP session with backend: " + backendUrl);
+                        if (mcpTracer != null) mcpTracer.recordError(attemptSpan, lastException);
+                        continue;
+                    }
+                    backendSessions.put(serviceId, session);
+                }
+
+                HttpResponse<String> response = sendOnce(backendUrl, requestBody, session.sessionId, attemptSpan, timeout);
+                loadBalancer.reportSuccess(backendUrl);
+                if (mcpTracer != null) mcpTracer.setHttpStatus(attemptSpan, response.statusCode());
+
+                if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                    RuntimeException ex = new RuntimeException("Backend returned status " + response.statusCode() + ": " + response.body());
+                    if (mcpTracer != null) mcpTracer.recordError(attemptSpan, ex);
+                    throw ex;
+                }
+
+                Map<String, Object> jsonRpcResponse = objectMapper.readValue(response.body(), Map.class);
+
+                // Session error → re-init once and retry
+                if (jsonRpcResponse.containsKey("error")) {
+                    Map<String, Object> error = (Map<String, Object>) jsonRpcResponse.get("error");
+                    int errorCode = error.get("code") instanceof Number ? ((Number) error.get("code")).intValue() : 0;
+                    if (errorCode == Constants.JSONRPC_INVALID_REQUEST) {
+                        log.info("Session error from backend {}, re-initializing", backendUrl);
+                        session = initializeBackendSession(backendUrl, timeout);
+                        if (session != null) {
+                            backendSessions.put(serviceId, session);
+                            response = sendOnce(backendUrl, requestBody, session.sessionId, attemptSpan, timeout);
+                            if (mcpTracer != null) mcpTracer.setHttpStatus(attemptSpan, response.statusCode());
+                            jsonRpcResponse = objectMapper.readValue(response.body(), Map.class);
+                        }
+                    }
+                }
+
+                if (jsonRpcResponse.containsKey("result")) {
+                    return jsonRpcResponse.get("result");
+                }
+                if (jsonRpcResponse.containsKey("error")) {
+                    RuntimeException ex = new RuntimeException("Backend MCP error: " + objectMapper.writeValueAsString(jsonRpcResponse.get("error")));
+                    if (mcpTracer != null) mcpTracer.recordError(attemptSpan, ex);
+                    throw ex;
+                }
+                return jsonRpcResponse;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                if (mcpTracer != null) mcpTracer.recordError(attemptSpan, e);
+                throw e;
+            } catch (java.io.IOException e) {
+                log.warn("Backend {} failed for MCP {} on {}: {}", backendUrl, method, spanLabel, e.getMessage());
+                loadBalancer.reportFailure(backendUrl);
+                if (mcpTracer != null) mcpTracer.recordError(attemptSpan, e);
+                lastException = e;
+            } catch (Exception e) {
+                log.warn("Error calling MCP backend {} for {} on {}: {}", backendUrl, method, spanLabel, e.getMessage());
+                loadBalancer.reportFailure(backendUrl);
+                if (mcpTracer != null) mcpTracer.recordError(attemptSpan, e);
+                lastException = e;
+            } finally {
+                if (attemptScope != null) attemptScope.close();
+                if (attemptSpan != null) attemptSpan.end();
+            }
+        }
+        throw lastException != null ? lastException : new RuntimeException("All backends failed for " + method + " on " + spanLabel);
+    }
+
+    private HttpResponse<String> sendOnce(String backendUrl, String requestBody, String sessionId, Span attemptSpan, int timeout)
+            throws java.io.IOException, InterruptedException, java.net.URISyntaxException {
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(new URI(backendUrl))
+                .header("Content-Type", APPLICATION_JSON)
+                .timeout(Duration.ofMillis(timeout))
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody));
+        if (sessionId != null) {
+            builder.header(Constants.MCP_SESSION_HEADER, sessionId);
+        }
+        if (mcpTracer != null) mcpTracer.injectContext(attemptSpan, builder);
+        return httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    /**
+     * @return the {@code resources} array from the upstream's {@code resources/list},
+     *         or an empty list if the backend doesn't support resources.
+     */
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> forwardResourcesList(Service service, int timeout) throws Exception {
+        try {
+            Object result = forwardJsonRpc(service, "resources/list", null, "resources/list", timeout);
+            if (result instanceof Map) {
+                Object resources = ((Map<String, Object>) result).get("resources");
+                return resources instanceof List ? (List<Map<String, Object>>) resources : List.of();
+            }
+        } catch (RuntimeException e) {
+            // Method-not-found means the backend doesn't expose resources — treat as empty.
+            if (e.getMessage() != null && e.getMessage().contains("-32601")) return List.of();
+            throw e;
+        }
+        return List.of();
+    }
+
+    public Object forwardResourcesRead(Service service, String uri, int timeout) throws Exception {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("uri", uri);
+        return forwardJsonRpc(service, "resources/read", params, "resources/read " + uri, timeout);
+    }
+
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> forwardPromptsList(Service service, int timeout) throws Exception {
+        try {
+            Object result = forwardJsonRpc(service, "prompts/list", null, "prompts/list", timeout);
+            if (result instanceof Map) {
+                Object prompts = ((Map<String, Object>) result).get("prompts");
+                return prompts instanceof List ? (List<Map<String, Object>>) prompts : List.of();
+            }
+        } catch (RuntimeException e) {
+            if (e.getMessage() != null && e.getMessage().contains("-32601")) return List.of();
+            throw e;
+        }
+        return List.of();
+    }
+
+    public Object forwardPromptsGet(Service service, String name, Object arguments, int timeout) throws Exception {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("name", name);
+        if (arguments != null) params.put("arguments", arguments);
+        return forwardJsonRpc(service, "prompts/get", params, "prompts/get " + name, timeout);
+    }
+
     @SuppressWarnings("unchecked")
     public Object forwardToolCall(Service service, String toolName, Object arguments, int timeout) throws Exception {
         Map<String, String> props = service.getServiceMeta().getUnknownProperties();

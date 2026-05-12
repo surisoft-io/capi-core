@@ -1,7 +1,10 @@
 package capi.owner_only
 
-default allow = false
+import rego.v1
+
+default allow := false
 
 allow if {
-    input.realm_access.roles[_] == "admin"
+    some role in input.realm_access.roles
+    role in data.capi.owner_only.allowed_roles
 }

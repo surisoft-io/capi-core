@@ -356,6 +356,19 @@ public class AdminGateway implements AutoCloseable {
             info.put("toolCount", toolCount);
             info.put("activeSessionCount", sessionCount);
 
+            // Feature flags surfaced to the UI / operators.
+            boolean genAiTracing = enabled
+                    && capiConfiguration.getMcp().getObservability() != null
+                    && capiConfiguration.getMcp().getObservability().getGenAi() != null
+                    && capiConfiguration.getMcp().getObservability().getGenAi().isEnabled();
+            String signingMode = (enabled && capiConfiguration.getMcp().getSigning() != null)
+                    ? capiConfiguration.getMcp().getSigning().getMode() : "off";
+            Map<String, Object> features = new LinkedHashMap<>();
+            features.put("genAiTracing", genAiTracing);
+            features.put("signingMode", signingMode);
+            features.put("openApiPromotion", true);
+            info.put("features", features);
+
             exchange.setStatusCode(StatusCodes.OK);
             exchange.getResponseSender().send(objectMapper.writeValueAsString(info));
         } catch (JsonProcessingException e) {

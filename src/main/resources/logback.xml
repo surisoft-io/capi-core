@@ -51,20 +51,22 @@
 
 <property name="logstashDestination" value="${logstash-destination}"/>
 
-<!-- OpenTelemetry MDC instrumentation: auto-injects trace_id and span_id into MDC -->
-<appender name="OTEL" class="io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender">
-    <appender-ref ref="CONSOLE"/>
-</appender>
-
 <!-- Pattern with trace/span support -->
 <property name="LOG_PATTERN"
               value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"/>
 
-<!-- Console appender -->
+<!-- Console appender — must be declared BEFORE any appender that
+     references it via <appender-ref>, otherwise the reference
+     resolves to nothing and log lines silently vanish. -->
 <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
     <encoder>
         <pattern>${LOG_PATTERN}</pattern>
     </encoder>
+</appender>
+
+<!-- OpenTelemetry MDC instrumentation: auto-injects trace_id and span_id into MDC -->
+<appender name="OTEL" class="io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender">
+    <appender-ref ref="CONSOLE"/>
 </appender>
 
 <!-- LOGSTASH appender (only created when logs are enabled) -->
@@ -169,8 +171,12 @@
     </then>
 </if>
 
-<!-- Root logger: app logs to console + logstash + file -->
+<!-- Root logger: app logs to console + OTEL + (optional) logstash + (optional) file.
+     CONSOLE is referenced directly because the OpenTelemetryAppender does NOT
+     forward to inner appenders — it captures log records as OTel signals only.
+     Without an explicit CONSOLE ref here, app logs would never reach stdout. -->
 <root level="INFO">
+    <appender-ref ref="CONSOLE"/>
     <appender-ref ref="OTEL"/>
     <appender-ref ref="LOGSTASH"/>
     <appender-ref ref="FILE"/>

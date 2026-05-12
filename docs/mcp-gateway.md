@@ -53,6 +53,10 @@ CAPI exposes a single `/mcp` endpoint. All MCP interactions are JSON-RPC 2.0 mes
 | `initialize` | Create an MCP session. Returns server capabilities and a `Mcp-Session-Id` header. |
 | `tools/list` | Returns the aggregated tool catalog from all MCP-enabled Consul services. |
 | `tools/call` | Invokes a tool. CAPI resolves the tool name to a backend service and forwards the request. |
+| `resources/list` | Aggregates resource catalogs from every `mcp-type=server` upstream. URIs are namespaced as `<serviceId>:<originalUri>`. |
+| `resources/read` | Reads a resource. CAPI strips the namespace prefix and routes to the owning upstream MCP server. |
+| `prompts/list` | Aggregates prompt templates from every `mcp-type=server` upstream. Names are namespaced as `<serviceId>_<originalName>`. |
+| `prompts/get` | Renders a prompt with the supplied `arguments`. CAPI routes by name prefix to the owning upstream. |
 | `ping` | Health check. Returns a JSON-RPC success response. |
 
 ### Response Format
@@ -274,6 +278,66 @@ These are stable strings — safe to alert on.
 - OpenAPI-promoted tools are not verified (they come from a different source of truth — the OpenAPI spec).
 - The signing CLI is whatever the operator wires up (`openssl` examples above). A first-class signing tool may ship later.
 - Hot key rotation works (just publish the new key under a new keyid, re-sign with it, then remove the old key). There's no signed transparency log — that's a future enhancement.
+
+## Resources and Prompts
+
+CAPI passes through MCP `resources/*` and `prompts/*` from upstream MCP servers (`mcp-type=server`). Tag-defined / OpenAPI-promoted REST services are out of scope — those backends do not implement the resources or prompts methods, and there is no analogue.
+
+### Capabilities
+
+When at least one `mcp-type=server` service is registered, the gateway advertises in its `initialize` response:
+
+```json
+"capabilities": {
+  "tools":     { "listChanged": false },
+  "resources": { "listChanged": false, "subscribe": false },
+  "prompts":   { "listChanged": false }
+}
+```
+
+`subscribe` is `false` in phase 1 — change notifications from upstream are not fanned out to MCP clients yet.
+
+### Aggregation and namespacing
+
+`resources/list` and `prompts/list` fan out to every `mcp-type=server` service in parallel and merge the results. To make routing back stateless, CAPI rewrites each entry's identifier with a service-id prefix:
+
+| Method | Original (upstream) | After CAPI rewrite |
+|---|---|---|
+| `resources/list` | `file:///docs/algebra.md` | `math-mcp:file:///docs/algebra.md` |
+| `prompts/list` | `explain_calculation` | `math-mcp_explain_calculation` |
+
+URIs use `:` as separator (URIs already contain `://` so `:` is unambiguous after the first occurrence). Prompt names use `_` (already used as the conventional MCP separator). Service ids that themselves contain `_` are handled by trying progressively longer prefixes — the longest matching service id wins.
+
+### Routed reads/gets
+
+`resources/read` and `prompts/get` are routed to a specific upstream server based on the namespace prefix. CAPI:
+
+1. Splits the input URI / name on the first separator.
+2. Looks up the service id in the cache.
+3. Forwards the call to that one upstream, with the original (unprefixed) URI/name and the original `arguments`.
+4. Returns the upstream's `contents` / `messages` payload verbatim, wrapped in a JSON-RPC envelope.
+
+Unknown service ids return JSON-RPC `-32602` (`INVALID_PARAMS`). Backend failures return `-32603` (`INTERNAL_ERROR`) — the same failure shape as `tools/call`.
+
+### Tracing
+
+Each method gets its own GenAI semconv operation name on the parent SERVER span:
+
+| Method | `gen_ai.operation.name` | Span name |
+|---|---|---|
+| `resources/list` | `list_resources` | `list_resources` |
+| `resources/read` | `read_resource` | `read_resource <uri>` |
+| `prompts/list` | `list_prompts` | `list_prompts` |
+| `prompts/get` | `get_prompt` | `get_prompt <name>` |
+
+`mcp.upstream` child spans appear once per upstream call (one per backend visited during fan-out for list ops; one per attempted replica for routed read/get ops with failover). New `capi.outcome` values: `resource_not_found`, `prompt_not_found`. Existing outcomes (`success`, `invalid_request`, `backend_failed`, `interrupted`) carry their usual semantics.
+
+### Limits in phase 1
+
+- **No `resources/templates/list`** — URI templates are out of scope. Add later if any upstream needs them.
+- **No `resources/subscribe`** — change notifications from upstream are not propagated to clients.
+- **No tag-defined resources/prompts** — only upstream-MCP-server passthrough. Tag-defined static resources (e.g. canned text content stored in Consul) is a phase 1.5 enhancement if anyone wants it.
+- **Aggregation is per-call, not cached** — list ops issue one upstream RPC per `mcp-type=server` service. Latency scales with the number of upstream MCP servers; with three or four servers this is fine, with thirty it would be worth adding a short-lived cache.
 
 ## Streaming (SSE) Model
 

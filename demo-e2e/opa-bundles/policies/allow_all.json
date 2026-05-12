@@ -1,0 +1,7 @@
+{
+  "capi": {
+    "allow_all": {
+      "allowed_roles": ["admin", "manager", "viewer"]
+    }
+  }
+}

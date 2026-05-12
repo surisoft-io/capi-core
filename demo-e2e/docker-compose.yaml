@@ -28,16 +28,6 @@ services:
       KC_HOSTNAME_STRICT: "false"
     command: start-dev
 
-  opa:
-    image: openpolicyagent/opa:1.4.2
-    container_name: demo-e2e-opa
-    platform: linux/amd64
-    ports:
-      - "8181:8181"
-    volumes:
-      - ./opa-policy:/policies:ro
-    command: run --server --addr 0.0.0.0:8181 /policies
-
   # --- Observability ---
 
   opensearch:

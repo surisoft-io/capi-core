@@ -1030,7 +1030,7 @@ class CAPIMainTest {
         when(mockStartup.getServiceCache()).thenReturn(svcCache);
         when(mockStartup.getUndertowSslContext()).thenReturn(null);
         when(mockStartup.getWebsocketUtils()).thenReturn(null);
-        when(mockStartup.getOpaService()).thenReturn(null);
+        when(mockStartup.getOpaWasmService()).thenReturn(null);
         when(mockStartup.getThrottleProcessor()).thenReturn(null);
         when(mockStartup.getApiKeyCache()).thenReturn(null);
         when(mockStartup.getOpenTelemetryTracer()).thenReturn(null);
@@ -1093,7 +1093,7 @@ class CAPIMainTest {
         when(mockWsUtils.createWebsocketAuthorization()).thenThrow(new RuntimeException("No OIDC configured"));
         when(mockStartup.getWebsocketUtils()).thenReturn(mockWsUtils);
 
-        when(mockStartup.getOpaService()).thenReturn(mock(io.surisoft.capi.service.OpaService.class));
+        when(mockStartup.getOpaWasmService()).thenReturn(mock(io.surisoft.capi.service.OpaWasmService.class));
         when(mockStartup.getThrottleProcessor()).thenReturn(mock(io.surisoft.capi.processor.ThrottleProcessor.class));
 
         org.cache2k.Cache<String, io.surisoft.capi.schema.ApiKeyStoreEntry> apiCache =

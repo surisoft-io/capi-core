@@ -403,9 +403,14 @@
         </div>
       </div>
       <div class="card-body">
+        <!-- Capability badges (fetched from /info/mcp) -->
+        <div id="mcpCapabilities" style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:1rem;font-size:0.7rem;">
+          <span class="tag tag-mcp" style="opacity:0.6;">loading capabilities...</span>
+        </div>
         <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:1rem;">
           <button class="svc-call" onclick="mcpListTools()" style="font-size:0.75rem;">List Tools</button>
           <button class="svc-call" onclick="mcpPing()" style="font-size:0.75rem;">Ping</button>
+          <button class="svc-call" onclick="mcpRefreshCatalog()" style="font-size:0.75rem;">Refresh Catalog</button>
         </div>
         <div style="margin-bottom:1rem;display:flex;gap:0.5rem;align-items:end;flex-wrap:wrap;">
           <div style="flex:1;min-width:200px;">
@@ -420,6 +425,11 @@
           </div>
           <button class="svc-call" onclick="mcpCallTool()" style="font-size:0.75rem;padding:0.4rem 1rem;">Call Tool</button>
         </div>
+        <!-- Tool catalog (fetched from /info/mcp/tools — shows kind/method/path metadata not in tools/list) -->
+        <details id="mcpCatalog" style="margin-bottom:1rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;">
+          <summary style="cursor:pointer;padding:0.5rem 0.8rem;font-size:0.78rem;color:var(--dim);">Tool catalog (admin) — kinds, HTTP methods, OpenAPI paths</summary>
+          <div id="mcpCatalogBody" style="padding:0.5rem 0.8rem;font-size:0.75rem;">Click Refresh Catalog to load.</div>
+        </details>
         <div id="mcpLog" style="max-height:500px;overflow-y:auto;font-family:'SF Mono','Fira Code',monospace;font-size:0.78rem;line-height:1.6;">
           <div class="empty-log">Click Initialize to start an MCP session.</div>
         </div>
@@ -983,6 +993,10 @@ function switchTab(name) {
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
   document.getElementById(`tab-${name}`).classList.add('active');
   event.target.classList.add('active');
+  if (name === 'mcp') {
+    mcpLoadCapabilities();
+    mcpRefreshCatalog();
+  }
 }
 
 // ── WebSocket ──
@@ -1275,6 +1289,83 @@ async function mcpQuickCall(toolName, defaultArgs) {
     addLog('mcp', `MCP ${toolName}`, `${result.ms}ms`, result.status, result.data, 'tag-mcp');
   } catch (e) {
     addLog('mcp', `MCP ${toolName}`, '', 'error', { error: e.message }, 'tag-mcp');
+  }
+}
+
+// Capabilities banner — surfaces the MCP feature flags exposed by /info/mcp.
+async function mcpLoadCapabilities() {
+  const el = document.getElementById('mcpCapabilities');
+  if (!el) return;
+  try {
+    const res = await fetch('/admin/info/mcp');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const info = await res.json();
+    const f = info.features || {};
+    const tracingOn = !!f.genAiTracing;
+    const signing = (f.signingMode || 'off').toLowerCase();
+    const promotion = !!f.openApiPromotion;
+    const tools = info.toolCount || 0;
+    const sessions = info.activeSessionCount || 0;
+
+    const badge = (label, on, color) => {
+      const bg = on ? color : '#1e2733';
+      const fg = on ? '#fff' : 'var(--dim)';
+      return `<span class="tag" style="background:${bg};color:${fg};">${label}</span>`;
+    };
+    el.innerHTML = [
+      badge(`Tools: ${tools}`, true, '#1e2e3a'),
+      badge(`Sessions: ${sessions}`, sessions > 0, 'var(--cyan)'),
+      badge(`OpenAPI promotion: ${promotion ? 'on' : 'off'}`, promotion, '#1e3a2e'),
+      badge(`GenAI tracing: ${tracingOn ? 'on' : 'off'}`, tracingOn, '#1e3a2e'),
+      badge(`Signing: ${signing}`, signing !== 'off',
+            signing === 'enforce' ? 'var(--red)' : (signing === 'warn' ? 'var(--orange)' : '#1e2733'))
+    ].join('');
+  } catch (e) {
+    el.innerHTML = `<span class="tag" style="background:#3a1e1e;color:var(--red)">capabilities unavailable: ${e.message}</span>`;
+  }
+}
+
+// Tool catalog — the spec-compliant tools/list response strips internal kind metadata,
+// so we hit /admin/info/mcp/tools to show what kind each tool is and where it dispatches.
+async function mcpRefreshCatalog() {
+  const body = document.getElementById('mcpCatalogBody');
+  if (!body) return;
+  body.innerHTML = '<span style="color:var(--dim)">loading...</span>';
+  try {
+    const res = await fetch('/admin/info/mcp/tools');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const tools = await res.json();
+    if (!Array.isArray(tools) || tools.length === 0) {
+      body.innerHTML = '<span style="color:var(--dim)">No tools registered yet.</span>';
+      return;
+    }
+    const rows = tools.map(t => {
+      const kind = t.openApiPromoted
+        ? `<span class="tag" style="background:#1e3a2e;color:var(--green)">OpenAPI ${t.httpMethod || ''} ${t.httpPathTemplate || ''}</span>`
+        : (t.mcpServer
+            ? '<span class="tag" style="background:#2a1e3a;color:var(--pink)">MCP Server</span>'
+            : '<span class="tag" style="background:#1e2e3a;color:var(--cyan)">REST tag-defined</span>');
+      const stream = t.streaming ? '<span class="tag" style="background:#3a2a1e;color:var(--orange)">streaming</span>' : '';
+      const desc = (t.description || '').replace(/[<>]/g, c => c === '<' ? '&lt;' : '&gt;');
+      return `<tr>
+        <td style="padding:0.3rem 0.5rem;font-family:monospace;color:var(--accent);">${t.name}</td>
+        <td style="padding:0.3rem 0.5rem;color:var(--dim);">${t.serviceId || ''}</td>
+        <td style="padding:0.3rem 0.5rem;">${kind} ${stream}</td>
+        <td style="padding:0.3rem 0.5rem;color:var(--dim);font-size:0.72rem;">${desc.length > 80 ? desc.substring(0, 80) + '…' : desc}</td>
+      </tr>`;
+    }).join('');
+    body.innerHTML = `
+      <table style="width:100%;border-collapse:collapse;">
+        <thead><tr style="border-bottom:1px solid var(--border);">
+          <th style="text-align:left;padding:0.3rem 0.5rem;color:var(--dim);font-weight:600;">Tool</th>
+          <th style="text-align:left;padding:0.3rem 0.5rem;color:var(--dim);font-weight:600;">Service</th>
+          <th style="text-align:left;padding:0.3rem 0.5rem;color:var(--dim);font-weight:600;">Kind</th>
+          <th style="text-align:left;padding:0.3rem 0.5rem;color:var(--dim);font-weight:600;">Description</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  } catch (e) {
+    body.innerHTML = `<span style="color:var(--red)">Failed to load: ${e.message}</span>`;
   }
 }
 

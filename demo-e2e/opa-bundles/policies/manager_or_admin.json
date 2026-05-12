@@ -1,0 +1,7 @@
+{
+  "capi": {
+    "manager_or_admin": {
+      "allowed_roles": ["admin", "manager"]
+    }
+  }
+}
