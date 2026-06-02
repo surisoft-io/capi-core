@@ -4,12 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.surisoft.capi.configuration.CAPIConfiguration;
 import io.surisoft.capi.processor.ServiceCapiInstanceMapper;
-import io.surisoft.capi.schema.ConsulObject;
-import io.surisoft.capi.schema.Mapping;
-import io.surisoft.capi.schema.Service;
-import io.surisoft.capi.schema.ServiceCapiInstances;
-import io.surisoft.capi.schema.ServiceMeta;
-import io.surisoft.capi.schema.State;
+import io.surisoft.capi.schema.*;
 import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.ServiceUtils;
 import org.cache2k.Cache;
@@ -23,17 +18,13 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
+import java.time.Instant;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class ConsulCatalogService {
 
@@ -58,9 +49,20 @@ public class ConsulCatalogService {
     private final String capiInstanceName;
     private final boolean strictToInstanceName;
     private final String serviceMetaExtrasPrefix; // nullable
+    private final Map<String, InvalidService> invalidServiceMap;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private volatile HttpClient httpClient;
+
+    /**
+     * Dedicated executor for per-host catalog fetches. Replaces the implicit use of
+     * ForkJoinPool.commonPool() that supplyAsync(...) defaults to. Three reasons:
+     *  - Bounded concurrency: at most numHosts catalog tasks run at once.
+     *  - Named, daemon threads ("consul-catalog-N") show up in thread dumps / Dynatrace.
+     *  - Lowered priority hints the OS scheduler to favor XNIO request threads under
+     *    contention. This is JVM/OS best-effort, not a hard guarantee.
+     */
+    private final ExecutorService catalogExecutor;
 
     public ConsulCatalogService(List<CAPIConfiguration.HostConfig> consulHosts,
                                 Cache<String, Service> serviceCache,
@@ -69,7 +71,8 @@ public class ConsulCatalogService {
                                 HttpClient httpClient,
                                 String capiInstanceName,
                                 boolean strictToInstanceName,
-                                String serviceMetaExtrasPrefix) {
+                                String serviceMetaExtrasPrefix,
+                                Map<String, InvalidService> invalidServiceMap) {
         this.consulHosts = consulHosts;
         this.serviceCache = serviceCache;
         this.serviceUtils = serviceUtils;
@@ -78,6 +81,29 @@ public class ConsulCatalogService {
         this.capiInstanceName = capiInstanceName;
         this.strictToInstanceName = strictToInstanceName;
         this.serviceMetaExtrasPrefix = serviceMetaExtrasPrefix;
+        this.invalidServiceMap = invalidServiceMap;
+
+        int poolSize = Math.max(1, consulHosts == null ? 1 : consulHosts.size());
+        AtomicInteger threadCounter = new AtomicInteger(1);
+        this.catalogExecutor = Executors.newFixedThreadPool(poolSize, r -> {
+            Thread t = new Thread(r, "consul-catalog-" + threadCounter.getAndIncrement());
+            t.setDaemon(true);
+            t.setPriority(Math.max(Thread.MIN_PRIORITY, Thread.NORM_PRIORITY - 1));
+            return t;
+        });
+    }
+
+    /** Releases the dedicated executor. Safe to call multiple times. */
+    public void shutdown() {
+        catalogExecutor.shutdown();
+        try {
+            if (!catalogExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                catalogExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            catalogExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 
     public void setHttpClient(HttpClient httpClient) {
@@ -86,10 +112,26 @@ public class ConsulCatalogService {
 
     public void runCycle() {
         long start = System.currentTimeMillis();
+        invalidServiceMap.clear();
         CycleResult result = fetchAndUnion();
         Map<String, Service> incoming = buildServices(result.reconciledObjects());
-        prefetchOpenApiSpecs(incoming);
+
+        // Reconcile FIRST to identify what's actually new or changed. The old
+        // ConsulNodeDiscovery did this — fetching OpenAPI for every service every
+        // cycle (the previous behavior here) multiplied the cycle's work by the
+        // number of services with an open-api endpoint, regardless of whether
+        // anything actually changed, and turned every upstream blip into hundreds
+        // of timeout waits charged to the scheduler thread.
         ServiceDelta delta = reconcile(incoming, result);
+
+        // Only fetch OpenAPI for services that genuinely need it. Failed fetches
+        // are dropped from the delta so the route isn't registered with a stale or
+        // missing spec.
+        Set<String> failedFetches = prefetchOpenApiForDelta(delta);
+        if (!failedFetches.isEmpty()) {
+            delta = filterFailedFetches(delta, failedFetches);
+        }
+
         apply(delta);
         maybeFlipReadinessLatch(result);
         emitSummary(result, delta, System.currentTimeMillis() - start);
@@ -118,7 +160,7 @@ public class ConsulCatalogService {
     }
 
     private CompletableFuture<HostResult> fetchHost(CAPIConfiguration.HostConfig host) {
-        return CompletableFuture.supplyAsync(() -> fetchHostSync(host));
+        return CompletableFuture.supplyAsync(() -> fetchHostSync(host), catalogExecutor);
     }
 
     private HostResult fetchHostSync(CAPIConfiguration.HostConfig host) {
@@ -365,31 +407,102 @@ public class ConsulCatalogService {
     // OpenAPI pre-fetch (parallel)
     // -------------------------------------------------------------------------
 
-    private void prefetchOpenApiSpecs(Map<String, Service> incoming) {
+    /**
+     * Decides which services in this cycle's delta need an OpenAPI fetch and runs
+     * them. The rules — matching the pre-rewrite ConsulNodeDiscovery behavior:
+     *  - delta.added: needs fetch (new service, no cached spec).
+     *  - delta.changed where the open-api endpoint URL itself changed: needs fetch.
+     *  - delta.changed where the URL is the same: copy the previously-parsed
+     *    OpenAPI from oldSvc to newSvc, no fetch needed.
+     * Returns the set of service IDs whose fetch failed — caller drops them from
+     * the delta so we don't replace working state with a half-built route.
+     */
+    private Set<String> prefetchOpenApiForDelta(ServiceDelta delta) {
+        Map<String, Service> toFetch = new LinkedHashMap<>();
+        for (Service s : delta.added()) {
+            toFetch.put(s.getId(), s);
+        }
+        for (ServiceDelta.ChangedPair p : delta.changed()) {
+            String oldEndpoint = p.oldSvc().getServiceMeta() != null
+                    ? p.oldSvc().getServiceMeta().getOpenApiEndpoint() : null;
+            String newEndpoint = p.newSvc().getServiceMeta() != null
+                    ? p.newSvc().getServiceMeta().getOpenApiEndpoint() : null;
+            if (Objects.equals(oldEndpoint, newEndpoint) && p.oldSvc().getOpenAPI() != null) {
+                // Endpoint URL unchanged — the cached parsed spec is still valid.
+                p.newSvc().setOpenAPI(p.oldSvc().getOpenAPI());
+            } else {
+                toFetch.put(p.newSvc().getId(), p.newSvc());
+            }
+        }
+        if (toFetch.isEmpty()) {
+            return Set.of();
+        }
+        return prefetchOpenApiSpecs(toFetch);
+    }
+
+    /**
+     * Returns the IDs of services whose fetch or parse failed. The caller is
+     * responsible for evicting them from the delta.
+     */
+    private Set<String> prefetchOpenApiSpecs(Map<String, Service> services) {
+        Set<String> failed = new HashSet<>();
         Map<Service, CompletableFuture<HttpResponse<String>>> futures = new LinkedHashMap<>();
-        for (Service svc : incoming.values()) {
+        for (Service svc : services.values()) {
             if (serviceUtils.needsOpenApiFetch(svc)) {
                 try {
                     futures.put(svc, httpClient.sendAsync(serviceUtils.buildOpenApiRequest(svc), BodyHandlers.ofString()));
                 } catch (Exception e) {
+                    invalidServiceMap.put(svc.getId(), new InvalidService(
+                            svc.getId(),
+                            svc.getServiceMeta().getGroup(),
+                            svc.getServiceMeta().getOpenApiEndpoint(),
+                            InvalidService.Reason.OPENAPI_FETCH_FAILED,
+                            e.getMessage(),
+                            Instant.now()));
+                    failed.add(svc.getId());
                     log.warn("Failed to build OpenAPI request for {}: {}", svc.getId(), e.getMessage());
                 }
             }
         }
-        List<String> drop = new ArrayList<>();
         for (Map.Entry<Service, CompletableFuture<HttpResponse<String>>> e : futures.entrySet()) {
             try {
                 HttpResponse<String> response = e.getValue().get(PER_REQUEST_TIMEOUT.toMillis() * 2, TimeUnit.MILLISECONDS);
                 if (!serviceUtils.processOpenApiSpec(e.getKey(), response)) {
-                    drop.add(e.getKey().getId());
+                    invalidServiceMap.put(e.getKey().getId(), new InvalidService(
+                            e.getKey().getId(),
+                            e.getKey().getServiceMeta().getGroup(),
+                            e.getKey().getServiceMeta().getOpenApiEndpoint(),
+                            InvalidService.Reason.OPENAPI_INVALID_SPEC,
+                            "Failed to build OpenAPI, invalid spec.",
+                            Instant.now()));
+                    failed.add(e.getKey().getId());
                 }
             } catch (Exception ex) {
+                invalidServiceMap.put(e.getKey().getId(), new InvalidService(
+                        e.getKey().getId(),
+                        e.getKey().getServiceMeta().getGroup(),
+                        e.getKey().getServiceMeta().getOpenApiEndpoint(),
+                        InvalidService.Reason.OPENAPI_FETCH_FAILED,
+                        ex.getMessage(),
+                        Instant.now()));
                 log.warn("Failed to fetch OpenAPI spec for {}: {}", e.getKey().getId(), ex.getMessage());
-                drop.add(e.getKey().getId());
+                failed.add(e.getKey().getId());
             }
         }
-        // Services whose OpenAPI fetch failed / produced invalid spec: do not register this cycle.
-        drop.forEach(incoming::remove);
+        return failed;
+    }
+
+    /** Removes services whose OpenAPI fetch failed from added/changed lists. The
+     *  cached entry (if any) is left in place, so a changed service whose new
+     *  spec failed keeps serving with its previous spec until the next cycle. */
+    private ServiceDelta filterFailedFetches(ServiceDelta delta, Set<String> failed) {
+        List<Service> filteredAdded = delta.added().stream()
+                .filter(s -> !failed.contains(s.getId()))
+                .toList();
+        List<ServiceDelta.ChangedPair> filteredChanged = delta.changed().stream()
+                .filter(p -> !failed.contains(p.newSvc().getId()))
+                .toList();
+        return new ServiceDelta(filteredAdded, filteredChanged, delta.gone());
     }
 
     // -------------------------------------------------------------------------
@@ -452,6 +565,12 @@ public class ConsulCatalogService {
                 if (h.supports(s)) h.onDisappear(s);
             }
             serviceCache.remove(s.getId());
+        }
+        // All onAppear / onChange / onDisappear have run; each handler now publishes
+        // its post-cycle snapshot atomically. Readers (RestGateway) flip from the
+        // previous cycle's snapshot to this one in a single volatile-store.
+        for (TransportHandler h : transportHandlers) {
+            h.afterCycle();
         }
     }
 

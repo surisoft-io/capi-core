@@ -6,7 +6,7 @@ import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.schema.State;
 import io.surisoft.capi.schema.WebsocketClient;
 import io.surisoft.capi.service.OpaWasmService;
-import io.surisoft.capi.utils.Constants;
+import io.surisoft.capi.service.RestClientSnapshot;
 import io.surisoft.capi.utils.HttpUtils;
 import io.surisoft.capi.utils.WebsocketUtils;
 import org.slf4j.Logger;
@@ -24,19 +24,22 @@ public class RestTransportHandler implements TransportHandler {
     private final HttpUtils httpUtils;
     private final OpaWasmService opaWasmService;
     private final int globalResponseTimeout;
+    private final RestClientSnapshot restClientSnapshot;
 
     public RestTransportHandler(boolean enabled,
                                 Map<String, RestClient> restClientMap,
                                 WebsocketUtils websocketUtils,
                                 HttpUtils httpUtils,
                                 OpaWasmService opaWasmService,
-                                int globalResponseTimeout) {
+                                int globalResponseTimeout,
+                                RestClientSnapshot restClientSnapshot) {
         this.enabled = enabled;
         this.restClientMap = restClientMap;
         this.websocketUtils = websocketUtils;
         this.httpUtils = httpUtils;
         this.opaWasmService = opaWasmService;
         this.globalResponseTimeout = globalResponseTimeout;
+        this.restClientSnapshot = restClientSnapshot;
     }
 
     @Override
@@ -75,6 +78,13 @@ public class RestTransportHandler implements TransportHandler {
     public void onDisappear(Service service) {
         if (restClientMap.remove(service.getContext()) != null) {
             log.info("REST client removed: {}", service.getContext());
+        }
+    }
+
+    @Override
+    public void afterCycle() {
+        if (restClientSnapshot != null) {
+            restClientSnapshot.publish(restClientMap);
         }
     }
 

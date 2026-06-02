@@ -82,7 +82,14 @@ capi:
     enabled: false
     endpoint: http://opa:8181
     wasmEnabled: false
+    # Full URL of the wasm bundle — single combined bundle with all policies
+    # as separate entrypoints (OPA's recommended layout, see
+    # https://www.openpolicyagent.org/docs/management-bundles).
+    # Example: http://opa-bundle-server:8080/bundles/bundle.tar.gz
     wasmBundleUrl: ""
+    # Optional bearer token sent as Authorization: Bearer <token> on every
+    # bundle fetch. Leave blank for an unauthenticated bundle server.
+    wasmBundleToken: ""
     wasmBundlePollIntervalSeconds: 60
     wasmPoolSize: 10
 

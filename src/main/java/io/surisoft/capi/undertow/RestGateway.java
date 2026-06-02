@@ -1,7 +1,10 @@
 package io.surisoft.capi.undertow;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.surisoft.capi.exception.AuthorizationException;
 import io.surisoft.capi.exception.HttpErrorHandler;
+import io.surisoft.capi.metrics.OpenAPIDefinition;
 import io.surisoft.capi.processor.ThrottleProcessor;
 import io.surisoft.capi.service.consul.ConsulCatalogService;
 import io.swagger.v3.oas.models.OpenAPI;
@@ -11,7 +14,9 @@ import io.surisoft.capi.schema.ApiKeyEntry;
 import io.surisoft.capi.schema.ApiKeyStoreEntry;
 import io.surisoft.capi.schema.RestClient;
 import io.surisoft.capi.schema.Service;
+import io.surisoft.capi.schema.ServiceMeta;
 import io.surisoft.capi.service.OpaWasmService;
+import io.surisoft.capi.service.RestClientSnapshot;
 import io.surisoft.capi.tracer.CapiTracer;
 import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.HttpUtils;
@@ -65,9 +70,19 @@ public class RestGateway {
     private String publicEndpointScheme;
     @Nullable
     private MeterRegistry meterRegistry;
+    @Nullable
+    private OpenAPIDefinition openAPIDefinition;
 
+    private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpErrorHandler httpErrorHandler;
     private Undertow server;
+
+    /** Atomically-published route snapshot. Initialized from the constructor map so
+     *  tests that pre-populate restClientMap and never wire a separate snapshot still
+     *  see their routes. Production overrides via setRestClientSnapshot(). */
+    private volatile RestClientSnapshot restClientSnapshot;
+
+    private static final String DEFINITIONS_OPENAPI_PREFIX = "/definitions/openapi/";
 
     public RestGateway(int port,
                        int ioThreads,
@@ -92,6 +107,22 @@ public class RestGateway {
         managedHeaders.put("Access-Control-Allow-Headers", StringUtils.join(accessControlAllowHeaders, ","));
 
         httpErrorHandler = new HttpErrorHandler(httpUtils);
+
+        // Initialize the snapshot from whatever the live map currently contains.
+        // This keeps existing tests (which pre-populate restClientMap then construct
+        // the gateway) working unchanged, and gives us a safe empty snapshot in prod
+        // until the first Consul cycle publishes one.
+        RestClientSnapshot initial = new RestClientSnapshot();
+        initial.publish(restClientMap);
+        this.restClientSnapshot = initial;
+    }
+
+    /** Production wiring: replace the constructor-initialized snapshot with the
+     *  shared instance the Consul cycle publishes to. */
+    public void setRestClientSnapshot(@Nullable RestClientSnapshot restClientSnapshot) {
+        if (restClientSnapshot != null) {
+            this.restClientSnapshot = restClientSnapshot;
+        }
     }
 
     public void setThrottleProcessor(@Nullable ThrottleProcessor throttleProcessor) {
@@ -116,6 +147,12 @@ public class RestGateway {
 
     public void setPublicEndpointScheme(@Nullable String publicEndpointScheme) {
         this.publicEndpointScheme = publicEndpointScheme;
+    }
+
+    public void setPublicEndpoint(@Nullable String publicEndpoint) {
+        if (publicEndpoint != null && !publicEndpoint.isEmpty()) {
+            this.openAPIDefinition = new OpenAPIDefinition(serviceCache, publicEndpoint);
+        }
     }
 
     public void setMeterRegistry(@Nullable MeterRegistry meterRegistry) {
@@ -190,6 +227,12 @@ public class RestGateway {
                 return;
             }
 
+            // OpenAPI definition endpoint — outside the routing context path, no per-route lookup
+            if (requestPath.startsWith(DEFINITIONS_OPENAPI_PREFIX)) {
+                handleOpenApiDefinition(exchange, requestPath.substring(DEFINITIONS_OPENAPI_PREFIX.length()));
+                return;
+            }
+
             // Reject event-stream requests on REST gateway
             if (isEventStream(exchange)) {
                 httpErrorHandler.sendError(exchange, 400, "Event Stream not allowed in this route, contact your System Administrator");
@@ -198,12 +241,12 @@ public class RestGateway {
 
             // Parse service ID from path: /api/serviceName/group/...
             String restClientId = extractServiceId(requestPath);
-            if (restClientId == null || !restClientMap.containsKey(restClientId)) {
+            Map<String, RestClient> activeRoutes = restClientSnapshot.current();
+            RestClient restClient = (restClientId == null) ? null : activeRoutes.get(restClientId);
+            if (restClient == null) {
                 httpErrorHandler.sendError(exchange, 404, "The requested route was not found, please try again later on.", contextPath);
                 return;
             }
-
-            RestClient restClient = restClientMap.get(restClientId);
 
             // Record metrics via completion listener
             if (meterRegistry != null) {
@@ -284,25 +327,30 @@ public class RestGateway {
                         return;
                     }
 
-                    // Prefer Wasm (in-process, microseconds) over HTTP (network round-trip)
-                    if (opaWasmService != null && opaWasmService.isReady(restClient.getOpaRego())) {
-                        // Verify JWT signature before trusting decoded claims
-                        try {
-                            httpUtils.authorizeRequest(accessToken);
-                        } catch (AuthorizationException e) {
-                            httpErrorHandler.sendError(exchange, 403, "Invalid token signature");
-                            return;
-                        }
-                        OpaResult opaResult = opaWasmService.evaluate(restClient.getOpaRego(), accessToken, true);
-                        if (opaResult == null || !opaResult.isAllowed()) {
-                            httpErrorHandler.sendError(exchange, 403, "Access denied by policy");
-                            return;
-                        }
-                    } else {
-                        // Wasm policy pool not loaded yet (cold start, bundle server unreachable,
-                        // policy load threw). Fail closed and tell well-behaved clients to retry.
+                    if (opaWasmService == null || !opaWasmService.isReady()) {
+                        // Pool not loaded yet (cold start, bundle server unreachable,
+                        // bundle load threw). Transient — tell well-behaved clients to retry.
                         exchange.getResponseHeaders().put(Headers.RETRY_AFTER, "1");
                         httpErrorHandler.sendError(exchange, 503, "Policy engine not ready");
+                        return;
+                    }
+                    if (!opaWasmService.hasPolicy(restClient.getOpaRego())) {
+                        // Service references a policy the bundle doesn't declare — config error,
+                        // not transient. Reject with a distinct status so retries don't paper over it.
+                        httpErrorHandler.sendError(exchange, 403,
+                                "Unknown policy: " + restClient.getOpaRego());
+                        return;
+                    }
+                    // Verify JWT signature before trusting decoded claims
+                    try {
+                        httpUtils.authorizeRequest(accessToken);
+                    } catch (AuthorizationException e) {
+                        httpErrorHandler.sendError(exchange, 403, "Invalid token signature");
+                        return;
+                    }
+                    OpaResult opaResult = opaWasmService.evaluate(restClient.getCanonicalServiceId(), restClient.getOpaRego(), accessToken, true);
+                    if (opaResult == null || !opaResult.isAllowed()) {
+                        httpErrorHandler.sendError(exchange, 403, "Access denied by policy");
                         return;
                     }
                 } catch (AuthorizationException e) {
@@ -437,6 +485,48 @@ public class RestGateway {
         return null; // Authorized
     }
 
+    private void handleOpenApiDefinition(HttpServerExchange exchange, String serviceId) {
+        if (!exchange.getRequestMethod().equals(Methods.GET)) {
+            httpErrorHandler.sendError(exchange, 405, "Method Not Allowed");
+            return;
+        }
+        if (serviceId.isEmpty() || serviceId.contains("/") || openAPIDefinition == null) {
+            httpErrorHandler.sendError(exchange, 404, "Not Found");
+            return;
+        }
+        Service service = serviceCache.get(serviceId);
+        ServiceMeta meta = service != null ? service.getServiceMeta() : null;
+        if (meta == null || !meta.isExposeOpenApiDefinition()) {
+            httpErrorHandler.sendError(exchange, 404, "Not Found");
+            return;
+        }
+        if (meta.isSecureOpenApiDefinition()) {
+            String accessToken;
+            try {
+                accessToken = httpUtils.processAuthorizationAccessToken(exchange);
+            } catch (AuthorizationException e) {
+                httpErrorHandler.sendError(exchange, 404, "Not Found");
+                return;
+            }
+            if (accessToken == null || !httpUtils.isAuthorized(accessToken, meta.getSubscriptionGroup())) {
+                httpErrorHandler.sendError(exchange, 404, "Not Found");
+                return;
+            }
+        }
+        Map<String, Object> definition = openAPIDefinition.getCacheOpenApiDefinition(service, serviceId);
+        if (definition == null) {
+            httpErrorHandler.sendError(exchange, 404, "Not Found");
+            return;
+        }
+        try {
+            exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+            exchange.setStatusCode(StatusCodes.OK);
+            exchange.getResponseSender().send(objectMapper.writeValueAsString(definition));
+        } catch (JsonProcessingException e) {
+            httpErrorHandler.sendError(exchange, 404, "Not Found");
+        }
+    }
+
     private String checkAuthorization(HttpServerExchange exchange, RestClient restClient) {
         try {
             String accessToken = httpUtils.processAuthorizationAccessToken(exchange);
@@ -455,7 +545,7 @@ public class RestGateway {
         }
     }
 
-    private String checkOpenApi(HttpServerExchange exchange, RestClient restClient, String forwardPath) {
+    private String  checkOpenApi(HttpServerExchange exchange, RestClient restClient, String forwardPath) {
         OpenAPI openAPI = restClient.getOpenAPI();
         String callingMethod = exchange.getRequestMethod().toString().toLowerCase();
 

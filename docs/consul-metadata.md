@@ -148,7 +148,7 @@ This allows 100 calls per 60 seconds. Throttle state is distributed across all C
 
 ### 6. Expose OpenAPI Spec
 
-If your service has an OpenAPI endpoint, CAPI can fetch and expose it:
+If your service has an OpenAPI endpoint, CAPI can fetch it at registration time and re-publish it to API consumers:
 
 ```bash
 curl -X PUT http://localhost:8500/v1/agent/service/register \
@@ -167,13 +167,17 @@ curl -X PUT http://localhost:8500/v1/agent/service/register \
   }'
 ```
 
-Retrieve the spec via the Admin API:
+Consumers retrieve the spec on the main gateway port (default `8380`), outside the configured `contextPath`:
 
 ```bash
-curl http://localhost:8381/info/openapi/order-service:v1
+curl http://localhost:8380/definitions/openapi/order-service:v1
 ```
 
-Add `"secure-open-api-definition": "true"` to require OAuth2 authentication to view the spec.
+CAPI returns the upstream spec with `servers[0].url` rewritten to point at the gateway and `info.title` / `info.description` replaced with CAPI-generated values. Without `expose-open-api-definition: "true"`, the endpoint returns `404`.
+
+Add `"secure-open-api-definition": "true"` to require a Bearer token whose claims include the service's `subscription-group`. Missing or unauthorized tokens also return `404` (the endpoint is silent about whether the service exists when secured).
+
+> Operators can also inspect any cached spec — regardless of the opt-in flag — via the admin-port endpoint at `http://localhost:8381/info/openapi/<service-id>`. That endpoint is unauthenticated and intended for diagnostics, not for client traffic.
 
 ### 7. Register a WebSocket Service
 
@@ -330,9 +334,9 @@ CAPI automatically detects the removal on the next discovery cycle and removes t
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `open-api` | — | URL of the service's OpenAPI spec endpoint. |
-| `expose-open-api-definition` | `false` | When `true`, the spec is available via `GET /info/openapi/<service-id>` on the Admin port. |
-| `secure-open-api-definition` | `false` | When `true`, requires OAuth2 authentication to view the OpenAPI spec. |
+| `open-api` | — | URL of the service's OpenAPI spec endpoint. Fetched at registration time, parsed, and cached in memory. |
+| `expose-open-api-definition` | `false` | When `true`, the cached spec is published to consumers at `GET /definitions/openapi/<service-id>` on the main gateway port (outside `contextPath`). When `false`, that endpoint returns `404`. |
+| `secure-open-api-definition` | `false` | When `true`, the public endpoint above requires a Bearer token whose claims include this service's `subscription-group`. Unauthorized requests get `404`, not `401`. |
 
 ### MCP
 

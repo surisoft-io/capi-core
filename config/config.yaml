@@ -35,9 +35,9 @@ capi:
     path:
     encoded:
     password:
-  consulCatalogDiscoverInterval: 10000
+  consulCatalogDiscoverInterval: 60000
   consulHosts:
-    - endpoint: https://localhost:8500
+    - endpoint: http://localhost:8500
       token:
   consulStore:
     enabled: false
@@ -52,7 +52,14 @@ capi:
       - https://localhost:8080/keycloak/realms/capi/protocol/openid-connect/certs
   opa:
     enabled: false
+    # Full URL of the wasm bundle. CAPI now consumes a single combined bundle
+    # (one .tar.gz with multiple entrypoints) — OPA's recommended layout per
+    # https://www.openpolicyagent.org/docs/management-bundles
+    # Example: http://opa-bundle-server:8080/bundles/bundle.tar.gz
     wasmBundleUrl:
+    # Optional bearer token sent as Authorization: Bearer <token> on every
+    # bundle fetch. Leave blank for an unauthenticated bundle server.
+    wasmBundleToken:
     wasmBundlePollIntervalSeconds: 60
     wasmPoolSize: 10
   traces:

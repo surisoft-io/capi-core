@@ -373,6 +373,7 @@ public class CAPIConfiguration {
     public static class Opa {
         private boolean enabled;
         private String wasmBundleUrl;
+        private String wasmBundleToken;
         private int wasmBundlePollIntervalSeconds = 60;
         private int wasmPoolSize = 10;
 
@@ -380,6 +381,8 @@ public class CAPIConfiguration {
         public void setEnabled(boolean enabled) { this.enabled = enabled; }
         public String getWasmBundleUrl() { return wasmBundleUrl; }
         public void setWasmBundleUrl(String wasmBundleUrl) { this.wasmBundleUrl = wasmBundleUrl; }
+        public String getWasmBundleToken() { return wasmBundleToken; }
+        public void setWasmBundleToken(String wasmBundleToken) { this.wasmBundleToken = wasmBundleToken; }
         public int getWasmBundlePollIntervalSeconds() { return wasmBundlePollIntervalSeconds; }
         public void setWasmBundlePollIntervalSeconds(int v) { this.wasmBundlePollIntervalSeconds = v; }
         public int getWasmPoolSize() { return wasmPoolSize; }

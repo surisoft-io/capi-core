@@ -80,6 +80,7 @@ data:
         endpoint: {{ .Values.capi.opa.endpoint }}
         wasmEnabled: {{ .Values.capi.opa.wasmEnabled }}
         wasmBundleUrl: {{ .Values.capi.opa.wasmBundleUrl | quote }}
+        wasmBundleToken: {{ .Values.capi.opa.wasmBundleToken | quote }}
         wasmBundlePollIntervalSeconds: {{ .Values.capi.opa.wasmBundlePollIntervalSeconds }}
         wasmPoolSize: {{ .Values.capi.opa.wasmPoolSize }}
       traces:

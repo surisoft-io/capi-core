@@ -11,6 +11,7 @@ public class CapiInfo {
     private String capiVersion;
     private Date startTimestamp;
     private Integer totalRoutes;
+    private Integer invalidServiceCount;
     private String uptime;
     private String capiNameSpace;
     private boolean oauth2Enabled;
@@ -62,6 +63,14 @@ public class CapiInfo {
 
     public void setTotalRoutes(Integer totalRoutes) {
         this.totalRoutes = totalRoutes;
+    }
+
+    public Integer getInvalidServiceCount() {
+        return invalidServiceCount;
+    }
+
+    public void setInvalidServiceCount(Integer invalidServiceCount) {
+        this.invalidServiceCount = invalidServiceCount;
     }
 
     public String getUptime() {

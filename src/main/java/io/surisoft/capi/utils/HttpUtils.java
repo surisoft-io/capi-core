@@ -244,7 +244,7 @@ public class HttpUtils {
     public boolean isAuthorized(String accessToken, String contextPath, Service service, OpaWasmService opaWasmService) {
         try {
             if(service.getServiceMeta().getOpaRego() != null && opaWasmService != null && opaWasmService.isReady(service.getServiceMeta().getOpaRego()) ) {
-                OpaResult opaResult = opaWasmService.evaluate(service.getServiceMeta().getOpaRego(), accessToken, true);
+                OpaResult opaResult = opaWasmService.evaluate(service.getId(), service.getServiceMeta().getOpaRego(), accessToken, true);
                 if (opaResult == null || !opaResult.isAllowed()) {
                     return false;
                 }

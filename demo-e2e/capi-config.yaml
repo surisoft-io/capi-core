@@ -49,7 +49,7 @@ capi:
       - http://keycloak:8080/keycloak/realms/e2e-demo/protocol/openid-connect/certs
   opa:
     enabled: true
-    wasmBundleUrl: http://opa-bundle-server:8080/bundles/
+    wasmBundleUrl: http://opa-bundle-server:8080/bundles/bundle.tar.gz
     wasmBundlePollIntervalSeconds: 30
     wasmPoolSize: 10
   traces:
