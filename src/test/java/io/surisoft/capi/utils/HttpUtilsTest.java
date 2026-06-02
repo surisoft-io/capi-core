@@ -512,9 +512,10 @@ class HttpUtilsTest {
         OpaResult opaResult = new OpaResult();
         opaResult.setResult(true);
         when(opaWasmService.isReady("my-rego")).thenReturn(true);
-        when(opaWasmService.evaluate("my-rego", "token", true)).thenReturn(opaResult);
+        when(opaWasmService.evaluate("svc-1", "my-rego", "token", true)).thenReturn(opaResult);
 
         Service service = new Service();
+        service.setId("svc-1");
         ServiceMeta meta = new ServiceMeta();
         meta.setOpaRego("my-rego");
         service.setServiceMeta(meta);
@@ -529,9 +530,10 @@ class HttpUtilsTest {
         OpaResult opaResult = new OpaResult();
         opaResult.setResult(false);
         when(opaWasmService.isReady("my-rego")).thenReturn(true);
-        when(opaWasmService.evaluate("my-rego", "token", true)).thenReturn(opaResult);
+        when(opaWasmService.evaluate("svc-1", "my-rego", "token", true)).thenReturn(opaResult);
 
         Service service = new Service();
+        service.setId("svc-1");
         ServiceMeta meta = new ServiceMeta();
         meta.setOpaRego("my-rego");
         service.setServiceMeta(meta);

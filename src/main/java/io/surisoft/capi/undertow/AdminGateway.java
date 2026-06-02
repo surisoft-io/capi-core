@@ -2,13 +2,12 @@ package io.surisoft.capi.undertow;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import io.surisoft.capi.configuration.CAPIConfiguration;
 import io.surisoft.capi.metrics.*;
-import io.surisoft.capi.schema.McpTool;
-import io.surisoft.capi.schema.Service;
-import io.surisoft.capi.schema.RestClient;
-import io.surisoft.capi.schema.WebsocketClient;
+import io.surisoft.capi.schema.*;
 import io.surisoft.capi.service.CapiTrustManager;
 import io.surisoft.capi.service.consul.ConsulCatalogService;
 import io.surisoft.capi.service.ConsulStore;
@@ -38,20 +37,25 @@ public class AdminGateway implements AutoCloseable {
     private final Cache<String, Service> serviceCache;
     private final SSLContext sslContext;
     ObjectMapper objectMapper = new ObjectMapper();
+    private static final ObjectMapper INVALID_SVC_MAPPER = new ObjectMapper()
+            .registerModule(new JavaTimeModule())
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
     private final CapiTrustManager capiTrustManager;
     private Map<String, WebsocketClient> websocketClients;
     private Map<String, RestClient> restClients;
     private McpToolRegistry mcpToolRegistry;
     private McpSessionStore mcpSessionStore;
     private ConsulStore consulStore;
+    private final Map<String, InvalidService> invalidServices;
 
-    public AdminGateway(int port, PrometheusMeterRegistry prometheusRegistry, CAPIConfiguration capiConfiguration, Cache<String, Service> serviceCache, SSLContext sslContext, CapiTrustManager capiTrustManager) {
+    public AdminGateway(int port, PrometheusMeterRegistry prometheusRegistry, CAPIConfiguration capiConfiguration, Cache<String, Service> serviceCache, SSLContext sslContext, CapiTrustManager capiTrustManager, Map<String, InvalidService> invalidServices) {
         this.port = port;
         this.prometheusRegistry = prometheusRegistry;
         this.capiConfiguration = capiConfiguration;
         this.serviceCache = serviceCache;
         this.sslContext = sslContext;
         this.capiTrustManager = capiTrustManager;
+        this.invalidServices = invalidServices;
     }
 
     public void start() {
@@ -67,7 +71,8 @@ public class AdminGateway implements AutoCloseable {
                 .addExactPath("/info/wsroutes", this::handleWsRoutes)
                 .addExactPath("/info/mcp", this::handleMcpInfo)
                 .addExactPath("/info/mcp/tools", this::handleMcpTools)
-                .addExactPath("/info/mcp/sessions", this::handleMcpSessions);
+                .addExactPath("/info/mcp/sessions", this::handleMcpSessions)
+                .addExactPath("/info/invalid-services", this::handleInvalidServices);
 
 
         Undertow.Builder builder = Undertow.builder();
@@ -110,6 +115,7 @@ public class AdminGateway implements AutoCloseable {
             links.put("mcp", Map.of("href", baseUrl + "/info/mcp"));
             links.put("mcp-tools", Map.of("href", baseUrl + "/info/mcp/tools"));
             links.put("mcp-sessions", Map.of("href", baseUrl + "/info/mcp/sessions"));
+            links.put("invalid-services", Map.of("href", baseUrl + "/info/invalid-services"));
 
             Map<String, Object> response = new LinkedHashMap<>();
             response.put("_links", links);
@@ -141,7 +147,7 @@ public class AdminGateway implements AutoCloseable {
 
     private void handleCapiInfo(HttpServerExchange exchange) {
         try {
-            Info info = new Info(capiConfiguration, restClients != null ? restClients.size() : 0);
+            Info info = new Info(capiConfiguration, restClients != null ? restClients.size() : 0, invalidServices.size());
             exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
             exchange.setStatusCode(StatusCodes.OK);
             exchange.getResponseSender().send(objectMapper.writeValueAsString(info.getInfo()));
@@ -215,7 +221,7 @@ public class AdminGateway implements AutoCloseable {
                 exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.NOT_FOUND, "Service not found")));
                 return;
             }
-            Object openApiObject = openAPIDefinition.getCacheOpenApiDefinition(service, objectMapper, serviceId);
+            Object openApiObject = openAPIDefinition.getCacheOpenApiDefinition(service, serviceId);
             if(openApiObject == null) {
                 exchange.setStatusCode(StatusCodes.NOT_FOUND);
                 exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.NOT_FOUND, "Open API not found for given Service")));
@@ -407,5 +413,20 @@ public class AdminGateway implements AutoCloseable {
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private void handleInvalidServices(HttpServerExchange exchange) {
+        exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+        try {
+            List<InvalidService> sorted = invalidServices.values().stream()
+                    .sorted(Comparator.comparing(InvalidService::serviceId))
+                    .toList();
+            exchange.setStatusCode(StatusCodes.OK);
+            exchange.getResponseSender().send(INVALID_SVC_MAPPER.writeValueAsString(sorted));
+        } catch (JsonProcessingException e) {
+            log.warn("Error serializing invalid services: {}", e.getMessage(), e);
+            exchange.getResponseSender().send("[]");
+        }
+
     }
 }

@@ -628,7 +628,7 @@ class McpGatewayTest {
             OpaWasmService opaWasmService = mock(OpaWasmService.class);
             OpaResult denied = new OpaResult();
             denied.setResult(false);
-            when(opaWasmService.evaluate("test-policy", "test-token-12345", true)).thenReturn(denied);
+            when(opaWasmService.evaluate("opa-deny-svc", "test-policy", "test-token-12345", true)).thenReturn(denied);
 
             HttpUtils opaHttpUtils = new HttpUtils(null, null);
 

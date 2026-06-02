@@ -9,12 +9,7 @@ import io.surisoft.capi.CAPIMain;
 import io.surisoft.capi.configuration.*;
 import io.surisoft.capi.oidc.Oauth2Provider;
 import io.surisoft.capi.processor.*;
-import io.surisoft.capi.schema.ApiKeyStoreEntry;
-import io.surisoft.capi.schema.ConsulKeyStoreEntry;
-import io.surisoft.capi.schema.GrpcClient;
-import io.surisoft.capi.schema.Service;
-import io.surisoft.capi.schema.RestClient;
-import io.surisoft.capi.schema.WebsocketClient;
+import io.surisoft.capi.schema.*;
 import io.surisoft.capi.service.*;
 import io.surisoft.capi.service.consul.*;
 import io.surisoft.capi.configuration.LocalCacheConfiguration;
@@ -64,7 +59,9 @@ public class Startup {
     private GrpcUtils grpcUtils;
     private final Map<String, WebsocketClient> webSocketClientMap = new java.util.concurrent.ConcurrentHashMap<>();
     private final Map<String, RestClient> restClientMap = new java.util.concurrent.ConcurrentHashMap<>();
+    private final RestClientSnapshot restClientSnapshot = new RestClientSnapshot();
     private final Map<String, GrpcClient> grpcClientMap = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<String, InvalidService> invalidServiceMap = new java.util.concurrent.ConcurrentHashMap<>();
     @Nullable
     private SSLContext undertowSslContext;
     @Nullable
@@ -204,6 +201,7 @@ public class Startup {
     private void startRouteConsistencyChecker() {
         routeConsistencyChecker = new RouteConsistencyChecker(serviceCache);
         routeConsistencyChecker.setRestClientMap(restClientMap);
+        routeConsistencyChecker.setRestClientSnapshot(restClientSnapshot);
     }
 
     private void startConsulCatalogService() {
@@ -219,7 +217,8 @@ public class Startup {
                     websocketUtils,
                     httpUtils,
                     opaWasmService,
-                    globalResponseTimeout));
+                    globalResponseTimeout,
+                    restClientSnapshot));
         }
         if (configuration.getWebsocket() != null) {
             handlers.add(new WebsocketTransportHandler(
@@ -246,7 +245,8 @@ public class Startup {
                 consulHttpClient,
                 configuration.getInstanceName(),
                 configuration.isStrictToInstanceName(),
-                extrasPrefix);
+                extrasPrefix,
+                invalidServiceMap);
     }
 
     private void createServiceCache() {
@@ -334,11 +334,14 @@ public class Startup {
     private void startOpaWasmService() {
         if(configuration.getOpa().isEnabled()) {
             if (configuration.getOpa().getWasmBundleUrl() != null) {
-                log.info("OPA Wasm enabled, bundle URL: {}, pool size: {}",
+                String token = configuration.getOpa().getWasmBundleToken();
+                log.info("OPA Wasm enabled, bundle URL: {}, pool size: {}, bundle auth: {}",
                         configuration.getOpa().getWasmBundleUrl(),
-                        configuration.getOpa().getWasmPoolSize());
+                        configuration.getOpa().getWasmPoolSize(),
+                        (token != null && !token.isBlank()) ? "bearer-token" : "none");
                 opaWasmService = new OpaWasmService(
                         configuration.getOpa().getWasmBundleUrl(),
+                        token,
                         configuration.getOpa().getWasmPoolSize(),
                         consulHttpClient
                 );
@@ -384,6 +387,10 @@ public class Startup {
 
     public Map<String, RestClient> getRestClientMap() {
         return restClientMap;
+    }
+
+    public RestClientSnapshot getRestClientSnapshot() {
+        return restClientSnapshot;
     }
 
     public @Nullable ThrottleProcessor getThrottleProcessor() {
@@ -474,5 +481,9 @@ public class Startup {
         httpClientBuilder.connectTimeout(Duration.ofSeconds(10));
         httpClientBuilder.executor(Executors.newVirtualThreadPerTaskExecutor());
         consulHttpClient = httpClientBuilder.build();
+    }
+
+    public Map<String, InvalidService> getInvalidServiceMap() {
+        return invalidServiceMap;
     }
 }

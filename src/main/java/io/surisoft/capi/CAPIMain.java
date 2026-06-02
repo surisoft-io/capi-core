@@ -102,7 +102,7 @@ public class CAPIMain {
     }
 
     private AdminGateway configureAdminGateway(Startup startup) {
-        AdminGateway adminGateway = new AdminGateway(capiConfiguration.getAdminPort(), startup.getPrometheusRegistry(), capiConfiguration, startup.getServiceCache(), startup.getUndertowSslContext(), startup.getCapiTrustManager());
+        AdminGateway adminGateway = new AdminGateway(capiConfiguration.getAdminPort(), startup.getPrometheusRegistry(), capiConfiguration, startup.getServiceCache(), startup.getUndertowSslContext(), startup.getCapiTrustManager(), startup.getInvalidServiceMap());
         if(startup.getWebSocketClientMap() != null) {
             adminGateway.setWebsocketClients(startup.getWebSocketClientMap());
         }
@@ -250,8 +250,10 @@ public class CAPIMain {
                 } catch (IllegalArgumentException e) {
                     log.warn("Invalid capi.publicEndpoint, ignoring for X-Forwarded-Proto: {}", publicEndpoint);
                 }
+                gateway.setPublicEndpoint(publicEndpoint);
             }
             gateway.setMeterRegistry(startup.getPrometheusRegistry());
+            gateway.setRestClientSnapshot(startup.getRestClientSnapshot());
             gateway.runProxy();
             return gateway;
         }

@@ -474,7 +474,7 @@ public class McpGateway implements AutoCloseable {
         if (accessToken == null) {
             return true;
         }
-        OpaResult opaResult = opaWasmService.evaluate(opaRego, accessToken, true);
+        OpaResult opaResult = opaWasmService.evaluate(service.getId(), opaRego, accessToken, true);
         return opaResult != null && opaResult.isAllowed();
     }
 

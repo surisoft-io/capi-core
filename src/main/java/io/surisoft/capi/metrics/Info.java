@@ -13,10 +13,12 @@ public class Info {
 
     private final CAPIConfiguration configuration;
     private final int totalRoutes;
+    private final int invalidServiceCount;
 
-    public Info(CAPIConfiguration configuration, int totalRoutes) {
+    public Info(CAPIConfiguration configuration, int totalRoutes, int invalidServiceCount) {
         this.configuration = configuration;
         this.totalRoutes = totalRoutes;
+        this.invalidServiceCount = invalidServiceCount;
     }
 
     public CapiInfo getInfo() {
@@ -26,6 +28,7 @@ public class Info {
         capiInfo.setUptime(Duration.ofMillis(uptimeMs).toString());
         capiInfo.setStartTimestamp(new java.util.Date(ManagementFactory.getRuntimeMXBean().getStartTime()));
         capiInfo.setTotalRoutes(totalRoutes);
+        capiInfo.setInvalidServiceCount(invalidServiceCount);
         capiInfo.setCapiVersion(configuration.getVersion());
         capiInfo.setCapiNameSpace(configuration.getInstanceName());
         capiInfo.setJavaVersion(String.valueOf(Runtime.version()));

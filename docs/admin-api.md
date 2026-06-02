@@ -87,15 +87,19 @@ curl http://localhost:8381/info/routes/order-service:v1
 
 Returns the full service object including mappings (upstream instances), metadata, load balancing configuration, and OpenAPI status.
 
-### OpenAPI
+### OpenAPI (diagnostics)
 
-Retrieve the OpenAPI spec for a service (the service must have `expose-open-api-definition: true` in its Consul metadata):
+Inspect the OpenAPI spec CAPI has cached for a service:
 
 ```bash
 curl http://localhost:8381/info/openapi/order-service:v1
 ```
 
-Returns the OpenAPI JSON spec with the server URL rewritten to point at the CAPI gateway.
+Returns the JSON spec with `servers[0].url` rewritten to point at the gateway, or `404` if CAPI has no cached spec for that service ID.
+
+This endpoint is **operator-facing**: it serves the spec regardless of `expose-open-api-definition` and does not authenticate the caller. Use it for diagnostics from inside the cluster.
+
+For the consumer-facing variant — which respects `expose-open-api-definition`, optionally requires a Bearer token via `secure-open-api-definition`, and lives on the main gateway port — see [`GET /definitions/openapi/<service-id>`](consul-metadata.md#6-expose-openapi-spec).
 
 ### Truststore
 

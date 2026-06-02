@@ -644,6 +644,11 @@ class RestGatewayTest {
         int port = pickPort();
         RestClient rc = createOpenRestClient("/throttled/v1");
         rc.setThrottle(true);
+        // Production sets this in RestTransportHandler#buildRestClient. The test
+        // helper doesn't, so we set it explicitly to match the serviceCache key
+        // below; otherwise the throttle lookup misses and the check is silently
+        // skipped — see the original 502 failures.
+        rc.setCanonicalServiceId("throttled:v1");
         restClientMap.put("/throttled/v1", rc);
 
         Service svc = new Service();
@@ -671,6 +676,8 @@ class RestGatewayTest {
         int port = pickPort();
         RestClient rc = createOpenRestClient("/throttled/v1");
         rc.setThrottle(true);
+        // See sibling test for why this is set explicitly.
+        rc.setCanonicalServiceId("throttled:v1");
         restClientMap.put("/throttled/v1", rc);
 
         Service svc = new Service();
@@ -886,6 +893,9 @@ class RestGatewayTest {
         int port = pickPort();
         RestClient rc = createOpenRestClient("/opa-svc/v1");
         rc.setOpaRego("my-rego-policy");
+        // Production passes restClient.getCanonicalServiceId() (the stable
+        // "<name>:<group>" form) to OpaWasmService.evaluate; mirror that here.
+        rc.setCanonicalServiceId("opa-svc:v1");
         restClientMap.put("/opa-svc/v1", rc);
 
         when(httpUtils.processAuthorizationAccessToken(any(io.undertow.server.HttpServerExchange.class))).thenReturn("opa-token");
@@ -893,8 +903,9 @@ class RestGatewayTest {
         OpaWasmService opaWasmService = mock(OpaWasmService.class);
         OpaResult denied = new OpaResult();
         denied.setResult(false);
-        when(opaWasmService.isReady("my-rego-policy")).thenReturn(true);
-        when(opaWasmService.evaluate("my-rego-policy", "opa-token", true)).thenReturn(denied);
+        when(opaWasmService.isReady()).thenReturn(true);
+        when(opaWasmService.hasPolicy("my-rego-policy")).thenReturn(true);
+        when(opaWasmService.evaluate("opa-svc:v1", "my-rego-policy", "opa-token", true)).thenReturn(denied);
 
         runningGateway = createGateway(port);
         runningGateway.setOpaWasmService(opaWasmService);
@@ -915,6 +926,8 @@ class RestGatewayTest {
         int port = pickPort();
         RestClient rc = createOpenRestClient("/opa-svc/v1");
         rc.setOpaRego("my-rego-policy");
+        // See sibling test for why canonical id is set explicitly.
+        rc.setCanonicalServiceId("opa-svc:v1");
         restClientMap.put("/opa-svc/v1", rc);
 
         when(httpUtils.processAuthorizationAccessToken(any(io.undertow.server.HttpServerExchange.class))).thenReturn("opa-token");
@@ -922,8 +935,9 @@ class RestGatewayTest {
         OpaWasmService opaWasmService = mock(OpaWasmService.class);
         OpaResult allowed = new OpaResult();
         allowed.setResult(true);
-        when(opaWasmService.isReady("my-rego-policy")).thenReturn(true);
-        when(opaWasmService.evaluate("my-rego-policy", "opa-token", true)).thenReturn(allowed);
+        when(opaWasmService.isReady()).thenReturn(true);
+        when(opaWasmService.hasPolicy("my-rego-policy")).thenReturn(true);
+        when(opaWasmService.evaluate("opa-svc:v1", "my-rego-policy", "opa-token", true)).thenReturn(allowed);
 
         runningGateway = createGateway(port);
         runningGateway.setOpaWasmService(opaWasmService);
@@ -1064,5 +1078,151 @@ class RestGatewayTest {
                 HttpResponse.BodyHandlers.ofString());
 
         assertEquals(200, resp.statusCode());
+    }
+
+    // === /definitions/openapi/{serviceId} ===
+
+    private Service createServiceWithOpenApi(String serviceId,
+                                             boolean expose,
+                                             boolean secure,
+                                             String subscriptionGroup) {
+        OpenAPI openAPI = new OpenAPI()
+                .info(new io.swagger.v3.oas.models.info.Info().title("Original").version("1.0"))
+                .servers(List.of(new io.swagger.v3.oas.models.servers.Server().url("http://backend")))
+                .paths(new Paths().addPathItem("/hello", new PathItem()));
+        ServiceMeta meta = new ServiceMeta();
+        meta.setOpenApiEndpoint("http://backend/api-docs");
+        meta.setExposeOpenApiDefinition(expose);
+        meta.setSecureOpenApiDefinition(secure);
+        meta.setSubscriptionGroup(subscriptionGroup);
+        Service service = new Service();
+        service.setId(serviceId);
+        service.setServiceMeta(meta);
+        service.setOpenAPI(openAPI);
+        return service;
+    }
+
+    @Test
+    void definitionsOpenApi_serviceUnknown_returns404() throws Exception {
+        int port = pickPort();
+        runningGateway = createGateway(port);
+        runningGateway.setPublicEndpoint("http://capi.example.com/api/");
+        runningGateway.runProxy();
+
+        HttpResponse<String> resp = HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder().uri(URI.create("http://localhost:" + port + "/definitions/openapi/missing:v1")).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(404, resp.statusCode());
+    }
+
+    @Test
+    void definitionsOpenApi_exposeFalse_returns404() throws Exception {
+        int port = pickPort();
+        serviceCache.put("my-svc:v1", createServiceWithOpenApi("my-svc:v1", false, false, null));
+        runningGateway = createGateway(port);
+        runningGateway.setPublicEndpoint("http://capi.example.com/api/");
+        runningGateway.runProxy();
+
+        HttpResponse<String> resp = HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder().uri(URI.create("http://localhost:" + port + "/definitions/openapi/my-svc:v1")).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(404, resp.statusCode());
+    }
+
+    @Test
+    void definitionsOpenApi_exposedAndOpen_returns200WithRewrittenServers() throws Exception {
+        int port = pickPort();
+        serviceCache.put("my-svc:v1", createServiceWithOpenApi("my-svc:v1", true, false, null));
+        runningGateway = createGateway(port);
+        runningGateway.setPublicEndpoint("http://capi.example.com/api/");
+        runningGateway.runProxy();
+
+        HttpResponse<String> resp = HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder().uri(URI.create("http://localhost:" + port + "/definitions/openapi/my-svc:v1")).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, resp.statusCode());
+        assertTrue(resp.body().contains("\"url\":\"http://capi.example.com/api/my-svc/v1\""),
+                "servers url should be rewritten to public endpoint; body=" + resp.body());
+        assertTrue(resp.body().contains("\"title\":\"my-svc:v1\""),
+                "info.title should be replaced with service id; body=" + resp.body());
+        assertTrue(resp.body().contains("Open API definition generated by CAPI"),
+                "info.description should be the CAPI marker; body=" + resp.body());
+    }
+
+    @Test
+    void definitionsOpenApi_securedNoToken_returns404() throws Exception {
+        int port = pickPort();
+        serviceCache.put("my-svc:v1", createServiceWithOpenApi("my-svc:v1", true, true, "group-a"));
+        when(httpUtils.processAuthorizationAccessToken(any(io.undertow.server.HttpServerExchange.class))).thenReturn(null);
+        runningGateway = createGateway(port);
+        runningGateway.setPublicEndpoint("http://capi.example.com/api/");
+        runningGateway.runProxy();
+
+        HttpResponse<String> resp = HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder().uri(URI.create("http://localhost:" + port + "/definitions/openapi/my-svc:v1")).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(404, resp.statusCode());
+    }
+
+    @Test
+    void definitionsOpenApi_securedBadToken_returns404() throws Exception {
+        int port = pickPort();
+        serviceCache.put("my-svc:v1", createServiceWithOpenApi("my-svc:v1", true, true, "group-a"));
+        when(httpUtils.processAuthorizationAccessToken(any(io.undertow.server.HttpServerExchange.class))).thenReturn("bad-token");
+        when(httpUtils.isAuthorized("bad-token", "group-a")).thenReturn(false);
+        runningGateway = createGateway(port);
+        runningGateway.setPublicEndpoint("http://capi.example.com/api/");
+        runningGateway.runProxy();
+
+        HttpResponse<String> resp = HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + port + "/definitions/openapi/my-svc:v1"))
+                        .header("Authorization", "Bearer bad-token")
+                        .GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(404, resp.statusCode());
+    }
+
+    @Test
+    void definitionsOpenApi_securedValidToken_returns200() throws Exception {
+        int port = pickPort();
+        serviceCache.put("my-svc:v1", createServiceWithOpenApi("my-svc:v1", true, true, "group-a"));
+        when(httpUtils.processAuthorizationAccessToken(any(io.undertow.server.HttpServerExchange.class))).thenReturn("good-token");
+        when(httpUtils.isAuthorized("good-token", "group-a")).thenReturn(true);
+        runningGateway = createGateway(port);
+        runningGateway.setPublicEndpoint("http://capi.example.com/api/");
+        runningGateway.runProxy();
+
+        HttpResponse<String> resp = HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + port + "/definitions/openapi/my-svc:v1"))
+                        .header("Authorization", "Bearer good-token")
+                        .GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, resp.statusCode());
+        assertTrue(resp.body().contains("\"url\":\"http://capi.example.com/api/my-svc/v1\""));
+    }
+
+    @Test
+    void definitionsOpenApi_postMethod_returns405() throws Exception {
+        int port = pickPort();
+        serviceCache.put("my-svc:v1", createServiceWithOpenApi("my-svc:v1", true, false, null));
+        runningGateway = createGateway(port);
+        runningGateway.setPublicEndpoint("http://capi.example.com/api/");
+        runningGateway.runProxy();
+
+        HttpResponse<String> resp = HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + port + "/definitions/openapi/my-svc:v1"))
+                        .POST(HttpRequest.BodyPublishers.noBody()).build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(405, resp.statusCode());
     }
 }

@@ -397,6 +397,10 @@
         <div class="field-info"><h3>I/O Threads</h3><div class="yaml-path">capi.websocket.ioThreads</div><p>Number of XNIO I/O threads for the WebSocket server.</p></div>
         <div class="field-control"><input type="number" id="ws.ioThreads" value="8"></div>
       </div>
+      <div class="field">
+        <div class="field-info"><h3>Response Timeout</h3><div class="yaml-path">capi.websocket.responseTimeout</div><p>Wall-clock timeout in ms for long-lived SSE/WebSocket connections (the Undertow <code>maxRequestTime</code>). Heartbeats do <em>not</em> reset it. Set higher than your expected stream duration.</p></div>
+        <div class="field-control"><input type="number" id="ws.responseTimeout" value="180000"></div>
+      </div>
     </div>
   </div>
 
@@ -570,7 +574,7 @@
   <!-- ===== OPA ===== -->
   <div class="config-section" id="sec-opa">
     <h2>OPA (Open Policy Agent)</h2>
-    <p class="section-desc">Policy-based authorization using OPA. Supports remote OPA server or in-process Wasm bundle evaluation.</p>
+    <p class="section-desc">Policy-based authorization. Policies are compiled to a single combined Wasm bundle (one tar.gz, one entrypoint per rego path) and evaluated in-process. CAPI fetches the bundle from a bundle server and pools instances for concurrent evaluation. This follows <a href="https://www.openpolicyagent.org/docs/management-bundles" target="_blank">OPA's recommended bundle layout</a>.</p>
 
     <div class="field">
       <div class="field-info"><h3>Enabled</h3><div class="yaml-path">capi.opa.enabled</div><p>Enable OPA policy evaluation for route authorization.</p></div>
@@ -578,26 +582,20 @@
     </div>
     <div class="children disabled" id="opa-children">
       <div class="field">
-        <div class="field-info"><h3>Endpoint</h3><div class="yaml-path">capi.opa.endpoint</div><p>URL of the remote OPA server (used when Wasm is disabled).</p></div>
-        <div class="field-control"><input type="text" id="opa.endpoint" value="http://localhost:8181"></div>
+        <div class="field-info"><h3>Wasm Bundle URL</h3><div class="yaml-path">capi.opa.wasmBundleUrl</div><p>Full URL of the wasm bundle. CAPI consumes a single combined bundle containing every policy as a separate entrypoint — <a href="https://www.openpolicyagent.org/docs/management-bundles" target="_blank">OPA's recommended layout</a>.</p></div>
+        <div class="field-control"><input type="text" id="opa.wasmBundleUrl" value="" placeholder="http://opa-bundle-server:8080/bundles/bundle.tar.gz"></div>
       </div>
       <div class="field">
-        <div class="field-info"><h3>Wasm Enabled</h3><div class="yaml-path">capi.opa.wasmEnabled</div><p>Evaluate policies in-process using a compiled Wasm bundle instead of calling the remote OPA server.</p></div>
-        <div class="field-control"><label class="toggle"><input type="checkbox" id="opa.wasmEnabled" data-toggles="opa-wasm-children"><span class="slider"></span></label></div>
+        <div class="field-info"><h3>Wasm Bundle Token</h3><div class="yaml-path">capi.opa.wasmBundleToken</div><p>Optional bearer token sent as <code>Authorization: Bearer &lt;token&gt;</code> on every bundle fetch. Leave blank for an unauthenticated bundle server.</p></div>
+        <div class="field-control"><input type="text" id="opa.wasmBundleToken" value="" placeholder=""></div>
       </div>
-      <div class="children disabled" id="opa-wasm-children">
-        <div class="field">
-          <div class="field-info"><h3>Wasm Bundle URL</h3><div class="yaml-path">capi.opa.wasmBundleUrl</div><p>URL to download the OPA Wasm bundle from.</p></div>
-          <div class="field-control"><input type="text" id="opa.wasmBundleUrl" value="" placeholder="http://opa:8181/bundles/policy.tar.gz"></div>
-        </div>
-        <div class="field">
-          <div class="field-info"><h3>Bundle Poll Interval</h3><div class="yaml-path">capi.opa.wasmBundlePollIntervalSeconds</div><p>How often (in seconds) to re-fetch the Wasm bundle.</p></div>
-          <div class="field-control"><input type="number" id="opa.wasmBundlePollIntervalSeconds" value="60"></div>
-        </div>
-        <div class="field">
-          <div class="field-info"><h3>Wasm Pool Size</h3><div class="yaml-path">capi.opa.wasmPoolSize</div><p>Number of pooled Wasm instances for concurrent evaluation.</p></div>
-          <div class="field-control"><input type="number" id="opa.wasmPoolSize" value="10"></div>
-        </div>
+      <div class="field">
+        <div class="field-info"><h3>Bundle Poll Interval</h3><div class="yaml-path">capi.opa.wasmBundlePollIntervalSeconds</div><p>How often (in seconds) to re-fetch the Wasm bundles.</p></div>
+        <div class="field-control"><input type="number" id="opa.wasmBundlePollIntervalSeconds" value="60"></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>Wasm Pool Size</h3><div class="yaml-path">capi.opa.wasmPoolSize</div><p>Number of pooled Wasm instances per policy for concurrent evaluation.</p></div>
+        <div class="field-control"><input type="number" id="opa.wasmPoolSize" value="10"></div>
       </div>
     </div>
   </div>
@@ -770,6 +768,20 @@
         <div class="field-info"><h3>Server Discovery Timeout</h3><div class="yaml-path">capi.mcp.mcpServerDiscoveryTimeoutMs</div><p>Timeout in ms for discovering MCP servers from Consul.</p></div>
         <div class="field-control"><input type="number" id="mcp.mcpServerDiscoveryTimeoutMs" value="10000"></div>
       </div>
+      <div class="field">
+        <div class="field-info"><h3>GenAI Observability</h3><div class="yaml-path">capi.mcp.observability.genAi.enabled</div><p>Emit OpenTelemetry GenAI semantic-convention attributes on MCP tool-call spans (model name, prompt/completion sizes, etc.).</p></div>
+        <div class="field-control"><label class="toggle"><input type="checkbox" id="mcp.observability.genAi.enabled"><span class="slider"></span></label></div>
+      </div>
+      <div class="field">
+        <div class="field-info"><h3>Manifest Signing Mode</h3><div class="yaml-path">capi.mcp.signing.mode</div><p>Server manifest signature enforcement. <code>off</code>: never verify. <code>warn</code>: verify but allow on failure (log only). <code>enforce</code>: reject unsigned or invalid. Requires <code>capi.consulStore.enabled=true</code>; trust keys are stored under the Consul KV prefix <code>capi-mcp-trust-keys/&lt;keyId&gt;</code>.</p></div>
+        <div class="field-control">
+          <select id="mcp.signing.mode">
+            <option value="off" selected>off</option>
+            <option value="warn">warn</option>
+            <option value="enforce">enforce</option>
+          </select>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -880,6 +892,7 @@
       L(2, 'listeningAddress', val('ws.listeningAddress'));
       L(2, 'contextPath', val('ws.contextPath'));
       L(2, 'ioThreads', val('ws.ioThreads'));
+      L(2, 'responseTimeout', val('ws.responseTimeout'));
     }
 
     // gRPC
@@ -943,17 +956,14 @@
       });
     }
 
-    // OPA
+    // OPA (wasm-only)
     lines.push(indent(1) + 'opa:');
     L(2, 'enabled', checked('opa.enabled'));
     if (checked('opa.enabled')) {
-      L(2, 'endpoint', val('opa.endpoint'));
-      L(2, 'wasmEnabled', checked('opa.wasmEnabled'));
-      if (checked('opa.wasmEnabled')) {
-        L(2, 'wasmBundleUrl', val('opa.wasmBundleUrl'));
-        L(2, 'wasmBundlePollIntervalSeconds', val('opa.wasmBundlePollIntervalSeconds'));
-        L(2, 'wasmPoolSize', val('opa.wasmPoolSize'));
-      }
+      L(2, 'wasmBundleUrl', val('opa.wasmBundleUrl'));
+      L(2, 'wasmBundleToken', val('opa.wasmBundleToken'));
+      L(2, 'wasmBundlePollIntervalSeconds', val('opa.wasmBundlePollIntervalSeconds'));
+      L(2, 'wasmPoolSize', val('opa.wasmPoolSize'));
     }
 
     // Traces
@@ -1011,6 +1021,11 @@
       L(2, 'toolCallTimeout', val('mcp.toolCallTimeout'));
       L(2, 'circuitBreakerCooldownMs', val('mcp.circuitBreakerCooldownMs'));
       L(2, 'mcpServerDiscoveryTimeoutMs', val('mcp.mcpServerDiscoveryTimeoutMs'));
+      lines.push(indent(2) + 'observability:');
+      lines.push(indent(3) + 'genAi:');
+      L(4, 'enabled', checked('mcp.observability.genAi.enabled'));
+      lines.push(indent(2) + 'signing:');
+      L(3, 'mode', val('mcp.signing.mode'));
     }
 
     const output = lines.join('\n') + '\n';

@@ -60,6 +60,24 @@ class RouteConsistencyCheckerTest {
     }
 
     @Test
+    void process_withEmptyOpenApiEndpoint_doesNotRemove() {
+        // Per-instance metadata can leave the global "open-api" key as "" while no
+        // per-instance override applies for this CAPI. The fetch gate treats empty
+        // as "no endpoint", so openAPI stays null — which must NOT trip the checker.
+        Service service = new Service();
+        service.setId("service-empty");
+        ServiceMeta meta = new ServiceMeta();
+        meta.setOpenApiEndpoint("");
+        service.setServiceMeta(meta);
+        serviceCache.put("service-empty", service);
+
+        checker.process();
+
+        assertNotNull(serviceCache.peek("service-empty"),
+                "service with empty openApiEndpoint must not be flagged as inconsistent");
+    }
+
+    @Test
     void process_withInconsistentService_removesFromCache() {
         Service service = new Service();
         service.setId("service-3");
