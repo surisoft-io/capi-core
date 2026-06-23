@@ -47,6 +47,7 @@ public class AdminGateway implements AutoCloseable {
     private McpSessionStore mcpSessionStore;
     private ConsulStore consulStore;
     private final Map<String, InvalidService> invalidServices;
+    private io.surisoft.capi.observability.JvmObservability jvmObservability;
 
     public AdminGateway(int port, PrometheusMeterRegistry prometheusRegistry, CAPIConfiguration capiConfiguration, Cache<String, Service> serviceCache, SSLContext sslContext, CapiTrustManager capiTrustManager, Map<String, InvalidService> invalidServices) {
         this.port = port;
@@ -72,7 +73,8 @@ public class AdminGateway implements AutoCloseable {
                 .addExactPath("/info/mcp", this::handleMcpInfo)
                 .addExactPath("/info/mcp/tools", this::handleMcpTools)
                 .addExactPath("/info/mcp/sessions", this::handleMcpSessions)
-                .addExactPath("/info/invalid-services", this::handleInvalidServices);
+                .addExactPath("/info/invalid-services", this::handleInvalidServices)
+                .addExactPath("/info/jvm/profile", this::handleJvmProfile);
 
 
         Undertow.Builder builder = Undertow.builder();
@@ -116,6 +118,7 @@ public class AdminGateway implements AutoCloseable {
             links.put("mcp-tools", Map.of("href", baseUrl + "/info/mcp/tools"));
             links.put("mcp-sessions", Map.of("href", baseUrl + "/info/mcp/sessions"));
             links.put("invalid-services", Map.of("href", baseUrl + "/info/invalid-services"));
+            links.put("jvm-profile", Map.of("href", baseUrl + "/info/jvm/profile?seconds=60&limit=25"));
 
             Map<String, Object> response = new LinkedHashMap<>();
             response.put("_links", links);
@@ -428,5 +431,41 @@ public class AdminGateway implements AutoCloseable {
             exchange.getResponseSender().send("[]");
         }
 
+    }
+
+    public void setJvmObservability(io.surisoft.capi.observability.JvmObservability jvmObservability) {
+        this.jvmObservability = jvmObservability;
+    }
+
+    private void handleJvmProfile(HttpServerExchange exchange) {
+        exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+        try {
+            if (jvmObservability == null || !jvmObservability.isEnabled()) {
+                exchange.setStatusCode(StatusCodes.NOT_FOUND);
+                exchange.getResponseSender().send(objectMapper.writeValueAsString(
+                        buildError(StatusCodes.NOT_FOUND, "JVM observability not enabled")));
+                return;
+            }
+            int seconds = parseIntParam(exchange, "seconds", 60, 1, 3600);
+            int limit = parseIntParam(exchange, "limit", 25, 1, 500);
+            List<io.surisoft.capi.observability.ProfileSampler.TopFrame> top =
+                    jvmObservability.getProfileSampler().topByCpu(java.time.Duration.ofSeconds(seconds), limit);
+            exchange.setStatusCode(StatusCodes.OK);
+            exchange.getResponseSender().send(objectMapper.writeValueAsString(top));
+        } catch (JsonProcessingException e) {
+            log.warn("Error serializing JVM profile: {}", e.getMessage(), e);
+            exchange.getResponseSender().send("[]");
+        }
+    }
+
+    private static int parseIntParam(HttpServerExchange exchange, String name, int defaultValue, int min, int max) {
+        java.util.Deque<String> values = exchange.getQueryParameters().get(name);
+        if (values == null || values.isEmpty()) return defaultValue;
+        try {
+            int v = Integer.parseInt(values.getFirst());
+            return Math.max(min, Math.min(max, v));
+        } catch (NumberFormatException nfe) {
+            return defaultValue;
+        }
     }
 }

@@ -239,6 +239,107 @@ class McpServerClientTest {
     }
 
     @Test
+    void forwardToolCall_withForwardAuthTag_attachesAuthorizationHeader() throws Exception {
+        int backendPort = findFreePort();
+
+        // Capture Authorization header per request body method
+        java.util.Map<String, String> seenAuthByMethod = java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<>());
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(exchange -> {
+                    if (exchange.isInIoThread()) {
+                        exchange.dispatch(() -> {
+                            try {
+                                exchange.startBlocking();
+                                String body = new String(exchange.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                                @SuppressWarnings("unchecked")
+                                Map<String, Object> req = objectMapper.readValue(body, Map.class);
+                                String method = (String) req.get("method");
+                                var hv = exchange.getRequestHeaders().get(Headers.AUTHORIZATION);
+                                seenAuthByMethod.put(method, hv != null && !hv.isEmpty() ? hv.getFirst() : null);
+
+                                exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+                                if ("initialize".equals(method)) {
+                                    exchange.getResponseHeaders().put(io.undertow.util.HttpString.tryFromString("Mcp-Session-Id"), "sess-1");
+                                    exchange.getResponseSender().send("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-03-26\"}}");
+                                } else if ("tools/call".equals(method)) {
+                                    exchange.getResponseSender().send("{\"jsonrpc\":\"2.0\",\"id\":\"" + req.get("id") + "\",\"result\":{\"content\":[]}}");
+                                }
+                            } catch (Exception e) {
+                                exchange.setStatusCode(500);
+                                exchange.getResponseSender().send("err");
+                            }
+                        });
+                    }
+                }).build();
+        backend.start();
+
+        try {
+            Service service = createMcpServerServiceWithBackend("authfwd-svc", "localhost", backendPort);
+            service.getServiceMeta().handleUnknown(io.surisoft.capi.utils.Constants.MCP_META_FORWARD_AUTH, "true");
+            serviceCache.put("authfwd-svc", service);
+
+            mcpServerClient.forwardToolCall(service, "doit", Map.of(), 5000, "Bearer end-user-token");
+
+            // tools/call carries the forwarded token; initialize stays anonymous
+            assertEquals("Bearer end-user-token", seenAuthByMethod.get("tools/call"));
+            assertNull(seenAuthByMethod.get("initialize"));
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void forwardToolCall_withoutForwardAuthTag_doesNotAttachAuthorization() throws Exception {
+        int backendPort = findFreePort();
+
+        java.util.Map<String, String> seenAuthByMethod = java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<>());
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(exchange -> {
+                    if (exchange.isInIoThread()) {
+                        exchange.dispatch(() -> {
+                            try {
+                                exchange.startBlocking();
+                                String body = new String(exchange.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                                @SuppressWarnings("unchecked")
+                                Map<String, Object> req = objectMapper.readValue(body, Map.class);
+                                String method = (String) req.get("method");
+                                var hv = exchange.getRequestHeaders().get(Headers.AUTHORIZATION);
+                                seenAuthByMethod.put(method, hv != null && !hv.isEmpty() ? hv.getFirst() : null);
+
+                                exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+                                if ("initialize".equals(method)) {
+                                    exchange.getResponseHeaders().put(io.undertow.util.HttpString.tryFromString("Mcp-Session-Id"), "sess-2");
+                                    exchange.getResponseSender().send("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-03-26\"}}");
+                                } else if ("tools/call".equals(method)) {
+                                    exchange.getResponseSender().send("{\"jsonrpc\":\"2.0\",\"id\":\"" + req.get("id") + "\",\"result\":{\"content\":[]}}");
+                                }
+                            } catch (Exception e) {
+                                exchange.setStatusCode(500);
+                                exchange.getResponseSender().send("err");
+                            }
+                        });
+                    }
+                }).build();
+        backend.start();
+
+        try {
+            Service service = createMcpServerServiceWithBackend("noauthfwd-svc", "localhost", backendPort);
+            // mcp-forward-auth NOT set
+            serviceCache.put("noauthfwd-svc", service);
+
+            // Even though a forwarded token is passed, the missing flag means it must not be attached
+            mcpServerClient.forwardToolCall(service, "doit", Map.of(), 5000, "Bearer end-user-token");
+
+            assertNull(seenAuthByMethod.get("tools/call"));
+            assertNull(seenAuthByMethod.get("initialize"));
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     void forwardToolCall_stripsPrefix() throws Exception {
         int backendPort = findFreePort();

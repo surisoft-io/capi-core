@@ -63,6 +63,8 @@ public class Startup {
     private final Map<String, GrpcClient> grpcClientMap = new java.util.concurrent.ConcurrentHashMap<>();
     private final Map<String, InvalidService> invalidServiceMap = new java.util.concurrent.ConcurrentHashMap<>();
     @Nullable
+    private io.surisoft.capi.observability.JvmObservability jvmObservability;
+    @Nullable
     private SSLContext undertowSslContext;
     @Nullable
     private CapiTrustManager capiTrustManager;
@@ -115,6 +117,21 @@ public class Startup {
         startApiKeyStore();
         startRouteConsistencyChecker();
         startMcpService();
+        startJvmObservability();
+    }
+
+    private void startJvmObservability() {
+        CAPIConfiguration.Observability.Jvm jvm = configuration.getObservability() != null
+                ? configuration.getObservability().getJvm() : null;
+        if (jvm == null || !jvm.isEnabled()) {
+            log.info("JVM observability disabled");
+            return;
+        }
+        jvmObservability = new io.surisoft.capi.observability.JvmObservability(
+                true,
+                java.time.Duration.ofMillis(jvm.getSampleIntervalMs()),
+                jvm.getRetentionSamples());
+        jvmObservability.start();
     }
 
     private void configureUndertowSsl() {
@@ -437,6 +454,10 @@ public class Startup {
         return routeConsistencyChecker;
     }
 
+    public @Nullable io.surisoft.capi.observability.JvmObservability getJvmObservability() {
+        return jvmObservability;
+    }
+
     private void startMcpService() {
         if (configuration.getMcp() != null && configuration.getMcp().isEnabled()) {
             log.info("Configuring MCP Gateway");
@@ -449,11 +470,11 @@ public class Startup {
                         LocalCacheConfiguration.mcpSessionCache(configuration.getMcp().getSessionTtl()));
             }
             mcpLoadBalancer = new McpBackendLoadBalancer(configuration.getMcp().getCircuitBreakerCooldownMs());
-            HttpClient mcpHttpClient = HttpClient.newBuilder()
-                    .connectTimeout(java.time.Duration.ofSeconds(10))
-                    .executor(Executors.newVirtualThreadPerTaskExecutor())
-                    .build();
-            mcpServerClient = new McpServerClient(serviceCache, mcpLoadBalancer, mcpHttpClient, configuration);
+            // Share the consulHttpClient so MCP server-backend dispatch uses the same
+            // trust material as every other JDK-HttpClient consumer (Consul polling,
+            // OPA bundle fetch, etc.). A freshly-built HttpClient here would default
+            // to JVM cacerts and silently break against internal-CA backends.
+            mcpServerClient = new McpServerClient(serviceCache, mcpLoadBalancer, consulHttpClient, configuration);
         }
     }
 

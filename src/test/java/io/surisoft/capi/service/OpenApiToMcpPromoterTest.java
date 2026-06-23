@@ -251,4 +251,66 @@ class OpenApiToMcpPromoterTest {
         plain.setName("manual");
         assertFalse(plain.isOpenApiPromoted());
     }
+
+    /**
+     * Regression: schemas produced by swagger-parser-v3 (i.e. real customer specs
+     * fetched at runtime — not the convenience StringSchema/IntegerSchema classes)
+     * carry their type in the model's internal `types` field for multi-type
+     * support. Serializing them through a vanilla ObjectMapper would emit
+     * `"type": null, "types": ["string"]` plus every other null-returning getter,
+     * which is not valid JSON Schema and prevents LLMs from knowing the actual
+     * parameter type. The promoter must use swagger-core's Json.mapper() so
+     * `types` collapses to `type` and nulls are suppressed.
+     */
+    @Test
+    void parsedOpenApi31Schema_emitsCleanJsonSchemaWithoutNullsOrInternalTypesField() throws Exception {
+        String spec = """
+                {
+                  "openapi": "3.1.0",
+                  "info": {"title": "test", "version": "1.0"},
+                  "paths": {
+                    "/search": {
+                      "get": {
+                        "operationId": "search",
+                        "summary": "Search",
+                        "parameters": [{
+                          "name": "q",
+                          "in": "query",
+                          "description": "Search query (min 2 characters)",
+                          "required": true,
+                          "schema": {"type": "string"}
+                        }]
+                      }
+                    }
+                  }
+                }
+                """;
+        OpenAPI api = new io.swagger.v3.parser.OpenAPIV3Parser().readContents(spec).getOpenAPI();
+        assertNotNull(api, "spec should parse");
+
+        Service svc = service("govis", api, "true");
+        List<McpTool> tools = promoter.promote(svc);
+        assertEquals(1, tools.size());
+
+        JsonNode schema = objectMapper.readTree(tools.get(0).getInputSchema());
+        JsonNode q = schema.get("properties").get("q");
+        assertNotNull(q, "'q' property must be present");
+
+        // The two bugs reported by the field customer:
+        assertEquals("string", q.get("type").asText(),
+                "spec-compliant 'type' field must be set, not swagger-internal 'types'");
+        assertNull(q.get("types"),
+                "swagger-internal 'types' field must not appear in the output");
+
+        // No null-valued keys (NON_NULL inclusion):
+        q.fields().forEachRemaining(field ->
+                assertFalse(field.getValue().isNull(),
+                        "schema field '" + field.getKey() + "' should be omitted, not emitted as null"));
+
+        // Parameter description on the Parameter (not the Schema) should still land
+        // on the property — promoter adds it explicitly after serialising the schema.
+        assertEquals("Search query (min 2 characters)", q.get("description").asText());
+
+        assertEquals("q", schema.get("required").get(0).asText());
+    }
 }

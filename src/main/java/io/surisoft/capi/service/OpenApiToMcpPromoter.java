@@ -208,9 +208,14 @@ public class OpenApiToMcpPromoter {
     private Map<String, Object> serializeSchema(Schema schema) {
         if (schema == null) return null;
         try {
-            // Round-trip through Jackson to drop swagger-internals and keep JSON Schema fields
-            String json = objectMapper.writeValueAsString(schema);
-            return objectMapper.readValue(json, LinkedHashMap.class);
+            // Use swagger-core's OpenAPI 3.1-aware mapper. A vanilla ObjectMapper
+            // would emit every Schema getter that returns null (turning a 1-property
+            // schema into a 60-key wall of `"foo": null`). The older Json.mapper()
+            // suppresses nulls but doesn't collapse the model's internal multi-type
+            // `types: ["string"]` representation back to `type: "string"`. Json31
+            // does both — it's the one to use for any Schema produced by
+            // swagger-parser-v3 against an OpenAPI 3.1 spec.
+            return io.swagger.v3.core.util.Json31.mapper().convertValue(schema, LinkedHashMap.class);
         } catch (Exception e) {
             log.debug("Could not serialize OpenAPI schema, defaulting to object: {}", e.getMessage());
             Map<String, Object> fallback = new LinkedHashMap<>();

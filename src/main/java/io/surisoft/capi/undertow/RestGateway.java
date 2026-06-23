@@ -38,6 +38,7 @@ import javax.net.ssl.SSLContext;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 public class RestGateway {
     private static final Logger log = LoggerFactory.getLogger(RestGateway.class);
@@ -83,6 +84,7 @@ public class RestGateway {
     private volatile RestClientSnapshot restClientSnapshot;
 
     private static final String DEFINITIONS_OPENAPI_PREFIX = "/definitions/openapi/";
+    private static final Pattern SLASH_TRIM = Pattern.compile("^/+|/+$");
 
     public RestGateway(int port,
                        int ioThreads,
@@ -587,8 +589,8 @@ public class RestGateway {
     }
 
     private boolean isOpenApiPathMatch(String requestPath, String definedPath) {
-        String req = requestPath.replaceAll("^/+|/+$", "");
-        String def = definedPath.replaceAll("^/+|/+$", "");
+        String req = SLASH_TRIM.matcher(requestPath).replaceAll("");
+        String def = SLASH_TRIM.matcher(definedPath).replaceAll("");
 
         String[] reqSegments = req.split("/");
         String[] defSegments = def.split("/");
@@ -596,9 +598,12 @@ public class RestGateway {
         if (reqSegments.length != defSegments.length) return false;
 
         for (int i = 0; i < reqSegments.length; i++) {
-            if (!defSegments[i].equals(reqSegments[i]) && !defSegments[i].matches("\\{.*}")) {
-                return false;
-            }
+            String defSeg = defSegments[i];
+            if (defSeg.equals(reqSegments[i])) continue;
+            boolean isPathParam = defSeg.length() >= 2
+                    && defSeg.charAt(0) == '{'
+                    && defSeg.charAt(defSeg.length() - 1) == '}';
+            if (!isPathParam) return false;
         }
         return true;
     }
@@ -637,7 +642,12 @@ public class RestGateway {
     private void addCorsHeaders(HttpServerExchange exchange) {
         HeaderValues originHeader = exchange.getRequestHeaders().get("Origin");
         if (originHeader != null && !originHeader.isEmpty()) {
-            String origin = originHeader.getFirst().replaceAll("(\r\n|\n)", "");
+            String raw = originHeader.getFirst();
+            // Strip CR/LF (CRLF-injection defense). Almost every Origin header is
+            // already clean, so short-circuit before allocating.
+            String origin = (raw.indexOf('\n') < 0 && raw.indexOf('\r') < 0)
+                    ? raw
+                    : raw.replace("\r", "").replace("\n", "");
             exchange.getResponseHeaders().put(HttpString.tryFromString(Constants.ACCESS_CONTROL_ALLOW_ORIGIN), origin);
             exchange.getResponseHeaders().put(HttpString.tryFromString(Constants.ACCESS_CONTROL_ALLOW_CREDENTIALS), "true");
         }

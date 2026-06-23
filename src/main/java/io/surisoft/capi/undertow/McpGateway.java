@@ -309,7 +309,18 @@ public class McpGateway implements AutoCloseable {
 
             List<McpTool> tools = toolRegistry.getAllTools();
             List<Map<String, Object>> toolList = new ArrayList<>();
+            int filtered = 0;
             for (McpTool tool : tools) {
+                // Per-service OPA visibility filter. A tool whose service declares an
+                // opaRego is only listed when the rego allows the caller's token. With
+                // no Bearer header but a rego attached, we fail closed — visibility
+                // must not leak inventory to unidentified callers. Services without a
+                // rego are unaffected.
+                McpToolRegistry.McpToolResolution resolution = toolRegistry.resolveToolByName(tool.getName());
+                if (resolution != null && !isOpaAllowed(exchange, resolution.getService(), true)) {
+                    filtered++;
+                    continue;
+                }
                 Map<String, Object> toolMap = new LinkedHashMap<>();
                 toolMap.put("name", tool.getName());
                 toolMap.put("description", tool.getDescription());
@@ -321,7 +332,10 @@ public class McpGateway implements AutoCloseable {
                 toolList.add(toolMap);
             }
 
-            if (span != null) span.setAttribute("mcp.tools.count", toolList.size());
+            if (span != null) {
+                span.setAttribute("mcp.tools.count", toolList.size());
+                if (filtered > 0) span.setAttribute("mcp.tools.filtered", filtered);
+            }
             if (mcpTracer != null) {
                 mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_SUCCESS);
                 mcpTracer.setHttpStatus(span, StatusCodes.OK);
@@ -426,8 +440,9 @@ public class McpGateway implements AutoCloseable {
     private void handleMcpServerToolCall(HttpServerExchange exchange, JsonRpcRequest request,
                                           McpTool tool, Service service, Object arguments, Span parentSpan) {
         int timeout = tool.getTimeout() > 0 ? tool.getTimeout() : configuration.getMcp().getToolCallTimeout();
+        String forwardedAuth = extractForwardedAuth(exchange);
         try {
-            Object result = mcpServerClient.forwardToolCall(service, tool.getName(), arguments, timeout);
+            Object result = mcpServerClient.forwardToolCall(service, tool.getName(), arguments, timeout, forwardedAuth);
             if (mcpTracer != null) mcpTracer.setOutcome(parentSpan, Constants.CAPI_OUTCOME_SUCCESS);
             sendJsonRpc(exchange, StatusCodes.OK, JsonRpcResponse.success(request.getId(), result));
         } catch (InterruptedException e) {
@@ -461,6 +476,12 @@ public class McpGateway implements AutoCloseable {
     }
 
     private boolean isOpaAllowed(HttpServerExchange exchange, Service service) {
+        // Call-time variant: missing token defaults to allow (call-time is gated
+        // upstream by OAuth2 + session validation).
+        return isOpaAllowed(exchange, service, false);
+    }
+
+    private boolean isOpaAllowed(HttpServerExchange exchange, Service service, boolean denyOnMissingToken) {
         String opaRego = service.getServiceMeta().getOpaRego();
         if (opaWasmService == null || opaRego == null) {
             return true;
@@ -472,7 +493,7 @@ public class McpGateway implements AutoCloseable {
             // no token available
         }
         if (accessToken == null) {
-            return true;
+            return !denyOnMissingToken;
         }
         OpaResult opaResult = opaWasmService.evaluate(service.getId(), opaRego, accessToken, true);
         return opaResult != null && opaResult.isAllowed();
@@ -484,9 +505,16 @@ public class McpGateway implements AutoCloseable {
                 && exchange.getRequestHeaders().get(ACCEPT_HEADER).contains(TEXT_EVENT_STREAM);
     }
 
+    private static String extractForwardedAuth(HttpServerExchange exchange) {
+        return exchange.getRequestHeaders().contains(Headers.AUTHORIZATION)
+                ? exchange.getRequestHeaders().get(Headers.AUTHORIZATION).getFirst()
+                : null;
+    }
+
     private void handleSyncToolCallWithFailover(HttpServerExchange exchange, JsonRpcRequest request,
                                                 List<String> backendUrls, McpTool tool, Object arguments, Span parentSpan) {
         int timeout = tool.getTimeout() > 0 ? tool.getTimeout() : configuration.getMcp().getToolCallTimeout();
+        String forwardedAuth = extractForwardedAuth(exchange);
         String requestBody;
         try {
             requestBody = arguments != null ? objectMapper.writeValueAsString(arguments) : "{}";
@@ -514,6 +542,7 @@ public class McpGateway implements AutoCloseable {
                         .header("Content-Type", APPLICATION_JSON)
                         .timeout(Duration.ofMillis(timeout))
                         .POST(HttpRequest.BodyPublishers.ofString(requestBody));
+                if (forwardedAuth != null) builder.header("Authorization", forwardedAuth);
                 if (mcpTracer != null) mcpTracer.injectContext(attemptSpan, builder);
                 HttpRequest backendRequest = builder.build();
 
@@ -573,9 +602,7 @@ public class McpGateway implements AutoCloseable {
         int timeout = tool.getTimeout() > 0 ? tool.getTimeout() : configuration.getMcp().getToolCallTimeout();
 
         Map<String, Object> argMap = arguments instanceof Map ? new LinkedHashMap<>((Map<String, Object>) arguments) : new LinkedHashMap<>();
-        String forwardedAuth = exchange.getRequestHeaders().contains(Headers.AUTHORIZATION)
-                ? exchange.getRequestHeaders().get(Headers.AUTHORIZATION).getFirst()
-                : null;
+        String forwardedAuth = extractForwardedAuth(exchange);
 
         Exception lastException = null;
         int attempt = 0;
@@ -672,12 +699,14 @@ public class McpGateway implements AutoCloseable {
         Scope attemptScope = (attemptSpan != null) ? attemptSpan.makeCurrent() : null;
         try {
             String requestBody = arguments != null ? objectMapper.writeValueAsString(arguments) : "{}";
+            String forwardedAuth = extractForwardedAuth(exchange);
             HttpRequest.Builder builder = HttpRequest.newBuilder()
                     .uri(new URI(backendUrl))
                     .header("Content-Type", APPLICATION_JSON)
                     .header(ACCEPT_HEADER, TEXT_EVENT_STREAM)
                     .timeout(Duration.ofMillis(timeout))
                     .POST(HttpRequest.BodyPublishers.ofString(requestBody));
+            if (forwardedAuth != null) builder.header("Authorization", forwardedAuth);
             if (mcpTracer != null) mcpTracer.injectContext(attemptSpan, builder);
             HttpRequest backendRequest = builder.build();
 
