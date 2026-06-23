@@ -24,6 +24,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class ConsulCatalogService {
@@ -34,6 +35,12 @@ public class ConsulCatalogService {
     private static final String GET_SERVICE_BY_NAME = "/v1/catalog/service/";
     private static final Duration PER_REQUEST_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration PER_HOST_TIMEOUT = Duration.ofSeconds(30);
+
+    /** Slack the caller (fetchAndUnion) waits beyond a host's own internal budget, so the
+     *  host task returns a (possibly partial) result and frees its catalog thread rather
+     *  than being abandoned mid-flight — the latter is what let detached fetches pile up
+     *  on catalogExecutor across cycles and spiral into hundreds of Consul timeouts. */
+    private static final Duration HOST_FUTURE_GRACE = Duration.ofSeconds(5);
 
     // §7.3 startup readiness latch — one-way. Set once on first clean cycle, never reset.
     private static volatile boolean connectedToConsul = false;
@@ -53,6 +60,11 @@ public class ConsulCatalogService {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private volatile HttpClient httpClient;
+
+    /** Defense-in-depth: skip a tick if the previous cycle hasn't returned. The scheduler
+     *  already serialises runCycle, so this only fires if runCycle is ever driven from more
+     *  than one caller — but it makes "never overlap" an enforced invariant, not an assumption. */
+    private final AtomicBoolean cycleInProgress = new AtomicBoolean(false);
 
     /**
      * Dedicated executor for per-host catalog fetches. Replaces the implicit use of
@@ -111,30 +123,38 @@ public class ConsulCatalogService {
     }
 
     public void runCycle() {
-        long start = System.currentTimeMillis();
-        invalidServiceMap.clear();
-        CycleResult result = fetchAndUnion();
-        Map<String, Service> incoming = buildServices(result.reconciledObjects());
-
-        // Reconcile FIRST to identify what's actually new or changed. The old
-        // ConsulNodeDiscovery did this — fetching OpenAPI for every service every
-        // cycle (the previous behavior here) multiplied the cycle's work by the
-        // number of services with an open-api endpoint, regardless of whether
-        // anything actually changed, and turned every upstream blip into hundreds
-        // of timeout waits charged to the scheduler thread.
-        ServiceDelta delta = reconcile(incoming, result);
-
-        // Only fetch OpenAPI for services that genuinely need it. Failed fetches
-        // are dropped from the delta so the route isn't registered with a stale or
-        // missing spec.
-        Set<String> failedFetches = prefetchOpenApiForDelta(delta);
-        if (!failedFetches.isEmpty()) {
-            delta = filterFailedFetches(delta, failedFetches);
+        if (!cycleInProgress.compareAndSet(false, true)) {
+            log.warn("Consul discovery cycle skipped — previous cycle still in progress");
+            return;
         }
+        long start = System.currentTimeMillis();
+        try {
+            invalidServiceMap.clear();
+            CycleResult result = fetchAndUnion();
+            Map<String, Service> incoming = buildServices(result.reconciledObjects());
 
-        apply(delta);
-        maybeFlipReadinessLatch(result);
-        emitSummary(result, delta, System.currentTimeMillis() - start);
+            // Reconcile FIRST to identify what's actually new or changed. The old
+            // ConsulNodeDiscovery did this — fetching OpenAPI for every service every
+            // cycle (the previous behavior here) multiplied the cycle's work by the
+            // number of services with an open-api endpoint, regardless of whether
+            // anything actually changed, and turned every upstream blip into hundreds
+            // of timeout waits charged to the scheduler thread.
+            ServiceDelta delta = reconcile(incoming, result);
+
+            // Only fetch OpenAPI for services that genuinely need it. Failed fetches
+            // are dropped from the delta so the route isn't registered with a stale or
+            // missing spec.
+            Set<String> failedFetches = prefetchOpenApiForDelta(delta);
+            if (!failedFetches.isEmpty()) {
+                delta = filterFailedFetches(delta, failedFetches);
+            }
+
+            apply(delta);
+            maybeFlipReadinessLatch(result);
+            emitSummary(result, delta, System.currentTimeMillis() - start);
+        } finally {
+            cycleInProgress.set(false);
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -146,12 +166,20 @@ public class ConsulCatalogService {
                 .map(this::fetchHost)
                 .toList();
 
+        // Wait slightly longer than the host's OWN internal budget (PER_HOST_TIMEOUT).
+        // fetchHostSync is now bound to return within that budget, so under normal
+        // degradation the future completes here and we collect a (possibly partial)
+        // result. The grace makes abandonment the exception, not the rule.
+        long hostWaitMs = PER_HOST_TIMEOUT.toMillis() + HOST_FUTURE_GRACE.toMillis();
         List<HostResult> results = new ArrayList<>(hostFutures.size());
         for (CompletableFuture<HostResult> future : hostFutures) {
             try {
-                results.add(future.get(PER_HOST_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS));
+                results.add(future.get(hostWaitMs, TimeUnit.MILLISECONDS));
             } catch (Exception e) {
                 // Per-host failure is isolated. We synthesize a failed result so other hosts still count.
+                // Cancel so the supplyAsync future is completed and not left dangling (note: this does
+                // not interrupt an already-running fetchHostSync — that one self-bounds to PER_HOST_TIMEOUT).
+                future.cancel(true);
                 log.warn("Consul host timed out or failed before returning: {}", e.getMessage());
                 results.add(HostResult.failed(null));
             }
@@ -164,10 +192,18 @@ public class ConsulCatalogService {
     }
 
     private HostResult fetchHostSync(CAPIConfiguration.HostConfig host) {
+        // Hard wall-clock budget for the WHOLE host fetch. Previously this method waited
+        // PER_REQUEST_TIMEOUT*2 on each of (potentially hundreds of) per-service lookups
+        // sequentially, so its runtime was unbounded (sum of timeouts) while the caller
+        // only waited PER_HOST_TIMEOUT and then walked away WITHOUT cancelling — leaving a
+        // detached task running on catalogExecutor. Across cycles those tasks piled up and
+        // spiralled. Bounding the total here keeps the thread free for the next cycle.
+        long deadlineNanos = System.nanoTime() + PER_HOST_TIMEOUT.toNanos();
+
         Set<String> catalogNames;
         try {
             HttpResponse<String> catalogResponse = sendWithGoawayRetry(buildCatalogRequest(host))
-                    .get(PER_REQUEST_TIMEOUT.toMillis() * 2, TimeUnit.MILLISECONDS);
+                    .get(remainingMillis(deadlineNanos), TimeUnit.MILLISECONDS);
             @SuppressWarnings("unchecked")
             Map<String, Object> responseObject = objectMapper.readValue(catalogResponse.body(), Map.class);
             responseObject.remove("consul");
@@ -188,8 +224,20 @@ public class ConsulCatalogService {
 
         for (Map.Entry<String, CompletableFuture<HttpResponse<String>>> e : futures.entrySet()) {
             String name = e.getKey();
+            long budgetMs = remainingMillis(deadlineNanos);
+            if (budgetMs <= 0) {
+                // Host budget exhausted. Stop waiting and cancel everything still pending so
+                // this thread returns NOW instead of grinding through the rest. Abandoned
+                // lookups count as failures, which makes result.clean() false and skips route
+                // cleanup (§7.1) — we never delete live routes off a partial view.
+                int abandoned = cancelPending(futures);
+                failed += abandoned;
+                log.warn("Consul host {} exceeded its {}ms budget; abandoned {} pending lookup(s) to free the cycle",
+                        host.getEndpoint(), PER_HOST_TIMEOUT.toMillis(), abandoned);
+                break;
+            }
             try {
-                HttpResponse<String> response = e.getValue().get(PER_REQUEST_TIMEOUT.toMillis() * 2, TimeUnit.MILLISECONDS);
+                HttpResponse<String> response = e.getValue().get(budgetMs, TimeUnit.MILLISECONDS);
                 PerServiceOutcome outcome = processServiceByName(name, response.body());
                 switch (outcome) {
                     case PerServiceOutcome.Kept k -> perService.put(name, k.entries());
@@ -207,6 +255,28 @@ public class ConsulCatalogService {
         }
 
         return new HostResult(host, catalogNames, perService, emptyFromConsul, failed, false);
+    }
+
+    /** Millis left until {@code deadlineNanos}, never negative. */
+    private static long remainingMillis(long deadlineNanos) {
+        return Math.max(0L, TimeUnit.NANOSECONDS.toMillis(deadlineNanos - System.nanoTime()));
+    }
+
+    /**
+     * Cancels every still-pending lookup and returns how many were cancelled. We stop waiting
+     * immediately; the in-flight HTTP requests are additionally bounded by their own
+     * {@code .timeout(PER_REQUEST_TIMEOUT)} so any that ignore the cancel still self-terminate
+     * within seconds rather than holding the connection for the rest of the (sequential) loop.
+     */
+    private int cancelPending(Map<String, CompletableFuture<HttpResponse<String>>> futures) {
+        int cancelled = 0;
+        for (CompletableFuture<HttpResponse<String>> f : futures.values()) {
+            if (!f.isDone()) {
+                f.cancel(true);
+                cancelled++;
+            }
+        }
+        return cancelled;
     }
 
     private void logPerServiceFailure(String serviceName, Throwable cause) {

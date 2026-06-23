@@ -148,6 +148,7 @@ public class Constants {
     public static final String MCP_META_FROM_OPENAPI = "mcp-from-openapi";
     public static final String MCP_META_PROMOTE_INCLUDE = "mcp-promote-include";
     public static final String MCP_META_PROMOTE_EXCLUDE = "mcp-promote-exclude";
+    public static final String MCP_META_FORWARD_AUTH = "mcp-forward-auth";
 
     // Per-tool signed manifest tags. Each suffix is appended to "mcp-tools-<name>-".
     public static final String MCP_META_TOOLS_SIGNATURE_SUFFIX = "-signature";

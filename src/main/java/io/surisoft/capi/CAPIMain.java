@@ -53,7 +53,7 @@ public class CAPIMain {
 
             ScheduledExecutorService scheduler = startSchedulers(startup);
 
-            registerShutdownHook(websocketGateway, grpcGateway, mcpGateway, restGateway, scheduler, adminGateway);
+            registerShutdownHook(websocketGateway, grpcGateway, mcpGateway, restGateway, scheduler, adminGateway, startup);
 
             log.info("CAPI Gateway started successfully.");
             Thread.currentThread().join();
@@ -116,11 +116,14 @@ public class CAPIMain {
         if(startup.getConsulStore() != null) {
             adminGateway.setConsulStore(startup.getConsulStore());
         }
+        if(startup.getJvmObservability() != null) {
+            adminGateway.setJvmObservability(startup.getJvmObservability());
+        }
         adminGateway.start();
         return adminGateway;
     }
 
-    private static void registerShutdownHook(@Nullable WebsocketGateway websocketGateway, @Nullable GrpcGateway grpcGateway, @Nullable McpGateway mcpGateway, @Nullable RestGateway restGateway, ScheduledExecutorService scheduler, AdminGateway adminGateway) {
+    private static void registerShutdownHook(@Nullable WebsocketGateway websocketGateway, @Nullable GrpcGateway grpcGateway, @Nullable McpGateway mcpGateway, @Nullable RestGateway restGateway, ScheduledExecutorService scheduler, AdminGateway adminGateway, Startup startup) {
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             log.info("Shutting down CAPI Gateway...");
             if(websocketGateway != null) websocketGateway.stop();
@@ -129,6 +132,7 @@ public class CAPIMain {
             if(restGateway != null) restGateway.stop();
             scheduler.shutdownNow();
             adminGateway.stop();
+            if(startup.getJvmObservability() != null) startup.getJvmObservability().stop();
             log.info("CAPI Gateway stopped.");
         }));
     }
@@ -292,9 +296,11 @@ public class CAPIMain {
         if(capiConfiguration.getMcp() != null && capiConfiguration.getMcp().isEnabled()
                 && startup.getMcpToolRegistry() != null
                 && startup.getMcpSessionStore() != null) {
-            java.net.http.HttpClient mcpHttpClient = java.net.http.HttpClient.newBuilder()
-                    .connectTimeout(java.time.Duration.ofSeconds(10))
-                    .build();
+            // Share the consulHttpClient so MCP OpenAPI-promoted tool dispatch uses
+            // the same trust material as every other JDK-HttpClient consumer. A
+            // freshly-built HttpClient here would default to JVM cacerts and silently
+            // fail PKIX validation against internal-CA backends.
+            java.net.http.HttpClient mcpHttpClient = startup.getConsulHttpClient();
             McpBackendLoadBalancer loadBalancer = startup.getMcpLoadBalancer() != null
                     ? startup.getMcpLoadBalancer()
                     : new McpBackendLoadBalancer(capiConfiguration.getMcp().getCircuitBreakerCooldownMs());

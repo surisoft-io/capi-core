@@ -302,8 +302,12 @@ public class McpServerClient {
         return forwardJsonRpc(service, "prompts/get", params, "prompts/get " + name, timeout);
     }
 
-    @SuppressWarnings("unchecked")
     public Object forwardToolCall(Service service, String toolName, Object arguments, int timeout) throws Exception {
+        return forwardToolCall(service, toolName, arguments, timeout, null);
+    }
+
+    @SuppressWarnings("unchecked")
+    public Object forwardToolCall(Service service, String toolName, Object arguments, int timeout, String forwardedAuth) throws Exception {
         Map<String, String> props = service.getServiceMeta().getUnknownProperties();
 
         // Strip prefix
@@ -312,6 +316,13 @@ public class McpServerClient {
         if (!prefix.isEmpty() && backendToolName.startsWith(prefix + "_")) {
             backendToolName = backendToolName.substring(prefix.length() + 1);
         }
+
+        // Per-service opt-in: forward the end-user's Authorization header into the
+        // downstream MCP server. Off by default — MCP servers are typically session-
+        // authenticated and shouldn't be handed a caller token unless they're set up
+        // to validate it against the same IdP.
+        boolean forwardAuth = forwardedAuth != null
+                && "true".equalsIgnoreCase(props.getOrDefault(Constants.MCP_META_FORWARD_AUTH, "false"));
 
         // Build JSON-RPC envelope
         Map<String, Object> jsonRpcRequest = new LinkedHashMap<>();
@@ -363,6 +374,7 @@ public class McpServerClient {
                 if (session.sessionId != null) {
                     requestBuilder.header(Constants.MCP_SESSION_HEADER, session.sessionId);
                 }
+                if (forwardAuth) requestBuilder.header("Authorization", forwardedAuth);
                 if (mcpTracer != null) mcpTracer.injectContext(attemptSpan, requestBuilder);
 
                 HttpResponse<String> response = httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
@@ -391,6 +403,7 @@ public class McpServerClient {
                                 if (session.sessionId != null) {
                                     requestBuilder.header(Constants.MCP_SESSION_HEADER, session.sessionId);
                                 }
+                                if (forwardAuth) requestBuilder.header("Authorization", forwardedAuth);
                                 if (mcpTracer != null) mcpTracer.injectContext(attemptSpan, requestBuilder);
                                 response = httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
                                 if (mcpTracer != null) mcpTracer.setHttpStatus(attemptSpan, response.statusCode());

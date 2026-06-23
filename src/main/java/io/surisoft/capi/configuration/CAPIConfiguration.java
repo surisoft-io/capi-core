@@ -29,6 +29,7 @@ public class CAPIConfiguration {
     private Mcp mcp;
     private Grpc grpc;
     private ApiKeyStore apiKeyStore;
+    private Observability observability = new Observability();
 
     public String getVersion() {
         return version;
@@ -607,6 +608,37 @@ public class CAPIConfiguration {
     }
     public void setApiKeyStore(ApiKeyStore apiKeyStore) {
         this.apiKeyStore = apiKeyStore;
+    }
+
+    public Observability getObservability() {
+        return observability;
+    }
+    public void setObservability(Observability observability) {
+        this.observability = observability;
+    }
+
+    /** Top-level observability config — currently just JVM-level (JFR). */
+    public static class Observability {
+        private Jvm jvm = new Jvm();
+
+        public Jvm getJvm() { return jvm; }
+        public void setJvm(Jvm jvm) { this.jvm = jvm; }
+
+        /** In-memory JFR aggregators exposed via /info/jvm/*. Opt-in. */
+        public static class Jvm {
+            private boolean enabled = false;
+            private int sampleIntervalMs = 20;
+            private int retentionSamples = 15_000;
+
+            public boolean isEnabled() { return enabled; }
+            public void setEnabled(boolean enabled) { this.enabled = enabled; }
+
+            public int getSampleIntervalMs() { return sampleIntervalMs; }
+            public void setSampleIntervalMs(int sampleIntervalMs) { this.sampleIntervalMs = sampleIntervalMs; }
+
+            public int getRetentionSamples() { return retentionSamples; }
+            public void setRetentionSamples(int retentionSamples) { this.retentionSamples = retentionSamples; }
+        }
     }
 
     public static class Grpc {

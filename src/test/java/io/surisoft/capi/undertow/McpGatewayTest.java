@@ -675,6 +675,95 @@ class McpGatewayTest {
     }
 
     @Test
+    void toolsList_filtersByPerServiceOpaPolicy() throws Exception {
+        int gatewayPort = findFreePort();
+
+        try (Cache<String, Service> opaSvcCache = new Cache2kBuilder<String, Service>() {}
+                .name("testToolsListVis-" + System.currentTimeMillis())
+                .eternal(true).entryCapacity(100).storeByReference(true).build();
+             Cache<String, McpSession> opaSessCache = new Cache2kBuilder<String, McpSession>() {}
+                .name("testToolsListVisSess-" + System.currentTimeMillis())
+                .expireAfterWrite(60000, TimeUnit.MILLISECONDS).entryCapacity(100).storeByReference(true).build()) {
+
+            CAPIConfiguration opaConfig = new CAPIConfiguration();
+            CAPIConfiguration.Mcp mcp = new CAPIConfiguration.Mcp();
+            mcp.setEnabled(true);
+            mcp.setPort(gatewayPort);
+            mcp.setSessionTtl(60000);
+            mcp.setToolCallTimeout(5000);
+            opaConfig.setMcp(mcp);
+            opaConfig.setVersion("1.0.0-test");
+            CAPIConfiguration.Oauth2 oauth2 = new CAPIConfiguration.Oauth2();
+            oauth2.setEnabled(false);
+            opaConfig.setOauth2(oauth2);
+
+            // Mock OPA: good-token allows "allow-svc" / denies "deny-svc"
+            OpaWasmService opaWasmService = mock(OpaWasmService.class);
+            OpaResult allowResult = new OpaResult();
+            allowResult.setResult(true);
+            OpaResult denyResult = new OpaResult();
+            denyResult.setResult(false);
+            when(opaWasmService.evaluate("allow-svc", "allow-policy", "good-token", true)).thenReturn(allowResult);
+            when(opaWasmService.evaluate("deny-svc", "deny-policy", "good-token", true)).thenReturn(denyResult);
+
+            try (McpGateway opaGw = new McpGateway(gatewayPort, null,
+                    new McpToolRegistry(opaSvcCache), new HttpUtils(null, null),
+                    opaWasmService, HttpClient.newHttpClient(), new LocalMcpSessionStore(opaSessCache), opaConfig,
+                    new McpBackendLoadBalancer(30000))) {
+                opaGw.start();
+
+                HttpClient client = HttpClient.newHttpClient();
+                String initBody = objectMapper.writeValueAsString(Map.of("jsonrpc", "2.0", "method", "initialize", "id", 1));
+                HttpResponse<String> initResp = client.send(HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + gatewayPort + "/mcp"))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(initBody)).build(),
+                        HttpResponse.BodyHandlers.ofString());
+                String sessionId = initResp.headers().firstValue("Mcp-Session-Id").orElseThrow();
+
+                // (a) no rego — always visible
+                Service openSvc = createMcpServiceWithBackend("open-svc", "open-tool", "localhost", findFreePort());
+                opaSvcCache.put("open-svc", openSvc);
+                // (b) rego allows good-token
+                Service allowSvc = createMcpServiceWithBackend("allow-svc", "allow-tool", "localhost", findFreePort());
+                allowSvc.getServiceMeta().setOpaRego("allow-policy");
+                opaSvcCache.put("allow-svc", allowSvc);
+                // (c) rego denies good-token
+                Service denySvc = createMcpServiceWithBackend("deny-svc", "deny-tool", "localhost", findFreePort());
+                denySvc.getServiceMeta().setOpaRego("deny-policy");
+                opaSvcCache.put("deny-svc", denySvc);
+
+                String listBody = objectMapper.writeValueAsString(Map.of("jsonrpc", "2.0", "method", "tools/list", "id", 2));
+
+                // (1) WITH good token: open + allow visible, deny hidden
+                HttpResponse<String> withGood = client.send(HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + gatewayPort + "/mcp"))
+                        .header("Content-Type", "application/json")
+                        .header("Mcp-Session-Id", sessionId)
+                        .header("Authorization", "Bearer good-token")
+                        .POST(HttpRequest.BodyPublishers.ofString(listBody)).build(),
+                        HttpResponse.BodyHandlers.ofString());
+                assertEquals(200, withGood.statusCode());
+                assertTrue(withGood.body().contains("open-tool"), "no-rego tool must be visible");
+                assertTrue(withGood.body().contains("allow-tool"), "rego-allowed tool must be visible");
+                assertFalse(withGood.body().contains("deny-tool"), "rego-denied tool must be hidden");
+
+                // (2) WITHOUT Authorization: only open visible — both regoed tools fail closed
+                HttpResponse<String> noAuth = client.send(HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + gatewayPort + "/mcp"))
+                        .header("Content-Type", "application/json")
+                        .header("Mcp-Session-Id", sessionId)
+                        .POST(HttpRequest.BodyPublishers.ofString(listBody)).build(),
+                        HttpResponse.BodyHandlers.ofString());
+                assertEquals(200, noAuth.statusCode());
+                assertTrue(noAuth.body().contains("open-tool"), "no-rego tool must still be visible");
+                assertFalse(noAuth.body().contains("allow-tool"), "rego-attached tool must be hidden when no Bearer is sent (fail closed)");
+                assertFalse(noAuth.body().contains("deny-tool"), "rego-attached tool must be hidden when no Bearer is sent (fail closed)");
+            }
+        }
+    }
+
+    @Test
     void toolsCall_backendUrlWithNullSchemeAndContext_usesDefaults() throws Exception {
         int backendPort = findFreePort();
         Undertow backend = Undertow.builder()
@@ -1926,6 +2015,89 @@ class McpGatewayTest {
 
             assertEquals(200, resp.statusCode());
             assertEquals("Bearer e2e-test-token", seenAuth.get());
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void tagDefinedTool_forwardsAuthorizationHeader() throws Exception {
+        java.util.concurrent.atomic.AtomicReference<String> seenAuth = new java.util.concurrent.atomic.AtomicReference<>();
+
+        int backendPort = findFreePort();
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(ex -> {
+                    var hv = ex.getRequestHeaders().get(Headers.AUTHORIZATION);
+                    if (hv != null && !hv.isEmpty()) seenAuth.set(hv.getFirst());
+                    ex.setStatusCode(StatusCodes.OK);
+                    ex.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+                    ex.getResponseSender().send("{\"ok\":true}");
+                }).build();
+        backend.start();
+
+        try {
+            String sessionId = initializeSession();
+            Service service = createMcpServiceWithBackend("auth-sync-svc", "greet", "localhost", backendPort);
+            serviceCache.put("auth-sync-svc", service);
+
+            String body = objectMapper.writeValueAsString(Map.of(
+                    "jsonrpc", "2.0", "method", "tools/call", "id", 201,
+                    "params", Map.of("name", "greet", "arguments", Map.of("name", "world"))
+            ));
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(new URI("http://localhost:" + port + "/mcp"))
+                    .header("Content-Type", "application/json")
+                    .header("Mcp-Session-Id", sessionId)
+                    .header("Authorization", "Bearer sync-test-token")
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            HttpResponse<String> resp = HttpClient.newHttpClient().send(req, HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(200, resp.statusCode());
+            assertEquals("Bearer sync-test-token", seenAuth.get());
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void streamingTool_forwardsAuthorizationHeader() throws Exception {
+        java.util.concurrent.atomic.AtomicReference<String> seenAuth = new java.util.concurrent.atomic.AtomicReference<>();
+
+        int backendPort = findFreePort();
+        Undertow backend = Undertow.builder()
+                .addHttpListener(backendPort, "0.0.0.0")
+                .setHandler(ex -> {
+                    var hv = ex.getRequestHeaders().get(Headers.AUTHORIZATION);
+                    if (hv != null && !hv.isEmpty()) seenAuth.set(hv.getFirst());
+                    ex.getResponseHeaders().put(Headers.CONTENT_TYPE, "text/event-stream");
+                    ex.getResponseSender().send("line1\nline2\n");
+                }).build();
+        backend.start();
+
+        try {
+            String sessionId = initializeSession();
+            Service service = createMcpServiceWithBackend("auth-stream-svc", "streamtool", "localhost", backendPort);
+            service.getServiceMeta().handleUnknown("mcp-streaming", "streamtool");
+            serviceCache.put("auth-stream-svc", service);
+
+            String body = objectMapper.writeValueAsString(Map.of(
+                    "jsonrpc", "2.0", "method", "tools/call", "id", 202,
+                    "params", Map.of("name", "streamtool", "arguments", Map.of())
+            ));
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(new URI("http://localhost:" + port + "/mcp"))
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "text/event-stream")
+                    .header("Mcp-Session-Id", sessionId)
+                    .header("Authorization", "Bearer stream-test-token")
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            HttpResponse<String> resp = HttpClient.newHttpClient().send(req, HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(200, resp.statusCode());
+            assertEquals("Bearer stream-test-token", seenAuth.get());
         } finally {
             backend.stop();
         }
