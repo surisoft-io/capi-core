@@ -614,6 +614,33 @@ class RestGatewayTest {
         assertEquals(200, resp.statusCode());
     }
 
+    @Test
+    void openApi_withRootContext_validatesApiPathNotBackendPath() throws Exception {
+        // Regression: OpenAPI validation must match the API-facing path ("/items"), NOT the
+        // backend-forwarding path ("/backend/items"). A service with a rootContext previously
+        // failed every validated call with "Call not allowed" (400) because of the extra segment.
+        int port = pickPort();
+        OpenAPI openAPI = new OpenAPI();
+        Paths paths = new Paths();
+        PathItem pathItem = new PathItem();
+        pathItem.setGet(new Operation());
+        paths.addPathItem("/items", pathItem);
+        openAPI.setPaths(paths);
+
+        RestClient rc = createOpenRestClient("/my-service/v1");
+        rc.setRootContext("/backend");
+        rc.setOpenAPI(openAPI);
+        restClientMap.put("/my-service/v1", rc);
+        runningGateway = createGateway(port);
+        runningGateway.runProxy();
+
+        HttpResponse<String> resp = HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder().uri(URI.create("http://localhost:" + port + "/api/my-service/v1/items")).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, resp.statusCode());
+    }
+
     // === Stop ===
 
     @Test

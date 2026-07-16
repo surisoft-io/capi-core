@@ -7,6 +7,7 @@ import io.surisoft.capi.schema.State;
 import io.surisoft.capi.schema.WebsocketClient;
 import io.surisoft.capi.service.OpaWasmService;
 import io.surisoft.capi.service.RestClientSnapshot;
+import io.surisoft.capi.undertow.CAPILoadBalancerProxyClient;
 import io.surisoft.capi.utils.HttpUtils;
 import io.surisoft.capi.utils.WebsocketUtils;
 import org.slf4j.Logger;
@@ -66,7 +67,8 @@ public class RestTransportHandler implements TransportHandler {
 
     @Override
     public void onChange(Service oldSvc, Service newSvc) {
-        restClientMap.remove(oldSvc.getContext());
+        RestClient removed = restClientMap.remove(oldSvc.getContext());
+        drainOldClient(removed, oldSvc);
         log.info("REST client removed for update: {}", oldSvc.getContext());
         if (isPublished(newSvc)) {
             restClientMap.put(newSvc.getContext(), buildRestClient(newSvc));
@@ -76,9 +78,24 @@ public class RestTransportHandler implements TransportHandler {
 
     @Override
     public void onDisappear(Service service) {
-        if (restClientMap.remove(service.getContext()) != null) {
+        RestClient removed = restClientMap.remove(service.getContext());
+        if (removed != null) {
+            drainOldClient(removed, service);
             log.info("REST client removed: {}", service.getContext());
         }
+    }
+
+    /** Reclaim the orphaned client's backend keep-alive sockets so they don't leak file descriptors
+     *  (Undertow never TTL-evicts a dereferenced pool). Deferred past the route's maxRequestTime so
+     *  in-flight requests on the old client finish untouched. */
+    private void drainOldClient(RestClient removed, Service svc) {
+        if (removed == null) {
+            return;
+        }
+        long maxRequestTime = (svc.getServiceMeta() != null && svc.getServiceMeta().getResponseTimeout() > 0)
+                ? svc.getServiceMeta().getResponseTimeout()
+                : globalResponseTimeout;
+        CAPILoadBalancerProxyClient.drainHandler(removed.getHttpHandler(), maxRequestTime);
     }
 
     @Override

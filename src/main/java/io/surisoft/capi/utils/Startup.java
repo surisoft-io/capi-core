@@ -195,6 +195,7 @@ public class Startup {
     }
 
     private void rebuildConsulHttpClient() {
+        HttpClient previous = consulHttpClient;
         startConsulHttpClient();
         HttpClient client = consulHttpClient;
         if (consulStore != null) consulStore.setHttpClient(client);
@@ -202,6 +203,17 @@ public class Startup {
         if (opaWasmService != null) opaWasmService.setHttpClient(client);
         if (apiKeyStore != null) apiKeyStore.setHttpClient(client);
         log.info("Consul HttpClient rebuilt with updated SSLContext and re-injected into consumers");
+        // Release the previous client: a discarded HttpClient pins its selector-manager thread,
+        // selector FDs, virtual-thread executor and pooled sockets until GC — which rarely runs
+        // here. shutdown() is a graceful, non-blocking close: in-flight discovery requests finish,
+        // then the client and its resources are released.
+        if (previous != null && previous != client) {
+            try {
+                previous.shutdown();
+            } catch (Exception e) {
+                log.warn("Failed to shut down previous Consul HttpClient: {}", e.getMessage());
+            }
+        }
     }
 
     private void startApiKeyStore() {
