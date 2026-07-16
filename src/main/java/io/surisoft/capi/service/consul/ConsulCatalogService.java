@@ -462,6 +462,19 @@ public class ConsulCatalogService {
         if (thisInstance.getScheme() != null && !thisInstance.getScheme().isEmpty()) {
             svc.getServiceMeta().setScheme(thisInstance.getScheme());
         }
+        // Per-instance backend override: repoint every mapping at this instance's
+        // ingress. Rebuild the set (hostname/port participate in Mapping.hashCode,
+        // so mutating in place would corrupt the HashSet).
+        if (thisInstance.getIngress() != null && !thisInstance.getIngress().isEmpty()) {
+            Set<Mapping> rebuilt = new HashSet<>();
+            for (Mapping m : svc.getMappingList()) {
+                serviceUtils.applyIngressToMapping(m, thisInstance.getIngress());
+                rebuilt.add(m);
+            }
+            svc.setMappingList(rebuilt);
+            svc.setRoundRobinEnabled(rebuilt.size() != 1);
+            svc.setFailOverEnabled(rebuilt.size() != 1);
+        }
     }
 
     private void setContext(Service svc) {
@@ -497,8 +510,18 @@ public class ConsulCatalogService {
                     ? p.oldSvc().getServiceMeta().getOpenApiEndpoint() : null;
             String newEndpoint = p.newSvc().getServiceMeta() != null
                     ? p.newSvc().getServiceMeta().getOpenApiEndpoint() : null;
-            if (Objects.equals(oldEndpoint, newEndpoint) && p.oldSvc().getOpenAPI() != null) {
-                // Endpoint URL unchanged — the cached parsed spec is still valid.
+            String oldVersion = p.oldSvc().getServiceMeta() != null
+                    ? p.oldSvc().getServiceMeta().getVersion() : null;
+            String newVersion = p.newSvc().getServiceMeta() != null
+                    ? p.newSvc().getServiceMeta().getVersion() : null;
+            // A `version` meta bump is the explicit "reload my API definition" signal from
+            // service owners. It must force a re-fetch even when the endpoint URL is unchanged
+            // — otherwise the cached spec goes stale forever (regressed in 627b6cb, which keyed
+            // the reuse decision purely on the URL). Only reuse the cached spec when the URL is
+            // unchanged AND the version is unchanged.
+            if (Objects.equals(oldEndpoint, newEndpoint)
+                    && !serviceUtils.didVersionChange(oldVersion, newVersion)
+                    && p.oldSvc().getOpenAPI() != null) {
                 p.newSvc().setOpenAPI(p.oldSvc().getOpenAPI());
             } else {
                 toFetch.put(p.newSvc().getId(), p.newSvc());

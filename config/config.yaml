@@ -6,8 +6,11 @@ capi:
   runningMode: full
   adminPort: 8381
   reverseProxyHost:
+  observability:
+    jvm:
+      enabled: true
   rest:
-    enabled: false
+    enabled: true
     port: 8380
     listeningAddress: 0.0.0.0
     contextPath: /api

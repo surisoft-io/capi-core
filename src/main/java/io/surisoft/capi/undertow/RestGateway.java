@@ -22,6 +22,7 @@ import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.HttpUtils;
 import io.surisoft.capi.utils.WebsocketUtils;
 import io.undertow.Undertow;
+import io.undertow.server.handlers.Cookie;
 import io.undertow.util.*;
 import io.undertow.server.HttpServerExchange;
 import io.micrometer.core.instrument.Counter;
@@ -200,22 +201,45 @@ public class RestGateway {
 
             // Access log — fires after the full proxy round-trip completes
             exchange.addExchangeCompleteListener((ex, nextListener) -> {
-                //We dont want to log health calls
-                if(!requestPath.equals(Constants.CAPI_HEALTH_PATH)) {
-                    long durationMs = (System.nanoTime() - startNanos) / 1_000_000;
-                    String originalIp = resolveClientIp(ex);
-                    ACCESS_LOG.info("{} {} {} {}ms {}",
-                            ex.getRequestMethod(),
-                            ex.getRequestPath(),
-                            ex.getStatusCode(),
-                            durationMs,
-                            originalIp);
+                try {
+                    //We dont want to log health calls
+                    if(!requestPath.equals(Constants.CAPI_HEALTH_PATH)) {
+                        long durationMs = (System.nanoTime() - startNanos) / 1_000_000;
+                        String originalIp = resolveClientIp(ex);
+                        ACCESS_LOG.info("{} {} {} {}ms {}",
+                                ex.getRequestMethod(),
+                                ex.getRequestPath(),
+                                ex.getStatusCode(),
+                                durationMs,
+                                originalIp);
+                    }
+                } finally {
+                    // MUST always proceed: proceed() drives the completion-listener chain whose
+                    // terminal listener is Undertow's connection cleanup. Skipping it (e.g. on the
+                    // health path, or if the body above throws) stalls the chain, so the channel is
+                    // never closed and the socket FD leaks. Confirmed root cause of the FD leak.
                     nextListener.proceed();
                 }
             });
 
             // Add CORS headers to all responses (not just OPTIONS)
             addCorsHeaders(exchange);
+
+            // No aviao - needs review
+            /* We want to provide a way for CAPI to set a cookie for human/browser legit request
+            *  Services will need to request this feature via ServiceMeta.browser-session-enabled
+            *  If a valid origin is found in the request, then CAPI will create a session signature valid for
+            *  ServiceMeta.browser-session-duration and set a cookie with that expiration. for CAPI own domain (RPM)
+            *  and Service context path.
+            *  The browser will then send the cookie for every service call: ex: capi/service/dev/get
+            *  If this feature is enable for the given service, CAPI will not allow any calls without the session header.
+            *  CAPI will never control if a session request is coming from a human //Check if its possible to control, via form hidden field maybe
+            *  The browser should only POST to CAPI /session endpoint if a human is actually holding the browser session.
+            */
+            if (requestPath.equals("/session")) {
+                handleSession(exchange, requestPath);
+                return;
+            }
 
             // Health check
             if (requestPath.equals(Constants.CAPI_HEALTH_PATH)) {
@@ -254,21 +278,26 @@ public class RestGateway {
             if (meterRegistry != null) {
                 final String metricServiceId = httpUtils.contextToRole(restClient.getServiceId());
                 exchange.addExchangeCompleteListener((ex, nextListener) -> {
-                    String statusGroup = String.valueOf(ex.getStatusCode() / 100) + "xx";
-                    Counter.builder("capi_requests_total")
-                            .tag("service", metricServiceId)
-                            .tag("method", ex.getRequestMethod().toString())
-                            .tag("status", String.valueOf(ex.getStatusCode()))
-                            .tag("status_group", statusGroup)
-                            .register(meterRegistry)
-                            .increment();
-                    long durationNanos = System.nanoTime() - startNanos;
-                    Timer.builder("capi_request_duration")
-                            .tag("service", metricServiceId)
-                            .tag("method", ex.getRequestMethod().toString())
-                            .register(meterRegistry)
-                            .record(durationNanos, TimeUnit.NANOSECONDS);
-                    nextListener.proceed();
+                    try {
+                        String statusGroup = (ex.getStatusCode() / 100) + "xx";
+                        Counter.builder("capi_requests_total")
+                                .tag("service", metricServiceId)
+                                .tag("method", ex.getRequestMethod().toString())
+                                .tag("status", String.valueOf(ex.getStatusCode()))
+                                .tag("status_group", statusGroup)
+                                .register(meterRegistry)
+                                .increment();
+                        long durationNanos = System.nanoTime() - startNanos;
+                        Timer.builder("capi_request_duration")
+                                .tag("service", metricServiceId)
+                                .tag("method", ex.getRequestMethod().toString())
+                                .register(meterRegistry)
+                                .record(durationNanos, TimeUnit.NANOSECONDS);
+                    } finally {
+                        // Always proceed — an exception in the metrics code above must not stall
+                        // the completion chain and leak the connection (see the access-log listener).
+                        nextListener.proceed();
+                    }
                 });
             }
 
@@ -295,10 +324,11 @@ public class RestGateway {
 
             // --- Pre-proxy checks (all synchronous, fast, no I/O to backends) ---
 
-            // 0. OpenAPI operation validation
+            // 0. OpenAPI operation validation — match against the API-facing path (root context
+            // stripped); the spec's paths are relative to servers.url, not the backend root context.
             if (restClient.getOpenAPI() != null) {
-                String forwardPath = normalizePathForForwarding(restClient, requestPath);
-                String openApiResult = checkOpenApi(exchange, restClient, forwardPath);
+                String apiPath = stripToApiPath(restClient, requestPath);
+                String openApiResult = checkOpenApi(exchange, restClient, apiPath);
                 if (openApiResult != null) {
                     httpErrorHandler.sendError(exchange, openApiResult.startsWith("Call not allowed") ? 400 : 401, openApiResult);
                     return;
@@ -424,10 +454,12 @@ public class RestGateway {
     }
 
     /**
-     * Normalize the path for forwarding to the backend.
-     * Strips the context path and service ID, keeps the remaining path.
+     * The request path as the OpenAPI spec sees it: CAPI context path and the service ID removed,
+     * but WITHOUT the backend root context. The spec's paths (relative to {@code servers.url}) do
+     * not include the backend root context, so request validation must match against this, not the
+     * backend-forwarding path. Returns "/" when the call targets the service root.
      */
-    private String normalizePathForForwarding(RestClient restClient, String requestPath) {
+    private String stripToApiPath(RestClient restClient, String requestPath) {
         // Strip context path
         String path = requestPath;
         if (contextPath != null && path.startsWith(contextPath)) {
@@ -435,13 +467,22 @@ public class RestGateway {
         }
         // Strip service ID
         path = path.replaceFirst(restClient.getServiceId(), "");
+        return path.isEmpty() ? "/" : path;
+    }
 
+    /**
+     * Normalize the path for forwarding to the backend: the API path (see {@link #stripToApiPath})
+     * with the backend root context prepended when one is configured.
+     */
+    private String normalizePathForForwarding(RestClient restClient, String requestPath) {
+        String path = stripToApiPath(restClient, requestPath);
         // Prepend root context if set
         if (restClient.getRootContext() != null && !restClient.getRootContext().isEmpty()
                 && !restClient.getRootContext().equals("/")) {
-            return restClient.getRootContext() + path;
+            // stripToApiPath returns "/" for the service root; don't emit "<root>/".
+            return path.equals("/") ? restClient.getRootContext() : restClient.getRootContext() + path;
         }
-        return path.isEmpty() ? "/" : path;
+        return path;
     }
 
     private String checkApiKey(HttpServerExchange exchange, RestClient restClient) {
@@ -659,5 +700,53 @@ public class RestGateway {
         }
         java.net.InetAddress addr = exchange.getSourceAddress().getAddress();
         return addr != null ? addr.getHostAddress() : "unknown";
+    }
+
+    //No aviao - needs review
+    private void handleSession(HttpServerExchange exchange, String requestPath) {
+        //need service authorized hosts
+        String origin = exchange.getRequestHeaders().getFirst("Origin");
+
+        if(!exchange.getRequestMethod().equals(HttpString.tryFromString("POST"))) {
+            httpErrorHandler.sendError(exchange, StatusCodes.METHOD_NOT_ALLOWED, "Bad request on.", contextPath);
+            return;
+        }
+
+        //Here i will need to get the form (maybe url enconded) with the following:
+        // 1 - The service id (in context path string representation)
+        // 2 - Some form field that may identify the request as a valid human request
+
+        //dummy string;
+        String dummyServiceId = "dddd";
+        String restClientId = extractServiceId(dummyServiceId);
+        Map<String, RestClient> activeRoutes = restClientSnapshot.current();
+        RestClient restClient = (restClientId == null) ? null : activeRoutes.get(restClientId);
+        if (restClient == null) {
+            httpErrorHandler.sendError(exchange, StatusCodes.NOT_FOUND, "The requested route was not found, please try again later on.", dummyServiceId);
+            return;
+        }
+
+        // After having the service object we will check if this service supports sessions
+        // starting with a dummy
+        boolean sessionEnabled = false;
+        if(sessionEnabled) {
+            // check if a list of allowed web applications is present
+            // if yes, the origin of this request will need to match of the allowed from the given list
+        } else {
+            httpErrorHandler.sendError(exchange, StatusCodes.BAD_REQUEST, "Session support not available for .", dummyServiceId);
+            return;
+        }
+
+        //if cookie exists, we extend the session
+        Cookie capiSessionCookie = exchange.getRequestCookie("CAPI-SESSION");
+        if(capiSessionCookie != null) {
+            exchange.setStatusCode(StatusCodes.CREATED);
+            //capiSessionCookie.setMaxAge()
+            exchange.getResponseSender().send("a success message");
+        } else {
+            //set the cookie logic
+            exchange.setStatusCode(StatusCodes.CREATED);
+            exchange.getResponseSender().send("a success message");
+        }
     }
 }

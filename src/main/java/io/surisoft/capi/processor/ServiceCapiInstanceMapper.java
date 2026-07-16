@@ -49,6 +49,9 @@ public class ServiceCapiInstanceMapper {
             case "ignore-open-api":
                 instance.setIgnoreOpenApi(Boolean.parseBoolean(value));
                 break;
+            case "ingress":
+                instance.setIngress(value);
+                break;
         }
     }
 }
