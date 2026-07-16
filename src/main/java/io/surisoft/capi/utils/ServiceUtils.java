@@ -110,6 +110,23 @@ public class ServiceUtils {
         return mapping;
     }
 
+    /**
+     * Points a mapping at the given ingress endpoint (host derived from the URL,
+     * port from the scheme: 80 for http, 443 for https). Mirrors the ingress
+     * branch of {@link #consulObjectToMapping} and is used by the per-instance
+     * ingress override so a single Consul registration can target a different
+     * backend per CAPI instance.
+     */
+    public void applyIngressToMapping(Mapping mapping, String ingress) {
+        mapping.setHostname(httpUtils.normalizeHttpEndpoint(ingress));
+        mapping.setIngress(true);
+        if(httpUtils.isEndpointSecure(ingress)) {
+            mapping.setPort(Constants.HTTPS_PORT);
+        } else {
+            mapping.setPort(Constants.HTTP_PORT);
+        }
+    }
+
     public void validateServiceType(Service service) {
         if(service.getServiceMeta().getType() == null) {
             service.getServiceMeta().setType("rest");
@@ -167,7 +184,7 @@ public class ServiceUtils {
         return existingEndpoint != null && !existingEndpoint.equals(incomingEndpoint);
     }
 
-    private boolean didVersionChange(String existingVersion, String incomingVersion) {
+    public boolean didVersionChange(String existingVersion, String incomingVersion) {
         if(existingVersion == null && incomingVersion != null) {
             return true;
         }
