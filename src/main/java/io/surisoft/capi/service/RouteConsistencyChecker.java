@@ -2,6 +2,7 @@ package io.surisoft.capi.service;
 
 import io.surisoft.capi.schema.RestClient;
 import io.surisoft.capi.schema.Service;
+import io.surisoft.capi.undertow.CAPILoadBalancerProxyClient;
 import org.cache2k.Cache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,6 +14,9 @@ import java.util.Map;
 public class RouteConsistencyChecker {
 
     private static final Logger log = LoggerFactory.getLogger(RouteConsistencyChecker.class);
+    /** Fallback drain grace basis when the service declares no responseTimeout; covers the global
+     *  REST/WS maxRequestTime ceilings so in-flight requests finish before the old pool is drained. */
+    private static final long DEFAULT_MAX_REQUEST_TIME = 180_000L;
     private final Cache<String, Service> serviceCache;
     private Map<String, RestClient> restClientMap;
     private RestClientSnapshot restClientSnapshot;
@@ -41,7 +45,14 @@ public class RouteConsistencyChecker {
             if(endpoint != null && !endpoint.isEmpty() && service.getValue().getOpenAPI() == null) {
                 log.warn("Inconsistency detected for service {}. Service will be removed.", service.getKey());
                 if(restClientMap != null) {
-                    restClientMap.remove(service.getValue().getContext());
+                    RestClient removed = restClientMap.remove(service.getValue().getContext());
+                    if (removed != null) {
+                        long maxRequestTime = service.getValue().getServiceMeta().getResponseTimeout() > 0
+                                ? service.getValue().getServiceMeta().getResponseTimeout()
+                                : DEFAULT_MAX_REQUEST_TIME;
+                        // Reclaim the orphaned client's backend sockets so they don't leak FDs.
+                        CAPILoadBalancerProxyClient.drainHandler(removed.getHttpHandler(), maxRequestTime);
+                    }
                 }
                 servicesToRemove.add(service.getKey());
             }

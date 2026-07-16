@@ -1,6 +1,8 @@
 package io.surisoft.capi.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import io.surisoft.capi.undertow.CAPILoadBalancerProxyClient;
+import io.undertow.server.HttpHandler;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.surisoft.capi.configuration.CapiSslContextHolder;
 import io.surisoft.capi.exception.HttpErrorHandler;
@@ -233,7 +235,9 @@ public class ConsulStore {
             if (service == null) continue;
             WebsocketClient tempClient = new WebsocketClient();
             tempClient.setMappingList(service.getMappingList());
+            HttpHandler oldHandler = restClient.getHttpHandler();
             restClient.setHttpHandler(websocketUtils.createClientHttpHandler(tempClient, service, new HttpErrorHandler(httpUtils), globalResponseTimeout));
+            CAPILoadBalancerProxyClient.drainHandler(oldHandler, globalResponseTimeout);
             count++;
         }
         log.debug("Rebuilt {} REST client handler(s) with new XnioSsl", count);
@@ -247,7 +251,9 @@ public class ConsulStore {
             String serviceKey = wsClient.getServiceId();
             Service service = serviceCache.get(serviceKey);
             if (service == null) continue;
+            HttpHandler oldHandler = wsClient.getHttpHandler();
             wsClient.setHttpHandler(websocketUtils.createClientHttpHandler(wsClient, service, null));
+            CAPILoadBalancerProxyClient.drainHandler(oldHandler, globalResponseTimeout);
             count++;
         }
         log.debug("Rebuilt {} WebSocket client handler(s) with new XnioSsl", count);
@@ -261,7 +267,9 @@ public class ConsulStore {
             String serviceKey = grpcClient.getServiceId();
             Service service = serviceCache.get(serviceKey);
             if (service == null) continue;
+            HttpHandler oldHandler = grpcClient.getHttpHandler();
             grpcClient.setHttpHandler(grpcUtils.createClientHttpHandler(grpcClient, service));
+            CAPILoadBalancerProxyClient.drainHandler(oldHandler, globalResponseTimeout);
             count++;
         }
         log.debug("Rebuilt {} gRPC client handler(s) with new XnioSsl", count);

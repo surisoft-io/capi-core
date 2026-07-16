@@ -13,6 +13,7 @@ public class ServiceCapiInstances {
         private boolean routeGroupFirst;
         private String scheme;
         private boolean ignoreOpenApi;
+        private String ingress;
 
         private boolean assumeParentSecured = true;
         private boolean assumeParentRouteGroupFirst = true;
@@ -55,6 +56,14 @@ public class ServiceCapiInstances {
 
         public void setIgnoreOpenApi(boolean ignoreOpenApi) {
             this.ignoreOpenApi = ignoreOpenApi;
+        }
+
+        public String getIngress() {
+            return ingress;
+        }
+
+        public void setIngress(String ingress) {
+            this.ingress = ingress;
         }
 
         public boolean isAssumeParentSecured() {
