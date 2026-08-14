@@ -10,6 +10,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
+import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -180,6 +181,51 @@ class ServiceUtilsTest {
         assertEquals(9090, result.getPort());
         assertFalse(result.isIngress());
         assertEquals("/", result.getRootContext());
+    }
+
+    @Test
+    void consulObjectToMapping_withoutIngress_stripsSchemeFromAddress() {
+        ConsulObject co = new ConsulObject();
+        co.setServiceName("rag-connectors");
+        co.setServiceAddress("http://vpce-009158417dfc77ff3.eu-west-1.vpce.amazonaws.com");
+        co.setServicePort(1818);
+        ServiceMeta meta = new ServiceMeta();
+        meta.setGroup("dev");
+        co.setServiceMeta(meta);
+
+        Mapping result = serviceUtils.consulObjectToMapping(co);
+        assertEquals("vpce-009158417dfc77ff3.eu-west-1.vpce.amazonaws.com", result.getHostname());
+        assertEquals(1818, result.getPort());
+        assertFalse(result.isIngress());
+    }
+
+    /** A scheme-prefixed address used to build http://http://host:1818, which parses to host "http". */
+    @Test
+    void normalizeConsulAddress_schemePrefixWouldOtherwiseYieldHostNamedHttp() {
+        assertEquals("http", URI.create("http://" + "http://some-host.example.com" + ":1818").getHost());
+        assertEquals("some-host.example.com",
+                URI.create("http://" + serviceUtils.normalizeConsulAddress("http://some-host.example.com", "svc") + ":1818").getHost());
+    }
+
+    @Test
+    void normalizeConsulAddress_variants() {
+        assertEquals("host.example.com", serviceUtils.normalizeConsulAddress("host.example.com", "svc"));
+        assertEquals("host.example.com", serviceUtils.normalizeConsulAddress("http://host.example.com", "svc"));
+        assertEquals("host.example.com", serviceUtils.normalizeConsulAddress("https://host.example.com", "svc"));
+        assertEquals("host.example.com", serviceUtils.normalizeConsulAddress("HTTPS://host.example.com", "svc"));
+        assertEquals("host.example.com", serviceUtils.normalizeConsulAddress("http://host.example.com/", "svc"));
+        assertEquals("host.example.com", serviceUtils.normalizeConsulAddress("http://host.example.com/api/v1", "svc"));
+        assertEquals("host.example.com", serviceUtils.normalizeConsulAddress("http://host.example.com:1818", "svc"));
+        assertEquals("host.example.com", serviceUtils.normalizeConsulAddress("host.example.com:1818", "svc"));
+        assertEquals("10.0.0.1", serviceUtils.normalizeConsulAddress("10.0.0.1", "svc"));
+    }
+
+    @Test
+    void normalizeConsulAddress_leavesIpv6AndBlankUntouched() {
+        assertEquals("2001:db8::1", serviceUtils.normalizeConsulAddress("2001:db8::1", "svc"));
+        assertEquals("[2001:db8::1]:1818", serviceUtils.normalizeConsulAddress("[2001:db8::1]:1818", "svc"));
+        assertNull(serviceUtils.normalizeConsulAddress(null, "svc"));
+        assertEquals("", serviceUtils.normalizeConsulAddress("", "svc"));
     }
 
     @Test

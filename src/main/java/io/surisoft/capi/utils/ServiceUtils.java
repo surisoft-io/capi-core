@@ -94,7 +94,7 @@ public class ServiceUtils {
                 mapping.setPort(Constants.HTTP_PORT);
             }
         } else {
-            mapping.setHostname(host);
+            mapping.setHostname(normalizeConsulAddress(host, consulObject.getServiceName()));
             mapping.setPort(port);
         }
 
@@ -108,6 +108,61 @@ public class ServiceUtils {
             mapping.setRootContext("/");
         }
         return mapping;
+    }
+
+    /**
+     * Reduces a Consul {@code ServiceAddress} to the bare host CAPI can put in a backend URI.
+     *
+     * <p>The backend URI is built as {@code scheme://hostname:port}, so a scheme-prefixed,
+     * path-carrying or port-carrying address produces a URI that {@link URI#create} accepts but
+     * that points somewhere else entirely — {@code http://http://host:1818} parses to
+     * {@code host=http}, which then fails DNS on every request and surfaces only as a 503
+     * "No server available at the moment". Consul accepts such an address happily, so normalize
+     * it here and tell the operator what was registered.
+     *
+     * <p>The scheme is <em>not</em> inferred from the address: the transport scheme comes from the
+     * {@code scheme} meta, and quietly flipping a route to TLS as a side effect of parsing an
+     * address would be worse than the warning.
+     */
+    String normalizeConsulAddress(String address, String serviceName) {
+        if (address == null || address.isBlank()) {
+            return address;
+        }
+
+        String normalized = address.strip();
+        String scheme = null;
+        if (normalized.regionMatches(true, 0, "http://", 0, 7)) {
+            scheme = "http";
+            normalized = normalized.substring(7);
+        } else if (normalized.regionMatches(true, 0, "https://", 0, 8)) {
+            scheme = "https";
+            normalized = normalized.substring(8);
+        }
+
+        int slash = normalized.indexOf('/');
+        if (slash >= 0) {
+            normalized = normalized.substring(0, slash);
+        }
+
+        int colon = normalized.lastIndexOf(':');
+        if (colon > 0 && normalized.indexOf(':') == colon) {
+            normalized = normalized.substring(0, colon);
+        }
+
+        if (normalized.equals(address)) {
+            return address;
+        }
+
+        if (scheme != null) {
+            log.warn("Service {} registered ServiceAddress '{}' with a scheme; using host '{}'. " +
+                     "Register the bare host in Consul and set the 'scheme' meta to '{}' instead.",
+                     serviceName, address, normalized, scheme);
+        } else {
+            log.warn("Service {} registered ServiceAddress '{}'; using host '{}'. " +
+                     "Register the bare host in Consul (port comes from ServicePort).",
+                     serviceName, address, normalized);
+        }
+        return normalized;
     }
 
     /**
