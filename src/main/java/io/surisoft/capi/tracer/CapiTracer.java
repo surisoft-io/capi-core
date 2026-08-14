@@ -11,6 +11,7 @@ import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.undertow.CAPILoadBalancerProxyClient;
 import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.HttpUtils;
+import io.undertow.server.ExchangeCompletionListener;
 import io.undertow.server.HttpServerExchange;
 import io.undertow.util.HeaderValues;
 import org.cache2k.Cache;
@@ -66,25 +67,7 @@ public class CapiTracer {
         decorateWithCapi(exchange, span, restClient);
 
         final long proxyStartTime = System.currentTimeMillis();
-        exchange.addExchangeCompleteListener((ex, nextListener) -> {
-            long clientResponseTime = System.currentTimeMillis() - proxyStartTime;
-            span.setAttribute("capi.client.response.time", Long.toString(clientResponseTime));
-            span.setAttribute("http.status_code", ex.getStatusCode());
-            span.setAttribute("capi.client.response.code", Integer.toString(ex.getStatusCode()));
-
-            String selectedHost = CAPILoadBalancerProxyClient.getSelectedHost(ex);
-            if (selectedHost != null) {
-                span.setAttribute("capi.client.address", selectedHost);
-            }
-
-            if (ex.getStatusCode() >= 400) {
-                span.setStatus(StatusCode.ERROR, "HTTP " + ex.getStatusCode());
-            }
-
-            span.updateName(serviceId);
-            span.end();
-            nextListener.proceed();
-        });
+        exchange.addExchangeCompleteListener((ex, nextListener) -> endSpan(ex, span, serviceId, proxyStartTime, nextListener));
     }
 
     /**
@@ -107,25 +90,56 @@ public class CapiTracer {
         decorateWithCapiBasic(exchange, span);
 
         final long proxyStartTime = System.currentTimeMillis();
-        exchange.addExchangeCompleteListener((ex, nextListener) -> {
+        exchange.addExchangeCompleteListener((ex, nextListener) -> endSpan(ex, span, serviceId, proxyStartTime, nextListener));
+    }
+
+    /**
+     * Decorates and ends the span, then ALWAYS drives the completion chain.
+     *
+     * proceed() must never be skipped: it drives the completion-listener chain whose terminal
+     * listener is Undertow's connection cleanup. If it is skipped the chain stalls, the channel
+     * is never closed and the socket FD leaks — the same defect fixed in RestGateway's access-log
+     * and metrics listeners. This listener is registered LAST (RestGateway ~:322) and Undertow
+     * runs completion listeners LIFO, so it runs FIRST: a throw here would stall the chain before
+     * those two hardened listeners ever run, bypassing their protection entirely.
+     *
+     * Throwable (not Exception) is caught deliberately — swallowing an Error is bad, but leaking
+     * a socket FD for the lifetime of the process is worse, and the span/exporter path is the
+     * throw-prone part (SimpleSpanProcessor exports inline on span.end()).
+     */
+    // package-private so CapiTracerTest can drive the failure paths directly
+    void endSpan(HttpServerExchange exchange,
+                 Span span,
+                 String serviceId,
+                 long proxyStartTime,
+                 ExchangeCompletionListener.NextListener nextListener) {
+        try {
             long clientResponseTime = System.currentTimeMillis() - proxyStartTime;
             span.setAttribute("capi.client.response.time", Long.toString(clientResponseTime));
-            span.setAttribute("http.status_code", ex.getStatusCode());
-            span.setAttribute("capi.client.response.code", Integer.toString(ex.getStatusCode()));
+            span.setAttribute("http.status_code", exchange.getStatusCode());
+            span.setAttribute("capi.client.response.code", Integer.toString(exchange.getStatusCode()));
 
-            String selectedHost = CAPILoadBalancerProxyClient.getSelectedHost(ex);
+            String selectedHost = CAPILoadBalancerProxyClient.getSelectedHost(exchange);
             if (selectedHost != null) {
                 span.setAttribute("capi.client.address", selectedHost);
             }
 
-            if (ex.getStatusCode() >= 400) {
-                span.setStatus(StatusCode.ERROR, "HTTP " + ex.getStatusCode());
+            if (exchange.getStatusCode() >= 400) {
+                span.setStatus(StatusCode.ERROR, "HTTP " + exchange.getStatusCode());
             }
 
             span.updateName(serviceId);
-            span.end();
-            nextListener.proceed();
-        });
+        } catch (Throwable t) {
+            log.warn("Failed to decorate trace span for {}", serviceId, t);
+        } finally {
+            try {
+                span.end();
+            } catch (Throwable t) {
+                log.warn("Failed to end trace span for {}", serviceId, t);
+            } finally {
+                nextListener.proceed();
+            }
+        }
     }
 
     /**

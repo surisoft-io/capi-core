@@ -43,13 +43,22 @@ public class WebsocketUtils {
     private final CapiSslContextHolder capiSslContextHolder;
     private volatile XnioSsl xnioSsl;
     private final CAPIConfiguration.Websocket websocketConfiguration;
+    private final CAPILoadBalancerProxyClient.PoolSettings poolSettings;
 
     public WebsocketUtils(CAPIConfiguration.Websocket websocketConfiguration,
                           List<DefaultJWTProcessor<SecurityContext>> defaultJWTProcessor,
                           @Nullable CapiSslContextHolder capiSslContextHolder) {
+        this(websocketConfiguration, defaultJWTProcessor, capiSslContextHolder, CAPILoadBalancerProxyClient.PoolSettings.DEFAULTS);
+    }
+
+    public WebsocketUtils(CAPIConfiguration.Websocket websocketConfiguration,
+                          List<DefaultJWTProcessor<SecurityContext>> defaultJWTProcessor,
+                          @Nullable CapiSslContextHolder capiSslContextHolder,
+                          CAPILoadBalancerProxyClient.PoolSettings poolSettings) {
         this.websocketConfiguration = websocketConfiguration;
         this.defaultJWTProcessor = defaultJWTProcessor;
         this.capiSslContextHolder = capiSslContextHolder;
+        this.poolSettings = poolSettings;
 
         if(capiSslContextHolder != null && capiSslContextHolder.getSslContext() != null) {
             this.xnioSsl = createXnioSsl(capiSslContextHolder.getSslContext());
@@ -69,11 +78,7 @@ public class WebsocketUtils {
                 : globalTimeoutMs;
 
         CAPILoadBalancerProxyClient loadBalancingProxyClient = new CAPILoadBalancerProxyClient();
-        loadBalancingProxyClient.setConnectionsPerThread(200);
-        loadBalancingProxyClient.setSoftMaxConnectionsPerThread(100);
-        loadBalancingProxyClient.setMaxQueueSize(500);
-        loadBalancingProxyClient.setTtl(30000);
-        loadBalancingProxyClient.setProblemServerRetry(10);
+        loadBalancingProxyClient.applyPoolSettings(poolSettings);
         webSocketClient.getMappingList().forEach((m) -> {
             String scheme = service.getServiceMeta().getScheme() == null ? HttpProtocol.HTTP.getProtocol() : service.getServiceMeta().getScheme();
             if(xnioSsl != null) {

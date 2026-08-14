@@ -57,6 +57,7 @@ capi:
     serviceName: capi
     endpoint: http://otel-collector:4318
     extraMetadataPrefix:
+    appEnvironment: demo-e2e
   corsEnabled: false
   allowedHeaders:
     - Origin

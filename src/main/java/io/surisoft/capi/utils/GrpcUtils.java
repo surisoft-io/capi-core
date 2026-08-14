@@ -25,9 +25,16 @@ public class GrpcUtils {
     @Nullable
     private final CapiSslContextHolder capiSslContextHolder;
     private volatile XnioSsl xnioSsl;
+    private final CAPILoadBalancerProxyClient.PoolSettings poolSettings;
 
     public GrpcUtils(@Nullable CapiSslContextHolder capiSslContextHolder) {
+        this(capiSslContextHolder, CAPILoadBalancerProxyClient.PoolSettings.DEFAULTS);
+    }
+
+    public GrpcUtils(@Nullable CapiSslContextHolder capiSslContextHolder,
+                     CAPILoadBalancerProxyClient.PoolSettings poolSettings) {
         this.capiSslContextHolder = capiSslContextHolder;
+        this.poolSettings = poolSettings;
 
         if(capiSslContextHolder != null && capiSslContextHolder.getSslContext() != null) {
             this.xnioSsl = createXnioSsl(capiSslContextHolder.getSslContext());
@@ -36,6 +43,7 @@ public class GrpcUtils {
 
     public HttpHandler createClientHttpHandler(GrpcClient grpcClient, Service service) {
         CAPILoadBalancerProxyClient loadBalancingProxyClient = new CAPILoadBalancerProxyClient();
+        loadBalancingProxyClient.applyPoolSettings(poolSettings);
         OptionMap http2Options = OptionMap.create(UndertowOptions.ENABLE_HTTP2, true);
         grpcClient.getMappingList().forEach((m) -> {
             String configuredScheme = service.getServiceMeta().getScheme() == null ? HttpProtocol.HTTP.getProtocol() : service.getServiceMeta().getScheme();

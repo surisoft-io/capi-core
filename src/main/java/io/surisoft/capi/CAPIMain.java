@@ -133,6 +133,15 @@ public class CAPIMain {
             scheduler.shutdownNow();
             adminGateway.stop();
             if(startup.getJvmObservability() != null) startup.getJvmObservability().stop();
+            // Last: gateways are stopped, so this flushes every span they produced. BatchSpanProcessor
+            // queues spans off-thread, so without this close() anything still queued at shutdown is lost.
+            if(startup.getOpenTelemetrySdk() != null) {
+                try {
+                    startup.getOpenTelemetrySdk().close();
+                } catch (Exception e) {
+                    log.warn("Failed to flush OpenTelemetry spans on shutdown", e);
+                }
+            }
             log.info("CAPI Gateway stopped.");
         }));
     }
