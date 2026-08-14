@@ -18,6 +18,10 @@ capi:
     connectionRequestTimeout: 5000
     requestTimeout: 5000
     responseTimeout: 120000
+    # Close a backend connection after this long unused. Keep it BELOW the shortest idle timeout
+    # on the path to the backend (corporate proxy / firewall / NAT / LB): those drop idle flows
+    # without FIN or RST, and a socket reused after such a drop stalls until responseTimeout (504).
+    connectionIdleTimeout: 30000
   websocket:
     enabled: false
     port: 8382
@@ -70,6 +74,9 @@ capi:
     serviceName: capi
     endpoint: http://localhost:4318
     extraMetadataPrefix:
+    # Deployment environment (e.g. dev / acc / prod). Emitted as the "appEnvironment"
+    # resource attribute on every span. Omitted from spans when left blank.
+    appEnvironment:
   corsEnabled: false
   allowedHeaders:
     - Origin

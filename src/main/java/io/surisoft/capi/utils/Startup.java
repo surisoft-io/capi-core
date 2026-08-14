@@ -4,7 +4,6 @@ import com.nimbusds.jose.proc.SecurityContext;
 import com.nimbusds.jwt.proc.DefaultJWTProcessor;
 import io.micrometer.core.instrument.composite.CompositeMeterRegistry;
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
-import io.opentelemetry.api.OpenTelemetry;
 import io.surisoft.capi.CAPIMain;
 import io.surisoft.capi.configuration.*;
 import io.surisoft.capi.oidc.Oauth2Provider;
@@ -13,6 +12,7 @@ import io.surisoft.capi.schema.*;
 import io.surisoft.capi.service.*;
 import io.surisoft.capi.service.consul.*;
 import io.surisoft.capi.configuration.LocalCacheConfiguration;
+import io.surisoft.capi.undertow.CAPILoadBalancerProxyClient;
 import io.surisoft.capi.tracer.TracingBootstrap;
 import jakarta.annotation.Nullable;
 import org.apache.hc.core5.ssl.SSLContextBuilder;
@@ -51,6 +51,8 @@ public class Startup {
     private CapiSslContextHolder capiSslContextHolder;
     @Nullable
     private io.opentelemetry.api.trace.Tracer openTelemetryTracer;
+    // Held so the shutdown hook can flush queued spans — BatchSpanProcessor drops them otherwise.
+    private io.opentelemetry.sdk.OpenTelemetrySdk openTelemetrySdk;
     @Nullable
     private OpaWasmService opaWasmService;
     @Nullable
@@ -165,13 +167,23 @@ public class Startup {
         if (oauth2Provider != null && oauth2Provider.getJwtProcessorList() != null) {
             jwtProcessors = oauth2Provider.getJwtProcessorList();
         }
-        websocketUtils = new WebsocketUtils(configuration.getWebsocket(), jwtProcessors, capiSslContextHolder);
+        websocketUtils = new WebsocketUtils(configuration.getWebsocket(), jwtProcessors, capiSslContextHolder, backendPoolSettings());
     }
 
     private void startGrpcUtils() {
         if(configuration.getGrpc() != null && configuration.getGrpc().isEnabled()) {
-            grpcUtils = new GrpcUtils(capiSslContextHolder);
+            grpcUtils = new GrpcUtils(capiSslContextHolder, backendPoolSettings());
         }
+    }
+
+    /** Backend pool policy is a property of the network path, so every transport shares one. */
+    private CAPILoadBalancerProxyClient.PoolSettings backendPoolSettings() {
+        CAPIConfiguration.Rest rest = configuration.getRest();
+        if (rest == null) {
+            return CAPILoadBalancerProxyClient.PoolSettings.DEFAULTS;
+        }
+        return new CAPILoadBalancerProxyClient.PoolSettings(
+                rest.getProxyPoolSize(), rest.getProxyMaxPoolSize(), rest.getConnectionIdleTimeout());
     }
 
     private void startConsulStore() {
@@ -332,8 +344,11 @@ public class Startup {
 
     private void startTraceService() {
         if(configuration.getTraces().isEnabled()) {
-            OpenTelemetry openTelemetry = TracingBootstrap.init(configuration.getTraces().getEndpoint(), configuration.getTraces().getServiceName());
-            openTelemetryTracer = openTelemetry.getTracer(configuration.getTraces().getServiceName());
+            openTelemetrySdk = TracingBootstrap.init(
+                    configuration.getTraces().getEndpoint(),
+                    configuration.getTraces().getServiceName(),
+                    configuration.getTraces().getAppEnvironment());
+            openTelemetryTracer = openTelemetrySdk.getTracer(configuration.getTraces().getServiceName());
         }
     }
 
@@ -456,6 +471,11 @@ public class Startup {
 
     public @Nullable io.opentelemetry.api.trace.Tracer getOpenTelemetryTracer() {
         return openTelemetryTracer;
+    }
+
+    /** Null when tracing is disabled. Close it on shutdown to flush queued spans. */
+    public @Nullable io.opentelemetry.sdk.OpenTelemetrySdk getOpenTelemetrySdk() {
+        return openTelemetrySdk;
     }
 
     public @Nullable OpaWasmService getOpaWasmService() {

@@ -4,6 +4,7 @@ import io.opentelemetry.api.trace.*;
 import io.surisoft.capi.schema.*;
 import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.HttpUtils;
+import io.undertow.server.ExchangeCompletionListener;
 import io.undertow.server.HttpServerExchange;
 import io.undertow.server.ServerConnection;
 import io.undertow.util.HeaderMap;
@@ -150,6 +151,9 @@ class CapiTracerTest {
 
         RestClient restClient = new RestClient();
         restClient.setServiceId("/meta-svc/v1");
+        // serviceCache is keyed on the canonical "<name>:<group>" id, not the context path
+        // (RestTransportHandler:111 sets this in production). Without it the lookup misses.
+        restClient.setCanonicalServiceId("meta-svc:v1");
 
         capiTracer.traceRequest(exchange, restClient);
 
@@ -336,5 +340,83 @@ class CapiTracerTest {
     @Test
     void constructor_setsFieldsCorrectly() {
         assertNotNull(capiTracer);
+    }
+
+    // ---- completion-listener FD-leak regression (endSpan must ALWAYS proceed) ----
+    //
+    // Undertow runs completion listeners LIFO and the tracer registers last, so it runs FIRST.
+    // If it fails to call proceed(), the chain stalls before RestGateway's hardened access-log
+    // and metrics listeners, Undertow's terminal connection cleanup never runs, and the socket
+    // FD leaks for the life of the process. These tests pin that contract.
+
+    @Test
+    void endSpan_happyPath_endsSpanAndProceeds() {
+        HttpServerExchange exchange = createExchange("GET", "/svc/v1/items");
+        exchange.setStatusCode(200);
+        ExchangeCompletionListener.NextListener nextListener = mock(ExchangeCompletionListener.NextListener.class);
+
+        capiTracer.endSpan(exchange, span, "svc:v1", System.currentTimeMillis(), nextListener);
+
+        verify(span).updateName("svc:v1");
+        verify(span).end();
+        verify(nextListener).proceed();
+    }
+
+    @Test
+    void endSpan_whenSetAttributeThrows_stillEndsSpanAndProceeds() {
+        HttpServerExchange exchange = createExchange("GET", "/svc/v1/items");
+        exchange.setStatusCode(200);
+        ExchangeCompletionListener.NextListener nextListener = mock(ExchangeCompletionListener.NextListener.class);
+
+        doThrow(new RuntimeException("exporter blew up"))
+                .when(span).setAttribute(eq("capi.client.response.time"), anyString());
+
+        capiTracer.endSpan(exchange, span, "svc:v1", System.currentTimeMillis(), nextListener);
+
+        // decoration failed, but the span must still be closed and the chain must still advance
+        verify(span).end();
+        verify(nextListener).proceed();
+    }
+
+    @Test
+    void endSpan_whenSpanEndThrows_stillProceeds() {
+        HttpServerExchange exchange = createExchange("GET", "/svc/v1/items");
+        exchange.setStatusCode(200);
+        ExchangeCompletionListener.NextListener nextListener = mock(ExchangeCompletionListener.NextListener.class);
+
+        doThrow(new RuntimeException("SimpleSpanProcessor export failed")).when(span).end();
+
+        capiTracer.endSpan(exchange, span, "svc:v1", System.currentTimeMillis(), nextListener);
+
+        verify(nextListener).proceed();
+    }
+
+    @Test
+    void endSpan_whenDecorationAndEndBothThrow_stillProceeds() {
+        HttpServerExchange exchange = createExchange("GET", "/svc/v1/items");
+        exchange.setStatusCode(500);
+        ExchangeCompletionListener.NextListener nextListener = mock(ExchangeCompletionListener.NextListener.class);
+
+        doThrow(new RuntimeException("decorate failed"))
+                .when(span).setStatus(any(StatusCode.class), anyString());
+        doThrow(new RuntimeException("end failed")).when(span).end();
+
+        capiTracer.endSpan(exchange, span, "svc:v1", System.currentTimeMillis(), nextListener);
+
+        verify(nextListener).proceed();
+    }
+
+    @Test
+    void endSpan_whenSpanThrowsError_stillProceeds() {
+        HttpServerExchange exchange = createExchange("GET", "/svc/v1/items");
+        exchange.setStatusCode(200);
+        ExchangeCompletionListener.NextListener nextListener = mock(ExchangeCompletionListener.NextListener.class);
+
+        // Throwable, not Exception: leaking an FD forever is worse than swallowing an Error here
+        doThrow(new StackOverflowError("agent instrumentation")).when(span).end();
+
+        capiTracer.endSpan(exchange, span, "svc:v1", System.currentTimeMillis(), nextListener);
+
+        verify(nextListener).proceed();
     }
 }

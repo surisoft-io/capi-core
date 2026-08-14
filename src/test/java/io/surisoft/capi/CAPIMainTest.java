@@ -1224,14 +1224,18 @@ class CAPIMainTest {
                 io.surisoft.capi.undertow.McpGateway.class,
                 io.surisoft.capi.undertow.RestGateway.class,
                 java.util.concurrent.ScheduledExecutorService.class,
-                io.surisoft.capi.undertow.AdminGateway.class);
+                io.surisoft.capi.undertow.AdminGateway.class,
+                io.surisoft.capi.utils.Startup.class);
         registerHook.setAccessible(true);
 
         java.util.concurrent.ScheduledExecutorService scheduler = java.util.concurrent.Executors.newScheduledThreadPool(1);
         io.surisoft.capi.undertow.AdminGateway mockAdmin = mock(io.surisoft.capi.undertow.AdminGateway.class);
+        // Mocked rather than null: the hook body dereferences startup (getJvmObservability())
+        // when it actually fires at JVM shutdown, after this test has finished.
+        io.surisoft.capi.utils.Startup mockStartup = mock(io.surisoft.capi.utils.Startup.class);
 
         // This registers a shutdown hook but shouldn't throw
-        assertDoesNotThrow(() -> registerHook.invoke(null, null, null, null, null, scheduler, mockAdmin));
+        assertDoesNotThrow(() -> registerHook.invoke(null, null, null, null, null, scheduler, mockAdmin, mockStartup));
         scheduler.shutdownNow();
     }
 

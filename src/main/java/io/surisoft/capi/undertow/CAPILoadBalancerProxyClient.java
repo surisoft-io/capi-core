@@ -59,6 +59,48 @@ public class CAPILoadBalancerProxyClient extends LoadBalancingProxyClient {
         return drainScheduled.get();
     }
 
+    /**
+     * Backend connection-pool sizing, shared by every transport (REST/WS via {@code WebsocketUtils},
+     * gRPC via {@code GrpcUtils}) so one network path gets one policy.
+     *
+     * @param connectionsPerThread max pooled connections per IO thread per host
+     * @param maxQueueSize         requests allowed to queue when the pool is saturated
+     * @param idleTimeoutMs        how long an unused connection may sit in the pool before it is closed
+     */
+    public record PoolSettings(int connectionsPerThread, int maxQueueSize, int idleTimeoutMs) {
+        public static final PoolSettings DEFAULTS = new PoolSettings(200, 500, 30_000);
+    }
+
+    /**
+     * Apply pool sizing, and — critically — make the idle timeout real.
+     *
+     * <p><b>Why {@code softMaxConnectionsPerThread} is pinned to 0.</b> Undertow's
+     * {@code ProxyConnectionPool.timeoutConnections} only reaps while
+     * {@code availableConnections.size() > coreCachedConnections}, and {@code coreCachedConnections}
+     * <em>is</em> the soft max. Any non-zero value therefore exempts that many sockets per thread
+     * per host from the TTL entirely — they are cached until the backend closes them. We previously
+     * set it to 100 alongside a 30s TTL, which meant the TTL never fired in practice.
+     *
+     * <p>That matters because a pooled socket can die <em>silently</em>: a stateful middlebox
+     * (corporate proxy, NAT, LB) expiring an idle flow sends neither FIN nor RST, so the socket
+     * still reports {@code isOpen()} and gets leased out again. The request is written into a dead
+     * socket, nothing comes back, and the exchange stalls until the {@code maxRequestTime} watchdog
+     * returns 504 — with no retry and no failover. Undertow validates nothing before leasing, so
+     * bounding how long a socket may sit idle is the only defence available here.
+     * See {@code ProxyStaleConnectionReuseTest}, which reproduces the 504 and pins this behaviour.
+     *
+     * <p>The TTL is an <em>idle</em> timeout, not a hard lifetime: {@code returnConnection} refreshes
+     * it on every return, so a busy pool never churns — only genuinely idle sockets are closed.
+     * Keep {@code idleTimeoutMs} below the shortest idle timeout on the path to the backend.
+     */
+    public void applyPoolSettings(PoolSettings settings) {
+        setConnectionsPerThread(settings.connectionsPerThread());
+        setSoftMaxConnectionsPerThread(0);
+        setMaxQueueSize(settings.maxQueueSize());
+        setTtl(settings.idleTimeoutMs());
+        setProblemServerRetry(10);
+    }
+
     // Terminal addHost builders (every other addHost overload delegates to one of these via virtual
     // dispatch), overridden only to record the host URI for drain-time pool closing.
     @Override

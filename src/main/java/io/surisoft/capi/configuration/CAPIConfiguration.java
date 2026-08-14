@@ -79,6 +79,8 @@ public class CAPIConfiguration {
         private String serviceName;
         private String endpoint;
         private String extraMetadataPrefix;
+        /** Deployment environment (dev/acc/prod). Emitted as the deployment.environment resource attribute. */
+        private String appEnvironment;
 
         public boolean isEnabled() {
             return enabled;
@@ -103,6 +105,12 @@ public class CAPIConfiguration {
         }
         public void setServiceName(String serviceName) {
             this.serviceName = serviceName;
+        }
+        public String getAppEnvironment() {
+            return appEnvironment;
+        }
+        public void setAppEnvironment(String appEnvironment) {
+            this.appEnvironment = appEnvironment;
         }
     }
 
@@ -235,6 +243,10 @@ public class CAPIConfiguration {
         private int responseTimeout;
         private int proxyPoolSize = 200;
         private int proxyMaxPoolSize = 500;
+        /** How long a backend connection may sit unused in the pool before it is closed. Must stay
+         *  below the shortest idle timeout on the path (firewall/NAT/LB), otherwise a silently
+         *  dropped flow can be leased out again and the request stalls until responseTimeout. */
+        private int connectionIdleTimeout = 30000;
 
         public boolean isEnabled() {
             return enabled;
@@ -296,6 +308,12 @@ public class CAPIConfiguration {
         }
         public void setProxyMaxPoolSize(int proxyMaxPoolSize) {
             this.proxyMaxPoolSize = proxyMaxPoolSize;
+        }
+        public int getConnectionIdleTimeout() {
+            return connectionIdleTimeout;
+        }
+        public void setConnectionIdleTimeout(int connectionIdleTimeout) {
+            this.connectionIdleTimeout = connectionIdleTimeout;
         }
 
     }
