@@ -1,4 +1,4 @@
-FROM maven:3.9.9-eclipse-temurin-23 AS build
+FROM maven:3.9.16-eclipse-temurin-25 AS build
 WORKDIR /app
 # Resolve dependencies in their own layer so they are only re-fetched when pom.xml
 # changes, not on every source edit. Note: dependency:go-offline is not exhaustive
@@ -8,7 +8,7 @@ RUN mvn -B dependency:go-offline
 COPY src ./src
 RUN mvn -B package -DskipTests
 
-FROM eclipse-temurin:23-jre
+FROM eclipse-temurin:25-jre
 WORKDIR /app
 RUN mkdir -p /capi/config /capi/logs && \
     chown -R 1000:0 /capi /app
