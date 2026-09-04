@@ -292,6 +292,79 @@ curl -X PUT http://localhost:8500/v1/agent/service/deregister/order-service
 
 CAPI automatically detects the removal on the next discovery cycle and removes the route.
 
+### 12. Guard Against Stale Specs During a Rolling Deploy
+
+**The problem.** Your service releases a new version and Helm rolls the pods one at a time:
+
+1. The first new pod comes up and registers with `"version":"2.0.1"`.
+2. CAPI sees the bump and re-fetches the OpenAPI spec.
+3. But `open-api` points at a load-balanced URL, and most pods are still running the **old**
+   release — so the fetch can be answered by one of them and return the **previous** spec.
+4. CAPI caches that spec against version `2.0.1` and never tries again, because the version it
+   recorded already matches what Consul advertises.
+
+The result is a gateway serving `2.0.1` routes validated against the `2.0.0` definition, with
+nothing in the logs to say so.
+
+**The guard.** Set `match-openapi-version` and CAPI will additionally require the fetched spec's
+`info.version` to equal the `version` metadata:
+
+```bash
+curl -X PUT http://localhost:8500/v1/agent/service/register \
+  -d '{
+    "Name": "order-service",
+    "Address": "order-service.default.svc.cluster.local",
+    "Port": 8080,
+    "Meta": {
+      "group": "v1",
+      "open-api": "http://order-service.default.svc.cluster.local:8080/openapi.json",
+      "version": "2.0.1",
+      "match-openapi-version": "true"
+    }
+  }'
+```
+
+When the versions disagree, CAPI **keeps the previous spec and keeps routing** — it does not
+take the service out of service. It simply declines to cache the mismatched definition and
+retries on the next discovery cycle. Once every pod serves the new release, the fetch matches
+and the spec updates. The rollout converges on its own.
+
+**The contract you are accepting.** Your OpenAPI document's `info.version` must be kept in step
+with the `version` metadata on every release:
+
+```json
+{ "openapi": "3.0.1", "info": { "title": "Order Service", "version": "2.0.1" } }
+```
+
+If the two drift apart, the service is **frozen on its current spec** — re-fetching, never
+applying — until you correct one of them. This is why the flag is off by default: most services
+never change `info.version`, and enabling it there would freeze them immediately.
+
+**Watching it.** `GET /info/invalid-services` reports the mismatch with both values and how long
+it has been failing:
+
+```json
+{
+  "serviceId": "order-service:v1",
+  "reason": "OPENAPI_VERSION_MISMATCH",
+  "detail": "meta version 2.0.1, spec info.version 2.0.0 — keeping the previous spec, failing for 47s over 2 attempt(s)"
+}
+```
+
+Read the age, not just the presence:
+
+| Failing for | Meaning | Action |
+|---|---|---|
+| Seconds to a few minutes | A rolling deploy is in flight | None — it will converge |
+| Hours | `match-openapi-version` is set but `info.version` is not maintained | Fix the spec or unset the flag |
+
+After three consecutive mismatches CAPI backs the re-fetch off to once every five minutes, so a
+misconfigured service does not keep hammering its own backend.
+
+**When the check is skipped.** If `version` is not set, or the spec declares no `info.version`,
+CAPI logs a warning and accepts the spec rather than freezing the service — a missing value is
+treated as a configuration mistake, not as evidence of staleness.
+
 ## Complete Metadata Reference
 
 ### Required Fields
@@ -310,7 +383,7 @@ CAPI automatically detects the removal on the next discovery cycle and removes t
 | `route-group-first` | `false` | When `true`, route path becomes `/<group>/<service>` instead of `/<service>/<group>`. |
 | `keep-group` | `false` | When `true`, preserves the group segment in the path forwarded to the backend. |
 | `state` | `PUBLISHED` | Service state. Only `PUBLISHED` services are routed. Set to other values to disable without deregistering. |
-| `version` | — | Service version metadata (informational). |
+| `version` | — | **The explicit "reload me" signal.** Bump it and CAPI rebuilds this service's routes and re-fetches its OpenAPI spec, even when nothing else changed. Without a bump, CAPI keeps the cached definition — a same-URL spec change is *not* picked up on its own. |
 
 ### Security
 
@@ -337,6 +410,7 @@ CAPI automatically detects the removal on the next discovery cycle and removes t
 | `open-api` | — | URL of the service's OpenAPI spec endpoint. Fetched at registration time, parsed, and cached in memory. |
 | `expose-open-api-definition` | `false` | When `true`, the cached spec is published to consumers at `GET /definitions/openapi/<service-id>` on the main gateway port (outside `contextPath`). When `false`, that endpoint returns `404`. |
 | `secure-open-api-definition` | `false` | When `true`, the public endpoint above requires a Bearer token whose claims include this service's `subscription-group`. Unauthorized requests get `404`, not `401`. |
+| `match-openapi-version` | `false` | When `true`, a fetched spec is accepted only if its `info.version` equals the `version` metadata. Guards against caching a stale spec during a rolling deploy — see [Guarding against stale specs](#12-guard-against-stale-specs-during-a-rolling-deploy). **Opt-in: enabling it commits you to keeping `info.version` in step with `version`.** |
 
 ### MCP
 
