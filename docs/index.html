@@ -196,6 +196,13 @@
     }
     .compare-table tbody tr:last-child td { border-bottom: none; }
     .compare-table tbody tr:hover { background: var(--surface); }
+    .compare-note {
+      margin-top: 18px;
+      font-size: 0.82rem;
+      line-height: 1.55;
+      opacity: 0.7;
+      max-width: 70ch;
+    }
     .check { color: #16a34a; font-weight: 700; }
     .cross { color: var(--text-muted); }
 
@@ -559,14 +566,16 @@
           <tr>
             <th></th>
             <th>CAPI Gateway</th>
-            <th>WSO2 API Manager</th>
-            <th>Kong</th>
-            <th>Traefik</th>
-            <th>Spring Cloud GW</th>
+            <th>WSO2 API Manager 4.x</th>
+            <th>Kong Gateway 3.x</th>
+            <th>Traefik v3</th>
+            <th>Spring Cloud GW 4.x</th>
           </tr>
         </thead>
         <tbody>
           <tr>
+            <!-- VERIFY: Spring Cloud Consul provides a DiscoveryClient route locator
+                 (spring.cloud.gateway.discovery.locator.enabled=true), so "Manual" may be harsher than reality. -->
             <td><strong>Consul auto-discovery</strong></td>
             <td class="check">Native</td>
             <td class="cross">Not supported</td>
@@ -583,6 +592,7 @@
             <td class="cross">YAML / code</td>
           </tr>
           <tr>
+            <!-- VERIFY: Kong has supported DB-less declarative mode since 1.1 (+ hybrid mode); a flat "PostgreSQL" requirement may be outdated. -->
             <td><strong>External database</strong></td>
             <td class="check">Not needed</td>
             <td class="cross">PostgreSQL / MySQL</td>
@@ -599,6 +609,7 @@
             <td class="check">Yes</td>
           </tr>
           <tr>
+            <!-- VERIFY: WSO2 APIM has shipped an OPA policy integration since ~4.1; "Manual / custom" may be outdated. -->
             <td><strong>OPA integration</strong></td>
             <td class="check">Built-in</td>
             <td class="cross">Manual / custom</td>
@@ -615,6 +626,8 @@
             <td class="check">Yes</td>
           </tr>
           <tr>
+            <!-- VERIFY: Spring Cloud Gateway ships RequestRateLimiter backed by Redis (distributed), so "Manual" looks wrong.
+                 Traefik's built-in rate limiting is per-instance; distributed needs Hub/Enterprise, so "Built-in" may be too generous. -->
             <td><strong>Distributed throttling</strong></td>
             <td class="check">Hazelcast</td>
             <td class="check">Traffic Manager</td>
@@ -623,6 +636,7 @@
             <td class="cross">Manual</td>
           </tr>
           <tr>
+            <!-- VERIFY: WSO2 APIM 4.x added OpenTelemetry tracing; Spring Boot 3 + Micrometer Tracing OTel bridge is near turnkey. -->
             <td><strong>OpenTelemetry</strong></td>
             <td class="check">Native OTLP</td>
             <td class="cross">Custom / ELK</td>
@@ -631,6 +645,8 @@
             <td class="cross">Manual</td>
           </tr>
           <tr>
+            <!-- VERIFY FIRST: fastest-moving row and CAPI's headline differentiator. Kong and WSO2 were both moving into
+                 MCP / AI-gateway territory during 2025-26. Confirm before the "Last reviewed" date below is trusted. -->
             <td><strong>MCP Gateway (LLM tools)</strong></td>
             <td class="check">Built-in (REST + MCP)</td>
             <td class="cross">No</td>
@@ -648,7 +664,7 @@
           </tr>
           <tr>
             <td><strong>Footprint</strong></td>
-            <td class="check">~120 MB</td>
+            <td class="check">~120 MB idle<br><span style="font-weight:400;opacity:.75">~450 MB at scale</span></td>
             <td class="cross">~1 GB+</td>
             <td class="cross">~500 MB+</td>
             <td class="check">~100 MB</td>
@@ -657,6 +673,13 @@
         </tbody>
       </table>
     </div>
+    <p class="compare-note">
+      Compared against WSO2 API Manager 4.x, Kong Gateway 3.x, Traefik v3 and Spring Cloud Gateway 4.x,
+      using each vendor&rsquo;s published documentation. Last reviewed September 2026. Competing products
+      change quickly &mdash; please check the current vendor documentation before relying on any row.
+      CAPI footprint measured in production: ~120&nbsp;MB for an idle instance, ~450&nbsp;MB with a large
+      service catalogue (parsed OpenAPI specs dominate).
+    </p>
   </div>
 </section>
 
