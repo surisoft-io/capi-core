@@ -239,11 +239,18 @@ curl -X PUT http://localhost:8500/v1/agent/service/register \
   }'
 ```
 
-Only the CAPI instance with `instanceName: production` will create a route for this service. If `strictToInstanceName: true`, services without a `capi-instance` declaration are ignored.
+Only the CAPI instance with `instanceName: production` will create a route for this service.
+
+`strictToInstanceName` (default `false`) decides what happens to services that declare **no** instance metadata at all: `false` means every CAPI instance routes them, `true` means none do. It has no effect once a service declares `capi-instance` or any `capi-instance-*` key.
 
 #### Multi-Instance Targeting
 
-A single service can target multiple CAPI instances with different settings per instance:
+A single registration can target several CAPI instances and give each one different settings.
+The overrides are **flat metadata keys**, one per property:
+
+```
+capi-instance-<instanceName>-<property>
+```
 
 ```bash
 curl -X PUT http://localhost:8500/v1/agent/service/register \
@@ -256,11 +263,56 @@ curl -X PUT http://localhost:8500/v1/agent/service/register \
       "group": "v1",
       "root-context": "/orders",
       "scheme": "http",
-      "capi-instance-production": "{\"secured\": true, \"routeGroupFirst\": false}",
-      "capi-instance-staging": "{\"secured\": false, \"routeGroupFirst\": false}"
+      "capi-instance-production-secured": "true",
+      "capi-instance-staging-secured": "false"
     }
   }'
 ```
+
+Both instances route the service; `production` requires a token, `staging` does not.
+
+**Supported properties**
+
+| Property | Example key | Effect |
+|---|---|---|
+| `secured` | `capi-instance-production-secured` | OAuth2 requirement for this instance only. |
+| `scheme` | `capi-instance-production-scheme` | Protocol used to reach the backend. |
+| `open-api` | `capi-instance-production-open-api` | A different OpenAPI spec URL for this instance. |
+| `ignore-open-api` | `capi-instance-staging-ignore-open-api` | Drop the spec entirely for this instance. |
+| `route-group-first` | `capi-instance-production-route-group-first` | Path order for this instance only. |
+| `ingress` | `capi-instance-internal-ingress` | Point this instance at a **different backend**, e.g. an internal vs. external hostname. Port is derived from the scheme (`http`→80, `https`→443); arbitrary ports are not supported here. |
+
+Any other property name is **silently ignored** — there is no error and no log line. Note the
+spelling is kebab-case (`route-group-first`, not `routeGroupFirst`).
+
+**Rules worth knowing**
+
+- **Declaring any `capi-instance-*` key acts as a whitelist.** Only the instances named in the keys
+  route the service. A third CAPI instance not mentioned anywhere will not pick it up, regardless of
+  `strictToInstanceName`.
+- **A block only overrides the properties it names.** Anything it omits is inherited from the
+  service's top-level metadata. `capi-instance-production-scheme: https` on its own leaves
+  `secured` exactly as the top-level `secured` field declares it.
+- **An instance with no block at all inherits everything.** In the combination
+  `"capi-instance": "production"` plus `"capi-instance-staging-secured": "true"`, both instances
+  route the service — but `production` has no block, so it uses the plain top-level `secured` value
+  rather than any override.
+- **Keep every registration of a service consistent.** When a service has multiple instances
+  (several pods), declare the same `capi-instance-*` keys on all of them. The instance *filter* is
+  evaluated per registration, but the override *values* are read from a single registration, so
+  divergent metadata gives order-dependent results.
+
+> ⚠️ **CAPI instance names must not contain a hyphen.**
+> The key is split at the **first** hyphen after the `capi-instance-` prefix, so with an
+> `instanceName` such as `order-prod` the key `capi-instance-order-prod-secured` is read as
+> instance `order`, property `prod-secured` — which matches no known property and is **discarded
+> without any error**. Every override for that instance silently does nothing.
+
+> ⚠️ **Every `capi-instance-*` key must include a property suffix.**
+> A bare `capi-instance-production` (with no `-<property>`) — for example an attempt to pass a JSON
+> object as the value — cannot be parsed and raises an error that causes the **whole service to be
+> skipped for that discovery cycle**. Earlier versions of this page documented such a JSON form; it
+> was never supported. Use the flat keys shown above.
 
 ### 10. Control Route Path Order
 
@@ -440,8 +492,8 @@ See [MCP Gateway](mcp-gateway.md) for the full design, the `tools/list` / `tools
 | Key | Default | Description |
 |-----|---------|-------------|
 | `capi-instance` | — | Target a specific CAPI instance by `instanceName`. |
-| `namespace` | — | Alternative field for instance targeting (same as `capi-instance`). |
-| `capi-instance-<name>` | — | JSON object with per-instance overrides. See multi-instance targeting above. |
+| `namespace` | — | Parsed but **not used for instance targeting**. Only `capi-instance` (and the `capi-instance-<name>-<property>` keys) select a CAPI instance. |
+| `capi-instance-<name>-<property>` | — | Per-instance override. One flat key per property — **not** a JSON object. See [Multi-Instance Targeting](#multi-instance-targeting) for the supported properties and the naming rules. |
 
 ### Timeouts
 

@@ -8,7 +8,7 @@ CAPI is configured via a YAML file. Set the `CAPI_CONFIG_FILE` environment varia
 capi:
   version: 1.0.0
   instanceName: default
-  strictToInstanceName: true
+  strictToInstanceName: false
   publicEndpoint: http://localhost:8380/api/
   runningMode: full
   adminPort: 8381
@@ -109,8 +109,8 @@ capi:
 | Field | Default | Description |
 |-------|---------|-------------|
 | `version` | — | CAPI version identifier (informational). |
-| `instanceName` | `default` | Name of this CAPI instance. Used for multi-instance targeting via Consul metadata. |
-| `strictToInstanceName` | `true` | When `true`, only services that declare this instance name are routed. When `false`, services without an instance declaration are also accepted. |
+| `instanceName` | — (`default` in the shipped config) | Name of this CAPI instance, matched against the `capi-instance` service metadata. **Must not contain a hyphen** — per-instance override keys are split at the first hyphen, so a hyphenated name silently voids every `capi-instance-<name>-<property>` override. See [Consul metadata](consul-metadata.md#multi-instance-targeting). |
+| `strictToInstanceName` | `false` | Controls services that declare **no** instance metadata: `true` ignores them, `false` routes them on every instance. Has no effect on services that declare `capi-instance` or a `capi-instance-<name>-<property>` key — those are always matched by name. |
 | `publicEndpoint` | — | The externally-reachable URL of this gateway. Used for OpenAPI spec URL rewriting. |
 | `runningMode` | `full` | Service types to proxy: `full` (REST + WebSocket + SSE), `websocket`, or `sse`. |
 | `adminPort` | `8381` | Port for the Admin API (health, metrics, routes). |
