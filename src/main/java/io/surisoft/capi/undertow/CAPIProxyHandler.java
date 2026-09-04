@@ -29,6 +29,7 @@ import javax.net.ssl.SSLPeerUnverifiedException;
 import java.io.Closeable;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.SocketTimeoutException;
 import java.nio.channels.Channel;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateEncodingException;
@@ -100,6 +101,7 @@ public final class CAPIProxyHandler implements HttpHandler {
     private final Map<HttpString, ExchangeAttribute> requestHeaders = new CopyOnWriteMap<>();
     private final HttpHandler next;
     private final int maxConnectionRetries;
+    private final int connectTimeout;
     private final Predicate idempotentRequestPredicate;
     private final HttpErrorHandler errorHandler;
 
@@ -108,6 +110,7 @@ public final class CAPIProxyHandler implements HttpHandler {
         this.maxRequestTime = builder.maxRequestTime;
         this.next = builder.next;
         this.maxConnectionRetries = builder.maxConnectionRetries;
+        this.connectTimeout = builder.connectTimeout;
         this.idempotentRequestPredicate = builder.idempotentRequestPredicate;
         requestHeaders.putAll(builder.requestHeaders);
         this.errorHandler = httpErrorHandler;
@@ -205,8 +208,38 @@ public final class CAPIProxyHandler implements HttpHandler {
 
         @Override
         public void run() {
-            proxyClient.getConnection(target, exchange, this, -1, TimeUnit.MILLISECONDS);
+            beginConnect(-1);
             selectedHost = CAPILoadBalancerProxyClient.getSelectedHost(exchange);
+        }
+
+        /**
+         * Start one attempt to acquire a backend connection, guarded by a watchdog.
+         *
+         * <p>Undertow bounds nothing here. {@code ProxyConnectionPool.connect} applies its timeout
+         * argument only to requests it <em>queues</em> when the pool is full; when it opens a new
+         * connection it calls {@code client.connect} with no timer, and XNIO's connect is purely
+         * selector-driven. A backend that refuses the port answers with an RST, so {@link #failed}
+         * fires at once and failover already works — but one that is merely unreachable
+         * (powered-off node, dropped SYN, firewall/security-group black hole) answers with silence.
+         * Nothing ever fails, so the retry below is never reached and the exchange stalls until the
+         * maxRequestTime watchdog returns 504, with a healthy sibling host sitting idle.
+         *
+         * <p>The watchdog turns that silence into an ordinary connection failure, which the retry
+         * path already knows how to handle.
+         */
+        private void beginConnect(long poolTimeoutMs) {
+            ConnectAttempt attempt = new ConnectAttempt(this, exchange);
+            attempt.arm(connectTimeout);
+            try {
+                proxyClient.getConnection(target, exchange, attempt, poolTimeoutMs, TimeUnit.MILLISECONDS);
+            } catch (RuntimeException e) {
+                // getConnection threw rather than calling back: settle the attempt so the watchdog
+                // cannot fire later against an attempt that is already over.
+                if (attempt.settle()) {
+                    exchange.putAttachment(CAPILoadBalancerProxyClient.CONNECTION_ERROR_KEY, e);
+                    failed(exchange);
+                }
+            }
         }
 
         @Override
@@ -225,7 +258,7 @@ public final class CAPIProxyHandler implements HttpHandler {
                     target = proxyClient.findTarget(exchange);
                     if (target != null) {
                         final long remaining = timeout > 0 ? timeout - time : -1;
-                        proxyClient.getConnection(target, exchange, this, remaining, TimeUnit.MILLISECONDS);
+                        beginConnect(remaining);
                     } else {
                         couldNotResolveBackend(exchange); // The context was registered when we started, so return 503
                     }
@@ -555,6 +588,108 @@ public final class CAPIProxyHandler implements HttpHandler {
         }
     }
 
+    /**
+     * One attempt to acquire a backend connection, with a deadline.
+     *
+     * <p>Wraps the {@link ProxyClientHandler} for a single {@code getConnection} call so a late
+     * result can be told apart from a live one. Exactly one of {@code completed}/{@code failed}/
+     * {@code couldNotResolveBackend}/{@code queuedRequestFailed}/timeout wins; the rest are dropped.
+     *
+     * <p>Two things make that necessary. First, once the watchdog has failed the attempt over, the
+     * original connect is still in flight — if it later succeeds, delegating would dispatch a second
+     * {@code ProxyAction} for an exchange the retry already owns. Second, that late connection
+     * belongs to nobody, so it is closed here rather than left to leak an FD.
+     *
+     * <p>Everything runs on the exchange's XNIO I/O thread: {@code getConnection} and its callbacks
+     * are invoked there, and {@code WorkerUtils.executeAfter} schedules onto the same thread. The
+     * {@code settled} flag is therefore thread-confined and needs no synchronisation, matching how
+     * {@code ProxyClientHandler.tries} is already handled.
+     */
+    private final class ConnectAttempt implements ProxyCallback<ProxyConnection> {
+
+        private final ProxyClientHandler delegate;
+        private final HttpServerExchange exchange;
+        private XnioExecutor.Key watchdogKey;
+        private boolean settled;
+
+        private ConnectAttempt(ProxyClientHandler delegate, HttpServerExchange exchange) {
+            this.delegate = delegate;
+            this.exchange = exchange;
+        }
+
+        /** Arms the deadline. {@code timeoutMs <= 0} leaves the attempt unbounded (previous behaviour). */
+        private void arm(int timeoutMs) {
+            if (timeoutMs <= 0 || settled) {
+                return;
+            }
+            watchdogKey = WorkerUtils.executeAfter(exchange.getIoThread(),
+                    () -> onTimeout(timeoutMs), timeoutMs, TimeUnit.MILLISECONDS);
+        }
+
+        /** Marks this attempt finished and cancels the deadline. False if something already won. */
+        private boolean settle() {
+            if (settled) {
+                return false;
+            }
+            settled = true;
+            if (watchdogKey != null) {
+                watchdogKey.remove();
+                watchdogKey = null;
+            }
+            return true;
+        }
+
+        private void onTimeout(int timeoutMs) {
+            watchdogKey = null;
+            if (!settle()) {
+                return;
+            }
+            String host = CAPILoadBalancerProxyClient.getSelectedHost(exchange);
+            log.debugf("Connect to backend %s did not complete within %d ms; failing over", host, timeoutMs);
+            // Take it out of rotation for a while. Undertow only does this for hosts that fail a
+            // connect outright; without it the silent host stays in round-robin and every request
+            // pays this timeout before failing over.
+            proxyClient.penaliseHost(exchange.getAttachment(CAPILoadBalancerProxyClient.SELECTED_HOST_URI_KEY));
+            exchange.putAttachment(CAPILoadBalancerProxyClient.CONNECTION_ERROR_KEY,
+                    new SocketTimeoutException(
+                            "Timed out connecting to backend " + host + " after " + timeoutMs + " ms"));
+            // Hand it to the ordinary failure path so retry/failover applies unchanged.
+            delegate.failed(exchange);
+        }
+
+        @Override
+        public void completed(HttpServerExchange exchange, ProxyConnection result) {
+            if (!settle()) {
+                // The watchdog already failed this attempt over and another host is handling the
+                // exchange. Nobody will ever use this connection, so close it instead of leaking it.
+                IoUtils.safeClose(result.getConnection());
+                return;
+            }
+            delegate.completed(exchange, result);
+        }
+
+        @Override
+        public void failed(HttpServerExchange exchange) {
+            if (settle()) {
+                delegate.failed(exchange);
+            }
+        }
+
+        @Override
+        public void couldNotResolveBackend(HttpServerExchange exchange) {
+            if (settle()) {
+                delegate.couldNotResolveBackend(exchange);
+            }
+        }
+
+        @Override
+        public void queuedRequestFailed(HttpServerExchange exchange) {
+            if (settle()) {
+                delegate.queuedRequestFailed(exchange);
+            }
+        }
+    }
+
     private static final class ResponseCallback implements ClientCallback<ClientExchange> {
 
         private final HttpServerExchange exchange;
@@ -747,6 +882,7 @@ public final class CAPIProxyHandler implements HttpHandler {
 
         private CAPILoadBalancerProxyClient proxyClient;
         private int maxRequestTime = -1;
+        private int connectTimeout = CAPILoadBalancerProxyClient.PoolSettings.DEFAULT_CONNECT_TIMEOUT_MS;
         private final Map<HttpString, ExchangeAttribute> requestHeaders = new CopyOnWriteMap<>();
         private HttpHandler next = ResponseCodeHandler.HANDLE_404;
         private final int maxConnectionRetries = DEFAULT_MAX_RETRY_ATTEMPTS;
@@ -760,6 +896,15 @@ public final class CAPIProxyHandler implements HttpHandler {
                 throw UndertowMessages.MESSAGES.argumentCannotBeNull("proxyClient");
             }
             this.proxyClient = proxyClient;
+            return this;
+        }
+
+        /**
+         * Bounds how long one attempt to acquire a backend connection may hang before the host is
+         * abandoned and the retry path tries the next one. 0 disables the watchdog.
+         */
+        public Builder setConnectTimeout(int connectTimeout) {
+            this.connectTimeout = connectTimeout;
             return this;
         }
 

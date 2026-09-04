@@ -183,7 +183,8 @@ public class Startup {
             return CAPILoadBalancerProxyClient.PoolSettings.DEFAULTS;
         }
         return new CAPILoadBalancerProxyClient.PoolSettings(
-                rest.getProxyPoolSize(), rest.getProxyMaxPoolSize(), rest.getConnectionIdleTimeout());
+                rest.getProxyPoolSize(), rest.getProxyMaxPoolSize(), rest.getConnectionIdleTimeout(),
+                rest.getConnectTimeout());
     }
 
     private void startConsulStore() {

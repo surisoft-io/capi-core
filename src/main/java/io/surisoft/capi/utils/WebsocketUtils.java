@@ -90,6 +90,7 @@ public class WebsocketUtils {
         CAPIProxyHandler.Builder builder = CAPIProxyHandler.builder()
                 .setProxyClient(loadBalancingProxyClient)
                 .setMaxRequestTime(timeout)
+                .setConnectTimeout(poolSettings.connectTimeoutMs())
                 .setNext(ResponseCodeHandler.HANDLE_404);
         if (httpErrorHandler != null) {
             builder.setHttpErrorHandler(httpErrorHandler);

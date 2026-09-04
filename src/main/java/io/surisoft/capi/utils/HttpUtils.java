@@ -15,6 +15,9 @@ import io.surisoft.capi.schema.OpaResult;
 import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.service.OpaWasmService;
 import io.undertow.server.HttpServerExchange;
+import io.undertow.util.HeaderMap;
+import io.undertow.util.HeaderValues;
+import io.undertow.util.Headers;
 import io.undertow.util.HttpString;
 import jakarta.annotation.Nullable;
 import jakarta.servlet.http.HttpServletRequest;
@@ -32,6 +35,7 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.StringJoiner;
 import java.util.stream.Stream;
 
 public class HttpUtils {
@@ -155,6 +159,107 @@ public class HttpUtils {
         } catch (Exception e) {
             log.trace("Could not extract access token for propagation: {}", e.getMessage());
         }
+    }
+
+    /**
+     * Removes from the outgoing request the credentials CAPI itself terminated: the cookie holding
+     * the access token (named by the {@code oauth2.cookieName} header) and CAPI's own session cookie.
+     * Every other cookie the client sent is application data and is forwarded untouched.
+     * <p>
+     * Must run after {@link #propagateAuthorization(HttpServerExchange)}, which copies the token into
+     * the Authorization header — the backend still gets the bearer token, just not a second, longer
+     * lived copy of the same credential it has no use for. Mirrors what the API key path already does
+     * when it drops the Authorization header once the key has been validated.
+     */
+    public void stripConsumedCredentialCookies(HttpServerExchange exchange) {
+        HeaderMap headers = exchange.getRequestHeaders();
+
+        String authCookieName = null;
+        if (authorizationCookieName != null && !authorizationCookieName.isEmpty()) {
+            HeaderValues namingHeader = headers.get(authorizationCookieName);
+            if (namingHeader != null && !namingHeader.isEmpty()) {
+                String declared = namingHeader.getFirst();
+                if (declared != null && !declared.isBlank()) {
+                    authCookieName = declared.trim();
+                }
+                // The header only tells CAPI which cookie carries the token. The backend has no use
+                // for it and it advertises where the credential lives, so it stops here too.
+                headers.remove(authorizationCookieName);
+            }
+        }
+
+        HeaderValues cookieValues = headers.get(Constants.COOKIE_HEADER);
+        if (cookieValues == null || cookieValues.isEmpty()) {
+            return;
+        }
+
+        // Fast path. Most requests carry no cookie CAPI has to remove, and this runs on every
+        // forwarded request, so leave the header untouched rather than parse and rebuild it. The
+        // scan allocates nothing and cannot miss a real match — a cookie named X implies the
+        // substring X. A false positive (the name appearing inside some other cookie's value) only
+        // costs a trip through the rebuild below, which compares names exactly.
+        if (!mayContainRemovableCookie(cookieValues, authCookieName)) {
+            return;
+        }
+
+        // HTTP/2 clients may split the cookie field across several header lines, so rebuild every one.
+        List<String> rebuilt = new ArrayList<>(cookieValues.size());
+        for (int i = 0; i < cookieValues.size(); i++) {
+            String kept = removeCookiesFromHeaderValue(cookieValues.get(i), authCookieName);
+            if (kept != null && !kept.isEmpty()) {
+                rebuilt.add(kept);
+            }
+        }
+
+        headers.remove(Constants.COOKIE_HEADER);
+        for (int i = 0; i < rebuilt.size(); i++) {
+            headers.add(Headers.COOKIE, rebuilt.get(i));
+        }
+    }
+
+    /** Cheap allocation-free pre-check for {@link #stripConsumedCredentialCookies}. */
+    private static boolean mayContainRemovableCookie(HeaderValues cookieValues, String authCookieName) {
+        for (int i = 0; i < cookieValues.size(); i++) {
+            String value = cookieValues.get(i);
+            if (value == null) {
+                continue;
+            }
+            if (value.contains(Constants.CAPI_SESSION_COOKIE_NAME)
+                    || (authCookieName != null && value.contains(authCookieName))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Rebuilds a single Cookie header value without the credential cookies, preserving the order and
+     * the original spelling of the pairs that survive. Returns an empty string when nothing is left,
+     * so the caller can drop the header rather than forward an empty one.
+     */
+    private String removeCookiesFromHeaderValue(String cookieHeaderValue, String authCookieName) {
+        if (cookieHeaderValue == null || cookieHeaderValue.isEmpty()) {
+            return null;
+        }
+        StringJoiner kept = new StringJoiner("; ");
+        for (String cookieString : cookieHeaderValue.split(";")) {
+            String trimmed = cookieString.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            int separator = trimmed.indexOf('=');
+            String name = separator > -1 ? trimmed.substring(0, separator).trim() : trimmed;
+            if (!isCredentialCookie(stripOffSurroundingQuote(name), authCookieName)) {
+                kept.add(trimmed);
+            }
+        }
+        return kept.toString();
+    }
+
+    /** Cookie names are case sensitive (RFC 6265), so match them exactly. */
+    private static boolean isCredentialCookie(String cookieName, String authCookieName) {
+        return Constants.CAPI_SESSION_COOKIE_NAME.equals(cookieName)
+                || (authCookieName != null && authCookieName.equals(cookieName));
     }
 
     private List<HttpCookie> getCookiesFromExchange(HttpServerExchange exchange) {

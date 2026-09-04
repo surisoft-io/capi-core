@@ -35,6 +35,8 @@ import org.cache2k.Cache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static net.logstash.logback.argument.StructuredArguments.v;
+
 import javax.net.ssl.SSLContext;
 import java.util.List;
 import java.util.Map;
@@ -206,12 +208,16 @@ public class RestGateway {
                     if(!requestPath.equals(Constants.CAPI_HEALTH_PATH)) {
                         long durationMs = (System.nanoTime() - startNanos) / 1_000_000;
                         String originalIp = resolveClientIp(ex);
+                        // StructuredArguments.v() puts each value in its own JSON field for the
+                        // Logstash encoder while rendering only the value into the message, so the
+                        // plain-text line (ACCESS-FILE, %msg) is unchanged and dashboards can filter
+                        // and aggregate on the fields instead of parsing the string.
                         ACCESS_LOG.info("{} {} {} {}ms {}",
-                                ex.getRequestMethod(),
-                                ex.getRequestPath(),
-                                ex.getStatusCode(),
-                                durationMs,
-                                originalIp);
+                                v("http_method", ex.getRequestMethod().toString()),
+                                v("http_path", ex.getRequestPath()),
+                                v("http_status", ex.getStatusCode()),
+                                v("duration_ms", durationMs),
+                                v("client_ip", originalIp));
                     }
                 } finally {
                     // MUST always proceed: proceed() drives the completion-listener chain whose
@@ -411,6 +417,10 @@ public class RestGateway {
 
             // Propagate authorization to backend
             httpUtils.propagateAuthorization(exchange);
+
+            // The credentials CAPI terminated stop here: the token is now in the Authorization
+            // header, so the cookie carrying it (and CAPI's own session cookie) must not travel on.
+            httpUtils.stripConsumedCredentialCookies(exchange);
 
             // --- Async proxy handoff ---
             if (restClient.isKeepGroup()) {
@@ -694,9 +704,26 @@ public class RestGateway {
         }
     }
 
+    /**
+     * The external client IP for the access log.
+     *
+     * <p>X-Forwarded-For carries the whole hop chain, {@code client, proxy1, proxy2}, oldest
+     * first — so the leftmost entry is the original external client and everything after it is
+     * infrastructure. Reading the header value as-is yields the entire comma-separated chain as
+     * soon as there is more than one hop.
+     *
+     * <p>NOTE: this trusts the inbound header. That is correct behind an edge that overwrites or
+     * appends it, but a direct caller can put any value here, so treat the field as
+     * attacker-influenced unless CAPI is known to be fronted.
+     */
     private String resolveClientIp(HttpServerExchange exchange) {
-        if (exchange.getRequestHeaders().contains("X-Forwarded-For")) {
-            return exchange.getRequestHeaders().get("X-Forwarded-For").getFirst();
+        String forwardedFor = exchange.getRequestHeaders().getFirst(Headers.X_FORWARDED_FOR);
+        if (forwardedFor != null && !forwardedFor.isBlank()) {
+            int comma = forwardedFor.indexOf(',');
+            String client = (comma >= 0 ? forwardedFor.substring(0, comma) : forwardedFor).trim();
+            if (!client.isEmpty()) {
+                return client;
+            }
         }
         java.net.InetAddress addr = exchange.getSourceAddress().getAddress();
         return addr != null ? addr.getHostAddress() : "unknown";
@@ -738,7 +765,7 @@ public class RestGateway {
         }
 
         //if cookie exists, we extend the session
-        Cookie capiSessionCookie = exchange.getRequestCookie("CAPI-SESSION");
+        Cookie capiSessionCookie = exchange.getRequestCookie(Constants.CAPI_SESSION_COOKIE_NAME);
         if(capiSessionCookie != null) {
             exchange.setStatusCode(StatusCodes.CREATED);
             //capiSessionCookie.setMaxAge()
