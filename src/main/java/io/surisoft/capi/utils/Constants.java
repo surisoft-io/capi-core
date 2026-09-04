@@ -17,6 +17,7 @@ public class Constants {
     public static final String AUTHORIZATION_HEADER = "Authorization";
     public static final String AUTHORIZATION_REQUEST_PARAMETER = "access_token";
     public static final String COOKIE_HEADER = "Cookie";
+    public static final String CAPI_SESSION_COOKIE_NAME = "CAPI-SESSION";
     public static final String AUTHORIZED_PARTY = "azp";
     public static final String CAPI_INTERNAL_ERROR = "capi-internal-error";
     public static final String HTTP_CONNECT_TIMEOUT = "connectTimeout=";

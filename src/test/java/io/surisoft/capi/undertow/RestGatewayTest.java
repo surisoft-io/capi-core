@@ -31,6 +31,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -178,6 +179,149 @@ class RestGatewayTest {
                 HttpResponse.BodyHandlers.ofString());
 
         assertEquals(200, resp.statusCode());
+    }
+
+    // === Cookie stripping (end to end, through a real gateway) ===
+
+    /** A fake but structurally realistic JWT — long enough that the duplication is the point. */
+    private static final String FAKE_JWT = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NSJ9.c2lnbmF0dXJl";
+
+    /**
+     * Stands in for the backend and records what actually arrived. The exchange headers are
+     * recycled once the exchange completes, so the values are copied out here and not later.
+     */
+    private RestClient createHeaderCapturingRestClient(String serviceId, Map<String, List<String>> captured) {
+        RestClient rc = new RestClient();
+        rc.setServiceId(serviceId);
+        rc.setSecured(false);
+        rc.setHttpHandler(exchange -> {
+            for (io.undertow.util.HeaderValues values : exchange.getRequestHeaders()) {
+                captured.put(values.getHeaderName().toString(), new ArrayList<>(values));
+            }
+            exchange.setStatusCode(200);
+            exchange.getResponseSender().send("{\"ok\":true}");
+        });
+        return rc;
+    }
+
+    /** Same gateway the other tests build, but with a real HttpUtils wired for cookie auth. */
+    private RestGateway createGatewayWithCookieAuth(int port, String cookieNameHeader) {
+        RestGateway gw = new RestGateway(port, 2, "/api", restClientMap,
+                new HttpUtils(cookieNameHeader, null), serviceCache, null, allowedHeaders, cookieNameHeader);
+        gw.setWebsocketUtils(websocketUtils);
+        return gw;
+    }
+
+    /**
+     * Registers the capturing backend and returns the map it will fill. Must be called before the
+     * gateway is constructed: {@link RestGateway} snapshots {@code restClientMap} in its constructor.
+     */
+    private Map<String, List<String>> registerCapturingBackend() {
+        Map<String, List<String>> backendSaw = new ConcurrentHashMap<>();
+        restClientMap.put("/cookie-service/dev", createHeaderCapturingRestClient("/cookie-service/dev", backendSaw));
+        return backendSaw;
+    }
+
+    private void proxyAndExpect200(HttpRequest.Builder request) throws Exception {
+        HttpResponse<String> resp = HttpClient.newHttpClient()
+                .send(request.GET().build(), HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, resp.statusCode(), "the request must have reached the capturing backend");
+    }
+
+    @Test
+    void forwardedRequest_dropsConsumedAuthCookieAndKeepsApplicationCookies() throws Exception {
+        Map<String, List<String>> backendSaw = registerCapturingBackend();
+        int port = pickPort();
+        runningGateway = createGatewayWithCookieAuth(port, "x-capi-cookie");
+        runningGateway.runProxy();
+
+        proxyAndExpect200(
+                HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + port + "/api/cookie-service/dev/resource"))
+                        .header("x-capi-cookie", "my_session")
+                        .header("Cookie", "locale=en; my_session=" + FAKE_JWT + "; XSRF-TOKEN=abc"));
+
+        assertEquals(List.of("locale=en; XSRF-TOKEN=abc"), backendSaw.get(Constants.COOKIE_HEADER));
+    }
+
+    @Test
+    void forwardedRequest_stillCarriesTheTokenAsBearer() throws Exception {
+        Map<String, List<String>> backendSaw = registerCapturingBackend();
+        int port = pickPort();
+        runningGateway = createGatewayWithCookieAuth(port, "x-capi-cookie");
+        runningGateway.runProxy();
+
+        proxyAndExpect200(
+                HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + port + "/api/cookie-service/dev/resource"))
+                        .header("x-capi-cookie", "my_session")
+                        .header("Cookie", "my_session=" + FAKE_JWT + "; locale=en"));
+
+        assertEquals(List.of("Bearer " + FAKE_JWT), backendSaw.get(Constants.AUTHORIZATION_HEADER),
+                "the backend must still be able to authenticate the caller");
+    }
+
+    @Test
+    void forwardedRequest_dropsTheHeaderNamingTheAuthCookie() throws Exception {
+        Map<String, List<String>> backendSaw = registerCapturingBackend();
+        int port = pickPort();
+        runningGateway = createGatewayWithCookieAuth(port, "x-capi-cookie");
+        runningGateway.runProxy();
+
+        proxyAndExpect200(
+                HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + port + "/api/cookie-service/dev/resource"))
+                        .header("x-capi-cookie", "my_session")
+                        .header("Cookie", "my_session=" + FAKE_JWT + "; locale=en"));
+
+        assertNull(backendSaw.get("x-capi-cookie"));
+    }
+
+    @Test
+    void forwardedRequest_dropsCookieHeaderEntirelyWhenOnlyTheCredentialWasSent() throws Exception {
+        Map<String, List<String>> backendSaw = registerCapturingBackend();
+        int port = pickPort();
+        runningGateway = createGatewayWithCookieAuth(port, "x-capi-cookie");
+        runningGateway.runProxy();
+
+        proxyAndExpect200(
+                HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + port + "/api/cookie-service/dev/resource"))
+                        .header("x-capi-cookie", "my_session")
+                        .header("Cookie", "my_session=" + FAKE_JWT));
+
+        assertNull(backendSaw.get(Constants.COOKIE_HEADER));
+    }
+
+    @Test
+    void forwardedRequest_dropsCapiOwnSessionCookie() throws Exception {
+        Map<String, List<String>> backendSaw = registerCapturingBackend();
+        int port = pickPort();
+        runningGateway = createGatewayWithCookieAuth(port, "x-capi-cookie");
+        runningGateway.runProxy();
+
+        proxyAndExpect200(
+                HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + port + "/api/cookie-service/dev/resource"))
+                        .header("Cookie", "locale=en; " + Constants.CAPI_SESSION_COOKIE_NAME + "=signature"));
+
+        assertEquals(List.of("locale=en"), backendSaw.get(Constants.COOKIE_HEADER));
+    }
+
+    @Test
+    void forwardedRequest_leavesCookiesUntouchedWhenCookieAuthIsNotConfigured() throws Exception {
+        Map<String, List<String>> backendSaw = registerCapturingBackend();
+        int port = pickPort();
+        // A real HttpUtils, but with no cookie name configured — the feature is off.
+        runningGateway = createGatewayWithCookieAuth(port, null);
+        runningGateway.runProxy();
+
+        proxyAndExpect200(
+                HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + port + "/api/cookie-service/dev/resource"))
+                        .header("Cookie", "locale=en; sticky=node-1; XSRF-TOKEN=abc"));
+
+        assertEquals(List.of("locale=en; sticky=node-1; XSRF-TOKEN=abc"), backendSaw.get(Constants.COOKIE_HEADER));
     }
 
     // === CORS ===
@@ -1088,23 +1232,109 @@ class RestGatewayTest {
         }
     }
 
-    // === X-Forwarded-For in access log ===
+    // === Access log: structured fields + external client IP ===
 
-    @Test
-    void xForwardedFor_isUsedForClientIp() throws Exception {
+    /** Captures what the access logger actually emitted, arguments included. */
+    private ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> attachAccessLogAppender() {
+        ch.qos.logback.classic.Logger accessLogger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger("capi.access");
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        accessLogger.addAppender(appender);
+        accessLogger.setLevel(ch.qos.logback.classic.Level.INFO);
+        return appender;
+    }
+
+    /** The single access-log event for a proxied call, or a failure if none was recorded. */
+    private ch.qos.logback.classic.spi.ILoggingEvent accessEventFor(String... requestHeaders) throws Exception {
         int port = pickPort();
         restClientMap.put("/my-service/v1", createOpenRestClient("/my-service/v1"));
         runningGateway = createGateway(port);
         runningGateway.runProxy();
 
-        HttpResponse<String> resp = HttpClient.newHttpClient().send(
-                HttpRequest.newBuilder()
-                        .uri(URI.create("http://localhost:" + port + "/api/my-service/v1"))
-                        .header("X-Forwarded-For", "203.0.113.50")
-                        .GET().build(),
-                HttpResponse.BodyHandlers.ofString());
-
+        var appender = attachAccessLogAppender();
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + port + "/api/my-service/v1")).GET();
+        for (int i = 0; i < requestHeaders.length; i += 2) {
+            builder.header(requestHeaders[i], requestHeaders[i + 1]);
+        }
+        HttpResponse<String> resp = HttpClient.newHttpClient()
+                .send(builder.build(), HttpResponse.BodyHandlers.ofString());
         assertEquals(200, resp.statusCode());
+
+        // The listener runs on exchange completion, which can trail the client's last byte.
+        for (int i = 0; i < 100 && appender.list.isEmpty(); i++) {
+            Thread.sleep(10);
+        }
+        assertFalse(appender.list.isEmpty(), "no access-log event was recorded");
+        return appender.list.get(0);
+    }
+
+    /**
+     * Value of a StructuredArgument field on the event, by field name.
+     *
+     * <p>{@code StructuredArguments.v()} yields an {@code ObjectAppendingMarker}: {@code
+     * getFieldName()} is public but {@code getFieldValue()} is protected, so it has to be reached
+     * through the declaring class rather than {@code getMethod}.
+     */
+    private Object accessField(ch.qos.logback.classic.spi.ILoggingEvent event, String field) {
+        for (Object argument : event.getArgumentArray()) {
+            if (argument instanceof net.logstash.logback.marker.SingleFieldAppendingMarker marker
+                    && field.equals(marker.getFieldName())) {
+                try {
+                    var m = net.logstash.logback.marker.SingleFieldAppendingMarker.class
+                            .getDeclaredMethod("getFieldValue");
+                    m.setAccessible(true);
+                    return m.invoke(marker);
+                } catch (ReflectiveOperationException e) {
+                    throw new AssertionError("could not read field " + field, e);
+                }
+            }
+        }
+        return null;
+    }
+
+    @Test
+    void accessLog_emitsEachPartAsItsOwnStructuredField() throws Exception {
+        var event = accessEventFor();
+
+        assertEquals("GET", accessField(event, "http_method"));
+        assertEquals("/api/my-service/v1", accessField(event, "http_path"));
+        assertEquals(200, accessField(event, "http_status"));
+        assertNotNull(accessField(event, "duration_ms"));
+        assertNotNull(accessField(event, "client_ip"));
+    }
+
+    @Test
+    void accessLog_plainTextMessageIsUnchanged() throws Exception {
+        var event = accessEventFor();
+
+        // Same shape the ACCESS-FILE appender writes: "VERB PATH STATUS Nms IP".
+        assertTrue(event.getFormattedMessage().matches("GET /api/my-service/v1 200 \\d+ms \\S+"),
+                "unexpected access line: " + event.getFormattedMessage());
+    }
+
+    @Test
+    void xForwardedFor_isUsedForClientIp() throws Exception {
+        var event = accessEventFor("X-Forwarded-For", "203.0.113.50");
+
+        assertEquals("203.0.113.50", accessField(event, "client_ip"));
+    }
+
+    @Test
+    void xForwardedForChain_logsTheLeftmostExternalClientNotTheWholeChain() throws Exception {
+        var event = accessEventFor("X-Forwarded-For", "203.0.113.50, 70.41.3.18, 150.172.238.178");
+
+        assertEquals("203.0.113.50", accessField(event, "client_ip"),
+                "the external client is the leftmost hop; the rest of the chain is infrastructure");
+    }
+
+    @Test
+    void noXForwardedFor_fallsBackToTheSocketAddress() throws Exception {
+        var event = accessEventFor();
+
+        assertEquals("127.0.0.1", accessField(event, "client_ip"));
     }
 
     // === /definitions/openapi/{serviceId} ===

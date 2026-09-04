@@ -139,6 +139,11 @@
                     "tenant": "${accessLogsTenant}"
                     }
                 </customFields>
+                <!-- Emits the StructuredArguments from the access-log call as their own JSON
+                     fields (http_method, http_path, http_status, duration_ms, client_ip) so
+                     dashboards filter and aggregate on fields instead of parsing `message`.
+                     Default is true; set explicitly so it cannot be lost in an edit. -->
+                <includeStructuredArguments>true</includeStructuredArguments>
             </encoder>
         </appender>
         <appender name="ASYNC-ACCESS" class="ch.qos.logback.classic.AsyncAppender">

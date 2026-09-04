@@ -59,6 +59,7 @@ public class GrpcUtils {
         return CAPIProxyHandler
                 .builder()
                 .setProxyClient(loadBalancingProxyClient)
+                .setConnectTimeout(poolSettings.connectTimeoutMs())
                 .setNext(ResponseCodeHandler.HANDLE_404)
                 .build();
     }

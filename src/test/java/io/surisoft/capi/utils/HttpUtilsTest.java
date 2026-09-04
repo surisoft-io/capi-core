@@ -353,6 +353,197 @@ class HttpUtilsTest {
         assertTrue(httpUtils.isSafeUri(URI.create("http://172.32.0.1/api"), false));
     }
 
+    // --- stripConsumedCredentialCookies ---
+
+    @Test
+    void stripConsumedCredentialCookies_fastPath_doesNotRebuildTheHeader() {
+        HttpUtils utils = new HttpUtils("x-capi-cookie", null);
+        String original = "locale=en; sticky=node-1; XSRF-TOKEN=abc";
+        io.undertow.util.HeaderMap headerMap = headers(
+                "x-capi-cookie", "my_session",
+                Constants.COOKIE_HEADER, original);
+
+        utils.stripConsumedCredentialCookies(exchangeWithHeaders(headerMap));
+
+        // Same String instance: nothing was split, joined, or re-added on the hot path.
+        assertSame(original, cookieHeader(headerMap));
+    }
+
+    @Test
+    void stripConsumedCredentialCookies_substringInACookieValueIsNotRemoved() {
+        HttpUtils utils = new HttpUtils("x-capi-cookie", null);
+        io.undertow.util.HeaderMap headerMap = headers(
+                Constants.COOKIE_HEADER, "tracking=" + Constants.CAPI_SESSION_COOKIE_NAME + "-xyz; locale=en");
+
+        utils.stripConsumedCredentialCookies(exchangeWithHeaders(headerMap));
+
+        // The pre-scan matches on substring and sends this down the rebuild path, where exact
+        // name comparison must keep it.
+        assertEquals("tracking=" + Constants.CAPI_SESSION_COOKIE_NAME + "-xyz; locale=en",
+                cookieHeader(headerMap));
+    }
+
+    @Test
+    void stripConsumedCredentialCookies_namingHeaderStillRemovedOnTheFastPath() {
+        HttpUtils utils = new HttpUtils("x-capi-cookie", null);
+        io.undertow.util.HeaderMap headerMap = headers(
+                "x-capi-cookie", "my_session",
+                Constants.COOKIE_HEADER, "locale=en");
+
+        utils.stripConsumedCredentialCookies(exchangeWithHeaders(headerMap));
+
+        assertFalse(headerMap.contains("x-capi-cookie"), "must be dropped even when its cookie is absent");
+        assertEquals("locale=en", cookieHeader(headerMap));
+    }
+
+    private static io.undertow.server.HttpServerExchange exchangeWithHeaders(io.undertow.util.HeaderMap headerMap) {
+        io.undertow.server.HttpServerExchange exchange = mock(io.undertow.server.HttpServerExchange.class);
+        when(exchange.getRequestHeaders()).thenReturn(headerMap);
+        return exchange;
+    }
+
+    private static io.undertow.util.HeaderMap headers(String... nameValuePairs) {
+        io.undertow.util.HeaderMap headerMap = new io.undertow.util.HeaderMap();
+        for (int i = 0; i < nameValuePairs.length; i += 2) {
+            headerMap.add(io.undertow.util.HttpString.tryFromString(nameValuePairs[i]), nameValuePairs[i + 1]);
+        }
+        return headerMap;
+    }
+
+    private static String cookieHeader(io.undertow.util.HeaderMap headerMap) {
+        io.undertow.util.HeaderValues values = headerMap.get(Constants.COOKIE_HEADER);
+        return values == null ? null : values.getFirst();
+    }
+
+    @Test
+    void stripConsumedCredentialCookies_removesAuthCookieKeepsTheRest() {
+        HttpUtils utils = new HttpUtils("x-capi-cookie", null);
+        io.undertow.util.HeaderMap headerMap = headers(
+                "x-capi-cookie", "my_session",
+                Constants.COOKIE_HEADER, "locale=en; my_session=eyJhbGciOiJ; XSRF-TOKEN=abc");
+
+        utils.stripConsumedCredentialCookies(exchangeWithHeaders(headerMap));
+
+        assertEquals("locale=en; XSRF-TOKEN=abc", cookieHeader(headerMap));
+    }
+
+    @Test
+    void stripConsumedCredentialCookies_removesTheHeaderNamingTheCookie() {
+        HttpUtils utils = new HttpUtils("x-capi-cookie", null);
+        io.undertow.util.HeaderMap headerMap = headers(
+                "x-capi-cookie", "my_session",
+                Constants.COOKIE_HEADER, "my_session=eyJhbGciOiJ; locale=en");
+
+        utils.stripConsumedCredentialCookies(exchangeWithHeaders(headerMap));
+
+        assertFalse(headerMap.contains("x-capi-cookie"));
+    }
+
+    @Test
+    void stripConsumedCredentialCookies_removesCapiSessionCookie() {
+        HttpUtils utils = new HttpUtils(null, null);
+        io.undertow.util.HeaderMap headerMap = headers(
+                Constants.COOKIE_HEADER, "locale=en; " + Constants.CAPI_SESSION_COOKIE_NAME + "=signature-value");
+
+        utils.stripConsumedCredentialCookies(exchangeWithHeaders(headerMap));
+
+        assertEquals("locale=en", cookieHeader(headerMap));
+    }
+
+    @Test
+    void stripConsumedCredentialCookies_dropsHeaderEntirelyWhenNothingIsLeft() {
+        HttpUtils utils = new HttpUtils("x-capi-cookie", null);
+        io.undertow.util.HeaderMap headerMap = headers(
+                "x-capi-cookie", "my_session",
+                Constants.COOKIE_HEADER, "my_session=eyJhbGciOiJ");
+
+        utils.stripConsumedCredentialCookies(exchangeWithHeaders(headerMap));
+
+        assertFalse(headerMap.contains(Constants.COOKIE_HEADER));
+    }
+
+    @Test
+    void stripConsumedCredentialCookies_rebuildsEveryHeaderValueWhenSplitByHttp2() {
+        HttpUtils utils = new HttpUtils("x-capi-cookie", null);
+        io.undertow.util.HeaderMap headerMap = headers(
+                "x-capi-cookie", "my_session",
+                Constants.COOKIE_HEADER, "locale=en",
+                Constants.COOKIE_HEADER, "my_session=eyJhbGciOiJ",
+                Constants.COOKIE_HEADER, "theme=dark; " + Constants.CAPI_SESSION_COOKIE_NAME + "=sig");
+
+        utils.stripConsumedCredentialCookies(exchangeWithHeaders(headerMap));
+
+        assertEquals(List.of("locale=en", "theme=dark"), List.copyOf(headerMap.get(Constants.COOKIE_HEADER)));
+    }
+
+    @Test
+    void stripConsumedCredentialCookies_handlesQuotedCookieNames() {
+        HttpUtils utils = new HttpUtils("x-capi-cookie", null);
+        io.undertow.util.HeaderMap headerMap = headers(
+                "x-capi-cookie", "my_session",
+                Constants.COOKIE_HEADER, "\"my_session\"=eyJhbGciOiJ; locale=en");
+
+        utils.stripConsumedCredentialCookies(exchangeWithHeaders(headerMap));
+
+        assertEquals("locale=en", cookieHeader(headerMap));
+    }
+
+    @Test
+    void stripConsumedCredentialCookies_cookieNameMatchIsCaseSensitive() {
+        HttpUtils utils = new HttpUtils("x-capi-cookie", null);
+        io.undertow.util.HeaderMap headerMap = headers(
+                "x-capi-cookie", "my_session",
+                Constants.COOKIE_HEADER, "MY_SESSION=not-the-credential; my_session=eyJhbGciOiJ");
+
+        utils.stripConsumedCredentialCookies(exchangeWithHeaders(headerMap));
+
+        assertEquals("MY_SESSION=not-the-credential", cookieHeader(headerMap));
+    }
+
+    @Test
+    void stripConsumedCredentialCookies_leavesCookiesUntouchedWhenCookieAuthNotConfigured() {
+        HttpUtils utils = new HttpUtils(null, null);
+        io.undertow.util.HeaderMap headerMap = headers(
+                Constants.COOKIE_HEADER, "locale=en; sticky=node-1; XSRF-TOKEN=abc");
+
+        utils.stripConsumedCredentialCookies(exchangeWithHeaders(headerMap));
+
+        assertEquals("locale=en; sticky=node-1; XSRF-TOKEN=abc", cookieHeader(headerMap));
+    }
+
+    @Test
+    void stripConsumedCredentialCookies_leavesCookiesUntouchedWhenNamingHeaderAbsent() {
+        HttpUtils utils = new HttpUtils("x-capi-cookie", null);
+        io.undertow.util.HeaderMap headerMap = headers(
+                Constants.COOKIE_HEADER, "my_session=eyJhbGciOiJ; locale=en");
+
+        utils.stripConsumedCredentialCookies(exchangeWithHeaders(headerMap));
+
+        assertEquals("my_session=eyJhbGciOiJ; locale=en", cookieHeader(headerMap));
+    }
+
+    @Test
+    void stripConsumedCredentialCookies_noCookieHeader_doesNotThrow() {
+        HttpUtils utils = new HttpUtils("x-capi-cookie", null);
+        io.undertow.util.HeaderMap headerMap = headers("x-capi-cookie", "my_session");
+
+        assertDoesNotThrow(() -> utils.stripConsumedCredentialCookies(exchangeWithHeaders(headerMap)));
+        assertFalse(headerMap.contains(Constants.COOKIE_HEADER));
+    }
+
+    @Test
+    void stripConsumedCredentialCookies_leavesAuthorizationHeaderInPlace() {
+        HttpUtils utils = new HttpUtils("x-capi-cookie", null);
+        io.undertow.util.HeaderMap headerMap = headers(
+                Constants.AUTHORIZATION_HEADER, "Bearer eyJhbGciOiJ",
+                "x-capi-cookie", "my_session",
+                Constants.COOKIE_HEADER, "my_session=eyJhbGciOiJ");
+
+        utils.stripConsumedCredentialCookies(exchangeWithHeaders(headerMap));
+
+        assertEquals("Bearer eyJhbGciOiJ", headerMap.get(Constants.AUTHORIZATION_HEADER).getFirst());
+    }
+
     @Test
     void getCookiesFromRequest_validCookies() {
         jakarta.servlet.http.HttpServletRequest request = mock(jakarta.servlet.http.HttpServletRequest.class);

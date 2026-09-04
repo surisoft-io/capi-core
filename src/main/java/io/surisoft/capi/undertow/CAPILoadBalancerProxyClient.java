@@ -29,6 +29,17 @@ public class CAPILoadBalancerProxyClient extends LoadBalancingProxyClient {
     public static final AttachmentKey<String> SELECTED_HOST_KEY = AttachmentKey.create(String.class);
     public static final AttachmentKey<String> SELECTED_SCHEME_KEY = AttachmentKey.create(String.class);
     public static final AttachmentKey<Throwable> CONNECTION_ERROR_KEY = AttachmentKey.create(Throwable.class);
+    /** Full URI of the host chosen for this exchange, so a failed attempt can name it precisely.
+     *  {@link #SELECTED_HOST_KEY} holds only the hostname, which is ambiguous when two mappings
+     *  share a host on different ports. */
+    public static final AttachmentKey<URI> SELECTED_HOST_URI_KEY = AttachmentKey.create(URI.class);
+
+    /** Hosts whose connect timed out, and the time they become eligible again. */
+    private final java.util.Map<URI, Long> connectPenaltyUntil = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** How long a host sits out after a connect timeout. Mirrors the problemServerRetry window
+     *  Undertow applies to hosts that fail a connect outright. */
+    private volatile long connectPenaltyMs = 10_000L;
 
     /** Extra slack added to a route's maxRequestTime before an orphaned pool is drained, so the
      *  in-flight watchdog ({@link CAPIProxyHandler} maxRequestTime) has certainly fired first and
@@ -67,8 +78,23 @@ public class CAPILoadBalancerProxyClient extends LoadBalancingProxyClient {
      * @param maxQueueSize         requests allowed to queue when the pool is saturated
      * @param idleTimeoutMs        how long an unused connection may sit in the pool before it is closed
      */
-    public record PoolSettings(int connectionsPerThread, int maxQueueSize, int idleTimeoutMs) {
-        public static final PoolSettings DEFAULTS = new PoolSettings(200, 500, 30_000);
+    public record PoolSettings(int connectionsPerThread, int maxQueueSize, int idleTimeoutMs,
+                               int connectTimeoutMs) {
+        /**
+         * Default bound on acquiring a backend connection. Generous next to a healthy connect
+         * (sub-millisecond on a LAN, tens of ms across regions, plus any TLS handshake), but far
+         * below {@code responseTimeout} so an unreachable host fails over instead of burning the
+         * whole request budget. See {@code CAPIProxyHandler.ConnectAttempt}.
+         */
+        public static final int DEFAULT_CONNECT_TIMEOUT_MS = 5_000;
+
+        public static final PoolSettings DEFAULTS =
+                new PoolSettings(200, 500, 30_000, DEFAULT_CONNECT_TIMEOUT_MS);
+
+        /** Overload for call sites that only tune pooling and want the default connect bound. */
+        public PoolSettings(int connectionsPerThread, int maxQueueSize, int idleTimeoutMs) {
+            this(connectionsPerThread, maxQueueSize, idleTimeoutMs, DEFAULT_CONNECT_TIMEOUT_MS);
+        }
     }
 
     /**
@@ -170,16 +196,77 @@ public class CAPILoadBalancerProxyClient extends LoadBalancingProxyClient {
     }
 
     public Host selectHost(HttpServerExchange exchange) {
-        Host host = super.selectHost(exchange);
+        Host host = selectHostSkippingPenalised(exchange);
         if(host != null) {
             String hostName = host.getUri().getHost();
             exchange.putAttachment(SELECTED_HOST_KEY, hostName);
             exchange.putAttachment(SELECTED_SCHEME_KEY, host.getUri().getScheme());
+            exchange.putAttachment(SELECTED_HOST_URI_KEY, host.getUri());
             exchange.getRequestHeaders().put(HttpString.tryFromString("CapiSelectedHost"), hostName);
             return host;
         }
         //no available hosts
         return null;
+    }
+
+    /**
+     * Round-robin, but stepping over hosts that recently timed out on connect.
+     *
+     * <p>Undertow takes a host out of rotation when a connect <em>fails</em>
+     * ({@code ConnectionPoolManager.handleError}), which is why a refused port recovers cleanly. A
+     * host that never answers produces no failure, so without this it stays in rotation and every
+     * request pays the connect timeout before failing over — the retry also consumes a round-robin
+     * slot, so with two hosts each request lands on the dead one first and the tax is permanent.
+     *
+     * <p>Undertow's own flag is not reusable here: {@code handleError()} sets it forever and only a
+     * private retry task ever clears it, so a recovered node would never return. This penalty
+     * expires on its own instead.
+     *
+     * <p>Fails open by design: if every host is penalised we still return one, because refusing to
+     * route is worse than trying a host that may have recovered.
+     */
+    private Host selectHostSkippingPenalised(HttpServerExchange exchange) {
+        int candidates = Math.max(1, trackedHosts.size());
+        Host firstChoice = null;
+        for (int i = 0; i < candidates; i++) {
+            Host host = super.selectHost(exchange);
+            if (host == null) {
+                return null;
+            }
+            if (firstChoice == null) {
+                firstChoice = host;
+            }
+            if (!isPenalised(host.getUri())) {
+                return host;
+            }
+        }
+        return firstChoice;
+    }
+
+    private boolean isPenalised(URI hostUri) {
+        Long until = connectPenaltyUntil.get(hostUri);
+        if (until == null) {
+            return false;
+        }
+        if (System.currentTimeMillis() >= until) {
+            connectPenaltyUntil.remove(hostUri, until);
+            return false;
+        }
+        return true;
+    }
+
+    /** Take a host out of rotation for {@link #connectPenaltyMs} after it failed to answer a connect. */
+    public void penaliseHost(URI hostUri) {
+        if (hostUri == null || connectPenaltyMs <= 0) {
+            return;
+        }
+        connectPenaltyUntil.put(hostUri, System.currentTimeMillis() + connectPenaltyMs);
+        log.warn("Backend {} did not answer a connection attempt; skipping it for {} ms", hostUri, connectPenaltyMs);
+    }
+
+    /** Test seam: shorten or disable ({@code 0}) the penalty window. */
+    void setConnectPenaltyMs(long connectPenaltyMs) {
+        this.connectPenaltyMs = connectPenaltyMs;
     }
 
     public static String getSelectedHost(HttpServerExchange exchange) {

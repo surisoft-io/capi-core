@@ -1,5 +1,6 @@
 package io.surisoft.capi.configuration;
 
+import io.surisoft.capi.undertow.CAPILoadBalancerProxyClient;
 import java.util.List;
 
 public class CAPIConfiguration {
@@ -247,6 +248,18 @@ public class CAPIConfiguration {
          *  below the shortest idle timeout on the path (firewall/NAT/LB), otherwise a silently
          *  dropped flow can be leased out again and the request stalls until responseTimeout. */
         private int connectionIdleTimeout = 30000;
+        /** Bound on acquiring a backend connection (TCP connect + TLS handshake, or waiting for a
+         *  free pooled connection). An unreachable host never fails on its own — its SYN is simply
+         *  dropped — so without this a request stalls until responseTimeout and returns 504 instead
+         *  of failing over to a healthy instance. 0 disables the watchdog. */
+        private int connectTimeout = CAPILoadBalancerProxyClient.PoolSettings.DEFAULT_CONNECT_TIMEOUT_MS;
+
+        public int getConnectTimeout() {
+            return connectTimeout;
+        }
+        public void setConnectTimeout(int connectTimeout) {
+            this.connectTimeout = connectTimeout;
+        }
 
         public boolean isEnabled() {
             return enabled;
