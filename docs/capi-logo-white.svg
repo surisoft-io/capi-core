@@ -1,9 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="-180 -180 360 360" fill="none">
   <!-- CAPI Gateway Logo — White (for dark backgrounds) -->
-  <rect x="-120" y="-120" width="240" height="240" rx="30" transform="rotate(45 0 0)" stroke="#fff" stroke-width="9" fill="none"/>
-  <path d="M 42 -66 L -8 -66 Q -63 -66 -63 -11 L -63 11 Q -63 66 -8 66 L 42 66" stroke="#fff" stroke-width="13" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <circle cx="42" cy="-66" r="16" fill="#fff"/>
-  <circle cx="42" cy="-66" r="6.5" fill="#000"/>
-  <circle cx="42" cy="66" r="16" fill="#fff"/>
-  <circle cx="42" cy="66" r="6.5" fill="#000"/>
+  <!-- Open cell — knockout badge, soft corners (canonical mark).
+       The artwork is authored in a 0..100 space; the transform centres it on the origin and
+       scales it so its height spans ±174.21, matching the previous mark exactly. -->
+  <g transform="translate(-238.15 -238.15) scale(4.7630)">
+    <mask id="capi-open-cell-white">
+      <rect width="100" height="100" fill="#fff"/>
+      <path d="M 66.95 39.41 A 19.99 19.99 0 1 0 66.95 60.59" stroke="#000" stroke-width="9.31" stroke-linecap="round" fill="none"/>
+    </mask>
+    <path d="M 82.91 36.70 Q 82.91 31.00 77.97 28.15 L 54.94 14.85 Q 50.00 12.00 45.06 14.85 L 22.03 28.15 Q 17.09 31.00 17.09 36.70 L 17.09 63.30 Q 17.09 69.00 22.03 71.85 L 45.06 85.15 Q 50.00 88.00 54.94 85.15 L 77.97 71.85 Q 82.91 69.00 82.91 63.30 Z" fill="#fff" mask="url(#capi-open-cell-white)"/>
+  </g>
 </svg>
