@@ -10,5 +10,5 @@ public record InvalidService(
         String detail,
         Instant detectedAt
 ) {
-    public enum Reason { OPENAPI_FETCH_FAILED, OPENAPI_INVALID_SPEC }
+    public enum Reason { OPENAPI_FETCH_FAILED, OPENAPI_INVALID_SPEC, OPENAPI_VERSION_MISMATCH }
 }

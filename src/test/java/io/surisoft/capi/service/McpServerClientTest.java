@@ -1037,4 +1037,156 @@ class McpServerClientTest {
             throw new RuntimeException(e);
         }
     }
+
+    // === Upstream protocol negotiation (2026-07-28) ===
+    //
+    // CAPI is a client here. Upstream MCP servers will sit on older, handshake-based revisions
+    // for a long time, so the probe must never take a working backend out of service.
+
+    /** Stands in for an upstream server that answers every method with the given body. */
+    private static io.undertow.Undertow backendReturning(int port, String responseBody) {
+        io.undertow.Undertow server = io.undertow.Undertow.builder()
+                .addHttpListener(port, "127.0.0.1")
+                .setHandler(exchange -> {
+                    exchange.getResponseHeaders().put(io.undertow.util.Headers.CONTENT_TYPE, "application/json");
+                    exchange.setStatusCode(200);
+                    exchange.getResponseSender().send(responseBody);
+                }).build();
+        server.start();
+        return server;
+    }
+
+    /**
+     * A genuine 2026-07-28 server: {@code initialize} no longer exists, so it answers -32601,
+     * and {@code server/discover} advertises the stateless revision.
+     */
+    private static io.undertow.Undertow statelessBackend(int port) {
+        io.undertow.Undertow server = io.undertow.Undertow.builder()
+                .addHttpListener(port, "127.0.0.1")
+                .setHandler(exchange -> {
+                    if (exchange.isInIoThread()) {
+                        exchange.dispatch(exchange.getDispatchExecutor(), () -> respondStateless(exchange));
+                        return;
+                    }
+                    respondStateless(exchange);
+                }).build();
+        server.start();
+        return server;
+    }
+
+    private static void respondStateless(io.undertow.server.HttpServerExchange exchange) {
+        try {
+            exchange.startBlocking();
+            String body = new String(exchange.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            String method = (String) objectMapper.readValue(body, Map.class).get("method");
+            exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+            if ("server/discover".equals(method)) {
+                exchange.getResponseSender().send(
+                        "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersions\":[\"2026-07-28\"]}}");
+            } else {
+                exchange.getResponseSender().send(
+                        "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}");
+            }
+        } catch (Exception e) {
+            exchange.setStatusCode(500);
+            exchange.getResponseSender().send("{}");
+        }
+    }
+
+    private static int freePort() throws Exception {
+        try (java.net.ServerSocket s = new java.net.ServerSocket(0)) {
+            return s.getLocalPort();
+        }
+    }
+
+    @Test
+    void discoverBackendProtocol_returnsCurrentWhenBackendAdvertisesIt() throws Exception {
+        int port = freePort();
+        io.undertow.Undertow backend = backendReturning(port,
+                "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersions\":[\"2026-07-28\",\"2025-03-26\"]}}");
+        try {
+            assertEquals(io.surisoft.capi.utils.Constants.MCP_PROTOCOL_VERSION_CURRENT,
+                    mcpServerClient.discoverBackendProtocol("http://127.0.0.1:" + port, 2000));
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void discoverBackendProtocol_fallsBackWhenBackendDoesNotKnowTheMethod() throws Exception {
+        int port = freePort();
+        // What a pre-2026 server replies: a JSON-RPC "method not found", HTTP 200.
+        io.undertow.Undertow backend = backendReturning(port,
+                "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}");
+        try {
+            assertNull(mcpServerClient.discoverBackendProtocol("http://127.0.0.1:" + port, 2000),
+                    "an older backend must fall through to the initialize handshake");
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void discoverBackendProtocol_survivesAnUnreachableBackend() throws Exception {
+        // Nothing listening: the probe must return null, not propagate.
+        assertNull(mcpServerClient.discoverBackendProtocol("http://127.0.0.1:" + freePort(), 500));
+    }
+
+    @Test
+    void discoverBackendProtocol_survivesGarbageBody() throws Exception {
+        int port = freePort();
+        io.undertow.Undertow backend = backendReturning(port, "not json at all");
+        try {
+            assertNull(mcpServerClient.discoverBackendProtocol("http://127.0.0.1:" + port, 2000));
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void initializeBackendSession_modernBackendGetsNoSessionId() throws Exception {
+        int port = freePort();
+        io.undertow.Undertow backend = statelessBackend(port);
+        try {
+            McpServerClient.McpBackendSession session =
+                    mcpServerClient.initializeBackendSession("http://127.0.0.1:" + port, 2000);
+
+            assertNotNull(session);
+            assertTrue(session.initialized);
+            assertNull(session.sessionId, "stateless upstream: no Mcp-Session-Id should ever be sent");
+            assertEquals(io.surisoft.capi.utils.Constants.MCP_PROTOCOL_VERSION_CURRENT, session.protocolVersion);
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void handshake_refusesAJsonRpcErrorDressedAsHttp200() throws Exception {
+        int port = freePort();
+        io.undertow.Undertow backend = backendReturning(port,
+                "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}");
+        try {
+            assertNull(mcpServerClient.handshakeBackendSession("http://127.0.0.1:" + port, 2000),
+                    "an error body is not a session, however healthy the HTTP status looks");
+        } finally {
+            backend.stop();
+        }
+    }
+
+    @Test
+    void initializeBackendSession_legacyBackendIsUnaffectedAndKeepsItsSession() throws Exception {
+        int port = freePort();
+        Undertow backend = createMockMcpServerForToolCall(port, "{}");
+        backend.start();
+        try {
+            McpServerClient.McpBackendSession session =
+                    mcpServerClient.initializeBackendSession("http://127.0.0.1:" + port, 2000);
+
+            assertNotNull(session);
+            assertEquals("mock-session", session.sessionId, "the handshake path must be untouched");
+            assertEquals(io.surisoft.capi.utils.Constants.MCP_PROTOCOL_VERSION, session.protocolVersion);
+        } finally {
+            backend.stop();
+        }
+    }
 }

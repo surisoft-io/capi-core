@@ -136,7 +136,58 @@ public class Constants {
 
     // MCP Gateway
     public static final String MCP_SESSION_HEADER = "Mcp-Session-Id";
+
+    /**
+     * Protocol revision assumed when a request declares none. The handshake-based revision CAPI
+     * has always spoken; kept as the default so existing clients are unaffected.
+     */
     public static final String MCP_PROTOCOL_VERSION = "2025-03-26";
+
+    /**
+     * Current revision. Stateless: no {@code initialize} handshake, no {@code Mcp-Session-Id};
+     * the protocol version and client capabilities travel per-request in {@code _meta}.
+     */
+    public static final String MCP_PROTOCOL_VERSION_CURRENT = "2026-07-28";
+
+    /** Advertised by {@code server/discover}, preferred first. */
+    public static final java.util.List<String> MCP_PROTOCOL_VERSIONS_SUPPORTED =
+            java.util.List.of(MCP_PROTOCOL_VERSION_CURRENT, MCP_PROTOCOL_VERSION);
+
+    /** Carries the negotiated revision on Streamable HTTP (2025-06-18 onwards). */
+    public static final String MCP_PROTOCOL_VERSION_HEADER = "MCP-Protocol-Version";
+
+    /** Standard request headers required on Streamable HTTP POST from 2026-07-28. */
+    public static final String MCP_METHOD_HEADER = "Mcp-Method";
+    public static final String MCP_NAME_HEADER = "Mcp-Name";
+
+    // Reserved _meta keys (2026-07-28).
+    public static final String MCP_META_KEY_PROTOCOL_VERSION = "io.modelcontextprotocol/protocolVersion";
+    public static final String MCP_META_KEY_CLIENT_CAPABILITIES = "io.modelcontextprotocol/clientCapabilities";
+    public static final String MCP_META_KEY_CLIENT_INFO = "io.modelcontextprotocol/clientInfo";
+    public static final String MCP_META_KEY_SERVER_INFO = "io.modelcontextprotocol/serverInfo";
+
+    // Result shape (2026-07-28).
+    public static final String MCP_RESULT_TYPE = "resultType";
+    public static final String MCP_RESULT_TYPE_COMPLETE = "complete";
+    public static final String MCP_CACHE_TTL_MS = "ttlMs";
+    public static final String MCP_CACHE_SCOPE = "cacheScope";
+    /**
+     * Tool/resource/prompt listings are OPA-filtered per caller, so a shared intermediary must
+     * never cache them — that would leak one caller's visible inventory to another.
+     */
+    public static final String MCP_CACHE_SCOPE_PRIVATE = "private";
+
+    /**
+     * Error code for a protocol version the server does not support. The 2026-07-28 revision
+     * partitions the JSON-RPC server-error range and allocates -32020..-32099 to the spec.
+     */
+    public static final int JSONRPC_UNSUPPORTED_PROTOCOL_VERSION = -32022;
+
+    /** {@code Mcp-Method}/{@code Mcp-Name} disagreed with the JSON-RPC body (2026-07-28). */
+    public static final int JSONRPC_HEADER_MISMATCH = -32020;
+
+    /** RFC 9728 protected-resource metadata, served on the MCP listener. */
+    public static final String MCP_PROTECTED_RESOURCE_PATH = "/.well-known/oauth-protected-resource";
     public static final String MCP_SERVER_NAME = "CAPI MCP Gateway";
     public static final String MCP_META_PREFIX = "mcp-";
     public static final String MCP_META_ENABLED = "mcp-enabled";

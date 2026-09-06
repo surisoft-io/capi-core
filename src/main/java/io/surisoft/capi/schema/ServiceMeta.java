@@ -75,6 +75,17 @@ public class ServiceMeta {
     private State state;
     @JsonProperty("version")
     private String version;
+    /**
+     * Opt in to verifying that the fetched spec is the one this {@code version} announces:
+     * the spec's {@code info.version} must equal {@link #version}. Guards the rolling-deploy
+     * race where the first new pod bumps {@code version} but the load-balanced {@code open-api}
+     * endpoint still answers from an old pod, leaving CAPI caching the previous spec forever.
+     * <p>
+     * Off by default — most services never bump {@code info.version}, and enabling it there
+     * would freeze them on their current spec. Owners opt in and accept that contract.
+     */
+    @JsonProperty("match-openapi-version")
+    private boolean matchOpenApiVersion;
 
     private Map<String, String> extraServiceMeta = new ConcurrentHashMap<>();
 
@@ -338,6 +349,14 @@ public class ServiceMeta {
 
     public void setVersion(String version) {
         this.version = version;
+    }
+
+    public boolean isMatchOpenApiVersion() {
+        return matchOpenApiVersion;
+    }
+
+    public void setMatchOpenApiVersion(boolean matchOpenApiVersion) {
+        this.matchOpenApiVersion = matchOpenApiVersion;
     }
 
     public int getResponseTimeout() {

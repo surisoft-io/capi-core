@@ -57,3 +57,6 @@ build/
 *.crt
 *.cer
 /.idea/
+
+### Internal assets — not for publication ###
+capi-lockups.html

@@ -40,7 +40,46 @@ MCP will be implemented as a logical interaction model layered on top of existin
 
 ## MCP Wire Protocol
 
-CAPI implements the [MCP Streamable HTTP transport](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#streamable-http) to ensure compatibility with standard MCP clients (Claude Desktop, Cursor, IDEs, custom agents).
+CAPI implements the [MCP Streamable HTTP transport](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http) and serves **two protocol revisions at once**:
+
+| Revision | Shape | Status in CAPI |
+|---|---|---|
+| **`2026-07-28`** | Stateless — no handshake, no session | Preferred; advertised first by `server/discover` |
+| **`2025-03-26`** | Handshake — `initialize` mints an `Mcp-Session-Id` | Still fully supported; the default when a client declares nothing |
+
+### Which revision a request uses
+
+CAPI resolves it per request, most specific first:
+
+1. the `io.modelcontextprotocol/protocolVersion` key inside the request's `_meta` object
+2. the `MCP-Protocol-Version` HTTP header
+3. otherwise `2025-03-26`
+
+**A client that declares nothing keeps exactly the behaviour it has today** — same session requirement, same response shape. Declaring an unsupported revision returns error `-32022` with the list of revisions CAPI does support.
+
+### Stateless mode (`2026-07-28`)
+
+There is no `initialize` and no `Mcp-Session-Id`. Every request stands alone, which means any request can land on any CAPI replica behind an ordinary load balancer.
+
+```bash
+# No handshake. Just call.
+curl -s http://localhost:8383/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'MCP-Protocol-Version: 2026-07-28' \
+  -d '{"jsonrpc":"2.0","method":"tools/list","id":1}'
+```
+
+Because there is no session to trust, **the bearer token is validated on every request**. That is stricter than the handshake model, where the token was checked once at `initialize` and never rebound for the life of the session.
+
+Results in this mode carry two extra fields required by the revision:
+
+- `resultType` — always `"complete"` (CAPI does not yet implement multi round-trip requests)
+- `_meta.io.modelcontextprotocol/serverInfo` — CAPI's name and version
+
+List results (`tools/list`, `resources/list`, `prompts/list`, `resources/read`, `prompts/get`) additionally carry:
+
+- `ttlMs` — a freshness hint, tracking `consulCatalogDiscoverInterval`, since that bounds how quickly the answer can change
+- `cacheScope` — always `"private"`. These listings are OPA-filtered per caller, so a shared intermediary must never cache them; doing so would leak one caller's visible tool inventory to another.
 
 ### Single Endpoint
 
@@ -50,23 +89,38 @@ CAPI exposes a single `/mcp` endpoint. All MCP interactions are JSON-RPC 2.0 mes
 
 | Method | Description |
 |---|---|
-| `initialize` | Create an MCP session. Returns server capabilities and a `Mcp-Session-Id` header. |
+| `server/discover` | **Mandatory from `2026-07-28`.** Returns the protocol revisions, capabilities and identity CAPI supports, so a client can pick a version before doing anything else. Needs no session and no token. |
+| `initialize` | Create an MCP session (`2025-03-26` only). Returns server capabilities and a `Mcp-Session-Id` header. Not used in stateless mode. |
 | `tools/list` | Returns the aggregated tool catalog from all MCP-enabled Consul services. |
 | `tools/call` | Invokes a tool. CAPI resolves the tool name to a backend service and forwards the request. |
 | `resources/list` | Aggregates resource catalogs from every `mcp-type=server` upstream. URIs are namespaced as `<serviceId>:<originalUri>`. |
 | `resources/read` | Reads a resource. CAPI strips the namespace prefix and routes to the owning upstream MCP server. |
 | `prompts/list` | Aggregates prompt templates from every `mcp-type=server` upstream. Names are namespaced as `<serviceId>_<originalName>`. |
 | `prompts/get` | Renders a prompt with the supplied `arguments`. CAPI routes by name prefix to the owning upstream. |
-| `ping` | Health check. Returns a JSON-RPC success response. |
+| `ping` | Health check. Returns a JSON-RPC success response. **Removed from the protocol in `2026-07-28`**; still answered for handshake-based clients. |
 
 ### Response Format
 
 - Standard tool calls return `application/json` with a JSON-RPC result.
 - Streaming tool calls return `text/event-stream` when the tool declares streaming capability and the client sends `Accept: text/event-stream`.
 
-### Session Header
+### Session Header (`2025-03-26` only)
 
-Sessions are identified by the `Mcp-Session-Id` HTTP header, as defined in the MCP specification. Clients must include this header in all requests after `initialize`.
+Sessions are identified by the `Mcp-Session-Id` HTTP header. Clients on this revision must include it in all requests after `initialize`.
+
+On `2026-07-28` the header does not exist — the revision removed protocol-level sessions entirely. Do not send it, and do not expect one back.
+
+### Standard request headers
+
+`2026-07-28` defines `Mcp-Method` and `Mcp-Name` on POST, so an intermediary can route without parsing the JSON-RPC body. CAPI **validates them when present but does not require them**, because it still serves `2025-03-26` clients that never send them. If a header disagrees with the body, the request is refused with `-32020` rather than silently resolved in favour of one or the other.
+
+### Structured tool output
+
+When a tool declares an `outputSchema`, a successful `tools/call` returns `structuredContent` alongside the usual `content` text block, so a client can consume the result programmatically.
+
+For **OpenAPI-promoted tools this is automatic** — the schema is taken from the operation's first successful JSON response, which the spec already describes. Nothing extra to register. For tag-defined tools, set `mcp-tools-<name>-outputSchema`.
+
+A backend that returns something other than JSON is not an error; the tool simply gets the text block only.
 
 ## MCP Session Management
 
@@ -101,6 +155,48 @@ For MCP, the OPA input is extended with additional context:
 - Tool name and tool metadata
 
 OPA policies remain centralized and declarative. MCP does not introduce a new authorization engine.
+
+### When the token is checked
+
+| Revision | Token validated |
+|---|---|
+| `2025-03-26` | once, at `initialize`. The session is then trusted for its lifetime. |
+| `2026-07-28` | **on every request** — there is no session to trust. |
+
+### Authorization discovery (RFC 9728)
+
+CAPI serves protected-resource metadata on the MCP listener:
+
+```bash
+curl http://localhost:8383/.well-known/oauth-protected-resource
+```
+
+```json
+{
+  "resource": "http://localhost:8383/mcp",
+  "authorization_servers": ["https://idp.example.com/realms/capi"],
+  "bearer_methods_supported": ["header"]
+}
+```
+
+A 401 from `/mcp` now carries a pointer to it:
+
+```
+WWW-Authenticate: Bearer resource_metadata="http://localhost:8383/.well-known/oauth-protected-resource"
+```
+
+That is the chain a standards-compliant MCP client follows to find out *where* to get a token. Previously CAPI returned a bare JSON-RPC error, and a client that did not already know the authorization server had no way to discover it.
+
+`authorization_servers` is derived from `oauth2.keys` by trimming the usual JWKS suffixes, which covers the common OIDC layouts (Keycloak, Okta, Entra, plain `/.well-known/jwks.json`). If your provider uses a different layout, set it explicitly:
+
+```yaml
+capi:
+  mcp:
+    authorizationServers:
+      - https://idp.example.com/realms/capi
+```
+
+The endpoint is deliberately unauthenticated — it is what a caller reads *in order to* authenticate, and it exposes nothing a 401 does not already imply.
 
 ## Tool Model
 
@@ -147,6 +243,7 @@ New MCP-specific metadata keys are introduced:
 | `mcp-tools` | List of tool names |
 | `mcp-tools-{name}-description` | Human-readable tool description (used by LLMs for tool selection) |
 | `mcp-tools-{name}-inputSchema` | JSON Schema defining the tool's input parameters |
+| `mcp-tools-{name}-outputSchema` | (Optional) JSON Schema for the tool's result. When set, a successful call also returns `structuredContent`. Auto-derived for `mcp-from-openapi` tools from the operation's 2xx JSON response — no tag needed there. |
 | `mcp-streaming` | List of tools that may emit SSE events |
 | `mcp-category` | Semantic classification used as OPA input |
 | `mcp-timeout` | Execution timeout budget |
@@ -354,14 +451,39 @@ Streaming behavior is enabled only when:
 
 Undertow manages the SSE connection lifecycle; tools are stateless request handlers.
 
+## Upstream MCP servers: protocol negotiation
+
+CAPI is an MCP **client** to every `mcp-type=server` backend, and those backends will sit on older revisions for a long time. CAPI negotiates per backend.
+
+**The handshake is tried first, deliberately.** Every MCP server deployed today speaks `2025-03-26`, so attempting `initialize` first keeps the common path at exactly the cost it has always had — no extra round-trip and no behaviour change. Probing first would tax every existing backend to accommodate the rare new one.
+
+```
+initialize ──succeeds──▶ handshake session, Mcp-Session-Id stored, as before
+     │
+     └──fails──▶ server/discover ──advertises 2026-07-28──▶ stateless session, no session id
+                       │
+                       └──anything else──▶ backend unusable, load balancer told
+```
+
+A failed `initialize` is precisely the signal that a backend *might* be stateless, since `2026-07-28` removed the method.
+
+Two safeguards:
+
+- **The probe is bounded** at 2 s independently of the caller's timeout, so a backend that black-holes `server/discover` cannot double the cost of establishing a session. Timing out is safe — it just falls back to the handshake.
+- **A JSON-RPC error is not a session.** An `initialize` that returns `-32601` arrives as HTTP `200` with an `error` member; CAPI now inspects the body rather than trusting the status line. Previously such a response would have produced a session with no id, and CAPI would have gone on sending a meaningless header forever.
+
+Stateless upstream sessions carry no `Mcp-Session-Id`, so nothing is sent — which also removes the replica-mismatch failure mode where a session minted by one replica was sent to another.
+
 ## Scope
 
 ### In Scope
 
-- MCP Streamable HTTP transport (JSON-RPC 2.0)
-- `initialize`, `tools/list`, `tools/call`, `ping` methods
+- MCP Streamable HTTP transport (JSON-RPC 2.0), serving both `2026-07-28` and `2025-03-26`
+- `server/discover`, `initialize`, `tools/list`, `tools/call`, `resources/*`, `prompts/*`, `ping`
+- Structured tool output (`outputSchema` / `structuredContent`)
+- Authorization discovery via RFC 9728 protected-resource metadata
 - Tool discovery and aggregation from Consul
-- Session management via Hazelcast
+- Session management via Hazelcast (`2025-03-26` clients only)
 - Authorization via existing JWT + OPA pipeline
 - SSE streaming for tools that declare it
 

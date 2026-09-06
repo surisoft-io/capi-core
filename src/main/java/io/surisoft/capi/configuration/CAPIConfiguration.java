@@ -697,7 +697,23 @@ public class CAPIConfiguration {
         private int toolCallTimeout = 30000;
         private long circuitBreakerCooldownMs = 30000;
         private int mcpServerDiscoveryTimeoutMs = 10000;
+        /**
+         * Issuer URLs advertised as {@code authorization_servers} in the RFC 9728 protected-resource
+         * metadata served on the MCP listener. Optional: when unset CAPI derives them from
+         * {@code oauth2.keys} by trimming the usual JWKS suffixes, which covers the common
+         * OIDC layouts but not every provider. Set explicitly if the derivation is wrong.
+         */
+        private java.util.List<String> authorizationServers;
         private Observability observability = new Observability();
+
+        public java.util.List<String> getAuthorizationServers() {
+            return authorizationServers;
+        }
+
+        public void setAuthorizationServers(java.util.List<String> authorizationServers) {
+            this.authorizationServers = authorizationServers;
+        }
+
 
         public boolean isEnabled() {
             return enabled;

@@ -8,6 +8,13 @@ public class JsonRpcRequest {
     private String method;
     private Object params;
     private Object id;
+    /**
+     * Reserved metadata envelope. From protocol revision 2026-07-28 this is where the client's
+     * protocol version, capabilities and identity travel, replacing the {@code initialize}
+     * handshake. Previously discarded by {@code @JsonIgnoreProperties}.
+     */
+    @com.fasterxml.jackson.annotation.JsonProperty("_meta")
+    private java.util.Map<String, Object> meta;
 
     public String getJsonrpc() {
         return jsonrpc;
@@ -39,5 +46,13 @@ public class JsonRpcRequest {
 
     public void setId(Object id) {
         this.id = id;
+    }
+
+    public java.util.Map<String, Object> getMeta() {
+        return meta;
+    }
+
+    public void setMeta(java.util.Map<String, Object> meta) {
+        this.meta = meta;
     }
 }

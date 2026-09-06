@@ -138,7 +138,9 @@ public class McpToolRegistry {
             tool.setDescription(props.getOrDefault(descKey, qualifiedName));
 
             String schemaKey = Constants.MCP_META_PREFIX + TOOLS_DOT + name + "-inputSchema";
+            String outputSchemaKey = Constants.MCP_META_PREFIX + TOOLS_DOT + name + "-outputSchema";
             tool.setInputSchema(props.getOrDefault(schemaKey, "{\"type\":\"object\"}"));
+            tool.setOutputSchema(props.get(outputSchemaKey));
 
             // Per-tool timeout override
             String toolTimeoutKey = Constants.MCP_META_PREFIX + TOOLS_DOT + name + "-timeout";

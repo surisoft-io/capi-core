@@ -312,6 +312,50 @@ public class ServiceUtils {
         return capiRunningMode.equalsIgnoreCase(Constants.FULL_TYPE) && serviceHasOpenApiEndpoint(service);
     }
 
+    /**
+     * Verifies that the spec CAPI just fetched is the one the service's {@code version} meta
+     * announces — opt in via {@code match-openapi-version}.
+     *
+     * <p>Guards the rolling-deploy race: the first pod of a new release bumps {@code version},
+     * CAPI re-fetches, but the load-balanced {@code open-api} endpoint answers from a pod still
+     * running the old release. CAPI would then cache the previous spec against the new version
+     * and never try again, because the version it recorded already matches.
+     *
+     * <p>Returns a human-readable description of the mismatch, or {@code null} when the spec is
+     * accepted (including when the check is off or cannot be evaluated).
+     *
+     * @see ServiceMeta#isMatchOpenApiVersion()
+     */
+    public String openApiVersionMismatch(Service service) {
+        ServiceMeta meta = service.getServiceMeta();
+        if (meta == null || !meta.isMatchOpenApiVersion()) {
+            return null;
+        }
+        String declaredVersion = meta.getVersion();
+        OpenAPI openAPI = service.getOpenAPI();
+        String specVersion = (openAPI != null && openAPI.getInfo() != null)
+                ? openAPI.getInfo().getVersion()
+                : null;
+
+        // Fail open when there is nothing to compare. A service that opted in but never set a
+        // version meta — or whose spec declares no info.version — is misconfigured, not stale;
+        // freezing it on its current spec would be worse than the race this guards against.
+        if (isBlank(declaredVersion) || isBlank(specVersion)) {
+            log.warn("Service {} sets match-openapi-version but {}; skipping the version check",
+                    service.getId(),
+                    isBlank(declaredVersion) ? "has no version meta" : "its spec declares no info.version");
+            return null;
+        }
+        if (declaredVersion.trim().equals(specVersion.trim())) {
+            return null;
+        }
+        return "meta version " + declaredVersion.trim() + ", spec info.version " + specVersion.trim();
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
     public HttpRequest buildOpenApiRequest(Service service) {
         String openApiEndpoint = service.getServiceMeta().getOpenApiEndpoint();
         URI uri = URI.create(openApiEndpoint);
