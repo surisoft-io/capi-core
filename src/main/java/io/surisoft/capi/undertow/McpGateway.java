@@ -111,7 +111,10 @@ public class McpGateway implements AutoCloseable {
     public void start() {
         PathHandler pathHandler = new PathHandler()
                 .addExactPath("/mcp", this::handleMcp)
-                .addExactPath("/mcp/health", this::handleHealth);
+                .addExactPath("/mcp/health", this::handleHealth)
+                // RFC 9728. Unauthenticated by definition — it is what a client reads to find
+                // out how to authenticate at all.
+                .addExactPath(Constants.MCP_PROTECTED_RESOURCE_PATH, this::handleProtectedResourceMetadata);
 
         Undertow.Builder builder = Undertow.builder();
         if (sslContext != null) {
@@ -181,30 +184,54 @@ public class McpGateway implements AutoCloseable {
                 return;
             }
 
+            // Standard request headers (2026-07-28). They let an upstream proxy route without
+            // parsing the body. CAPI validates them when present rather than requiring them:
+            // it still serves 2025-03-26 clients, which never send them.
+            String headerMismatch = checkStandardHeaders(exchange, request);
+            if (headerMismatch != null) {
+                sendJsonRpc(exchange, StatusCodes.OK, JsonRpcResponse.error(
+                        request.getId(), Constants.JSONRPC_HEADER_MISMATCH, headerMismatch));
+                return;
+            }
+
+            // Which revision is this request speaking? Everything downstream branches on it.
+            String protocolVersion = resolveProtocolVersion(exchange, request);
+            if (!isSupportedProtocolVersion(protocolVersion)) {
+                sendJsonRpc(exchange, StatusCodes.OK, JsonRpcResponse.error(
+                        request.getId(), Constants.JSONRPC_UNSUPPORTED_PROTOCOL_VERSION,
+                        "Unsupported protocol version: " + protocolVersion,
+                        Map.of("supported", Constants.MCP_PROTOCOL_VERSIONS_SUPPORTED)));
+                return;
+            }
+
             switch (method) {
+                case "server/discover":
+                    handleServerDiscover(exchange, request, protocolVersion);
+                    break;
                 case "initialize":
-                    handleInitialize(exchange, request);
+                    handleInitialize(exchange, request, protocolVersion);
                     break;
                 case "tools/list":
-                    handleToolsList(exchange, request);
+                    handleToolsList(exchange, request, protocolVersion);
                     break;
                 case "tools/call":
-                    handleToolsCall(exchange, request);
+                    handleToolsCall(exchange, request, protocolVersion);
                     break;
                 case "resources/list":
-                    handleResourcesList(exchange, request);
+                    handleResourcesList(exchange, request, protocolVersion);
                     break;
                 case "resources/read":
-                    handleResourcesRead(exchange, request);
+                    handleResourcesRead(exchange, request, protocolVersion);
                     break;
                 case "prompts/list":
-                    handlePromptsList(exchange, request);
+                    handlePromptsList(exchange, request, protocolVersion);
                     break;
                 case "prompts/get":
-                    handlePromptsGet(exchange, request);
+                    handlePromptsGet(exchange, request, protocolVersion);
                     break;
                 case "ping":
-                    handlePing(exchange, request);
+                    // Removed in 2026-07-28; still answered for handshake-based clients.
+                    handlePing(exchange, request, protocolVersion);
                     break;
                 default:
                     sendJsonRpc(exchange, StatusCodes.OK,
@@ -217,7 +244,36 @@ public class McpGateway implements AutoCloseable {
         }
     }
 
-    private void handleInitialize(HttpServerExchange exchange, JsonRpcRequest request) {
+    /**
+     * {@code server/discover} — mandatory from 2026-07-28. Lets a client learn our supported
+     * revisions, capabilities and identity in one call, before committing to a version. It is
+     * deliberately unauthenticated and stateless: it advertises nothing a caller could not
+     * infer from a 401, and requiring a token here would break version discovery for clients
+     * that have not yet obtained one.
+     */
+    private void handleServerDiscover(HttpServerExchange exchange, JsonRpcRequest request, String protocolVersion) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("protocolVersions", Constants.MCP_PROTOCOL_VERSIONS_SUPPORTED);
+        result.put("capabilities", buildCapabilities());
+        result.put("serverInfo", Map.of("name", Constants.MCP_SERVER_NAME, "version", configuration.getVersion()));
+        sendJsonRpc(exchange, StatusCodes.OK,
+                JsonRpcResponse.success(request.getId(), decorateResult(result, protocolVersion)));
+    }
+
+    /** Capability block shared by {@code initialize} and {@code server/discover}. */
+    private Map<String, Object> buildCapabilities() {
+        Map<String, Object> capabilities = new LinkedHashMap<>();
+        capabilities.put("tools", Map.of("listChanged", false));
+        if (resourceRegistry != null) {
+            capabilities.put("resources", Map.of("listChanged", false, "subscribe", false));
+        }
+        if (promptRegistry != null) {
+            capabilities.put("prompts", Map.of("listChanged", false));
+        }
+        return capabilities;
+    }
+
+    private void handleInitialize(HttpServerExchange exchange, JsonRpcRequest request, String protocolVersion) {
         Span span = (mcpTracer != null)
                 ? mcpTracer.startServerSpan(exchange, Constants.GEN_AI_OPERATION_INITIALIZE)
                 : null;
@@ -259,15 +315,7 @@ public class McpGateway implements AutoCloseable {
 
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("protocolVersion", Constants.MCP_PROTOCOL_VERSION);
-            Map<String, Object> capabilities = new LinkedHashMap<>();
-            capabilities.put("tools", Map.of("listChanged", false));
-            if (resourceRegistry != null) {
-                capabilities.put("resources", Map.of("listChanged", false, "subscribe", false));
-            }
-            if (promptRegistry != null) {
-                capabilities.put("prompts", Map.of("listChanged", false));
-            }
-            result.put("capabilities", capabilities);
+            result.put("capabilities", buildCapabilities());
             result.put("serverInfo", Map.of("name", Constants.MCP_SERVER_NAME, "version", configuration.getVersion()));
 
             exchange.getResponseHeaders().put(MCP_SESSION_ID_HEADER, sessionId);
@@ -277,7 +325,8 @@ public class McpGateway implements AutoCloseable {
                 mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_SUCCESS);
                 mcpTracer.setHttpStatus(span, StatusCodes.OK);
             }
-            sendJsonRpc(exchange, StatusCodes.OK, JsonRpcResponse.success(request.getId(), result));
+            sendJsonRpc(exchange, StatusCodes.OK,
+                    JsonRpcResponse.success(request.getId(), decorateResult(result, protocolVersion)));
         } catch (RuntimeException t) {
             if (mcpTracer != null) {
                 mcpTracer.recordError(span, t);
@@ -290,7 +339,7 @@ public class McpGateway implements AutoCloseable {
         }
     }
 
-    private void handleToolsList(HttpServerExchange exchange, JsonRpcRequest request) {
+    private void handleToolsList(HttpServerExchange exchange, JsonRpcRequest request, String protocolVersion) {
         Span span = (mcpTracer != null)
                 ? mcpTracer.startServerSpan(exchange, Constants.GEN_AI_OPERATION_LIST_TOOLS)
                 : null;
@@ -298,7 +347,7 @@ public class McpGateway implements AutoCloseable {
         try {
             if (mcpTracer != null) mcpTracer.setToolCallId(span, request.getId());
 
-            McpSession session = validateSession(exchange, request);
+            McpSession session = authorizeRequest(exchange, request, protocolVersion);
             if (session == null) {
                 if (mcpTracer != null) {
                     mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_INVALID_REQUEST);
@@ -307,7 +356,10 @@ public class McpGateway implements AutoCloseable {
                 return;
             }
 
-            List<McpTool> tools = toolRegistry.getAllTools();
+            // Deterministic order: the spec asks for it so clients can cache the listing and
+            // LLM prompt caches stay warm across calls.
+            List<McpTool> tools = new ArrayList<>(toolRegistry.getAllTools());
+            tools.sort(Comparator.comparing(McpTool::getName, Comparator.nullsLast(Comparator.naturalOrder())));
             List<Map<String, Object>> toolList = new ArrayList<>();
             int filtered = 0;
             for (McpTool tool : tools) {
@@ -329,6 +381,13 @@ public class McpGateway implements AutoCloseable {
                 } catch (JsonProcessingException e) {
                     toolMap.put("inputSchema", Map.of("type", "object"));
                 }
+                if (tool.getOutputSchema() != null && !tool.getOutputSchema().isBlank()) {
+                    try {
+                        toolMap.put("outputSchema", objectMapper.readValue(tool.getOutputSchema(), Object.class));
+                    } catch (JsonProcessingException e) {
+                        log.warn("Tool '{}' has an unparseable outputSchema; omitting it", tool.getName());
+                    }
+                }
                 toolList.add(toolMap);
             }
 
@@ -341,7 +400,8 @@ public class McpGateway implements AutoCloseable {
                 mcpTracer.setHttpStatus(span, StatusCodes.OK);
             }
             sendJsonRpc(exchange, StatusCodes.OK,
-                    JsonRpcResponse.success(request.getId(), Map.of("tools", toolList)));
+                    JsonRpcResponse.success(request.getId(),
+                            decorateCacheable(new LinkedHashMap<>(Map.of("tools", toolList)), protocolVersion)));
         } catch (RuntimeException t) {
             if (mcpTracer != null) {
                 mcpTracer.recordError(span, t);
@@ -355,7 +415,7 @@ public class McpGateway implements AutoCloseable {
     }
 
     @SuppressWarnings("unchecked")
-    private void handleToolsCall(HttpServerExchange exchange, JsonRpcRequest request) {
+    private void handleToolsCall(HttpServerExchange exchange, JsonRpcRequest request, String protocolVersion) {
         Span span = (mcpTracer != null)
                 ? mcpTracer.startServerSpan(exchange, Constants.GEN_AI_OPERATION_EXECUTE_TOOL)
                 : null;
@@ -363,7 +423,7 @@ public class McpGateway implements AutoCloseable {
         try {
             if (mcpTracer != null) mcpTracer.setToolCallId(span, request.getId());
 
-            McpSession session = validateSession(exchange, request);
+            McpSession session = authorizeRequest(exchange, request, protocolVersion);
             if (session == null) {
                 if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_INVALID_REQUEST);
                 return;
@@ -417,13 +477,13 @@ public class McpGateway implements AutoCloseable {
 
             Object arguments = params.get("arguments");
             if (tool.isMcpServer() && mcpServerClient != null) {
-                handleMcpServerToolCall(exchange, request, tool, service, arguments, span);
+                handleMcpServerToolCall(exchange, request, tool, service, arguments, span, protocolVersion);
             } else if (tool.isOpenApiPromoted()) {
-                handleOpenApiToolCall(exchange, request, backendUrls, tool, arguments, span);
+                handleOpenApiToolCall(exchange, request, backendUrls, tool, arguments, span, protocolVersion);
             } else if (isStreamingRequest(tool, exchange)) {
-                handleStreamingToolCall(exchange, request, backendUrls.get(0), tool, arguments, span);
+                handleStreamingToolCall(exchange, request, backendUrls.get(0), tool, arguments, span, protocolVersion);
             } else {
-                handleSyncToolCallWithFailover(exchange, request, backendUrls, tool, arguments, span);
+                handleSyncToolCallWithFailover(exchange, request, backendUrls, tool, arguments, span, protocolVersion);
             }
         } catch (RuntimeException t) {
             if (mcpTracer != null) {
@@ -438,13 +498,14 @@ public class McpGateway implements AutoCloseable {
     }
 
     private void handleMcpServerToolCall(HttpServerExchange exchange, JsonRpcRequest request,
-                                          McpTool tool, Service service, Object arguments, Span parentSpan) {
+                                          McpTool tool, Service service, Object arguments, Span parentSpan, String protocolVersion) {
         int timeout = tool.getTimeout() > 0 ? tool.getTimeout() : configuration.getMcp().getToolCallTimeout();
         String forwardedAuth = extractForwardedAuth(exchange);
         try {
             Object result = mcpServerClient.forwardToolCall(service, tool.getName(), arguments, timeout, forwardedAuth);
             if (mcpTracer != null) mcpTracer.setOutcome(parentSpan, Constants.CAPI_OUTCOME_SUCCESS);
-            sendJsonRpc(exchange, StatusCodes.OK, JsonRpcResponse.success(request.getId(), result));
+            sendJsonRpc(exchange, StatusCodes.OK,
+                    JsonRpcResponse.success(request.getId(), decorateResult(result, protocolVersion)));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             if (mcpTracer != null) {
@@ -512,7 +573,7 @@ public class McpGateway implements AutoCloseable {
     }
 
     private void handleSyncToolCallWithFailover(HttpServerExchange exchange, JsonRpcRequest request,
-                                                List<String> backendUrls, McpTool tool, Object arguments, Span parentSpan) {
+                                                List<String> backendUrls, McpTool tool, Object arguments, Span parentSpan, String protocolVersion) {
         int timeout = tool.getTimeout() > 0 ? tool.getTimeout() : configuration.getMcp().getToolCallTimeout();
         String forwardedAuth = extractForwardedAuth(exchange);
         String requestBody;
@@ -552,8 +613,7 @@ public class McpGateway implements AutoCloseable {
                 if (mcpTracer != null) mcpTracer.setHttpStatus(attemptSpan, backendResponse.statusCode());
 
                 if (backendResponse.statusCode() >= 200 && backendResponse.statusCode() < 300) {
-                    Map<String, Object> content = Map.of("content",
-                            List.of(Map.of("type", "text", "text", backendResponse.body())));
+                    Object content = buildToolResult(tool, backendResponse.body(), protocolVersion);
                     if (mcpTracer != null) mcpTracer.setOutcome(parentSpan, Constants.CAPI_OUTCOME_SUCCESS);
                     sendJsonRpc(exchange, StatusCodes.OK, JsonRpcResponse.success(request.getId(), content));
                 } else {
@@ -598,7 +658,7 @@ public class McpGateway implements AutoCloseable {
 
     @SuppressWarnings("unchecked")
     private void handleOpenApiToolCall(HttpServerExchange exchange, JsonRpcRequest request,
-                                       List<String> backendUrls, McpTool tool, Object arguments, Span parentSpan) {
+                                       List<String> backendUrls, McpTool tool, Object arguments, Span parentSpan, String protocolVersion) {
         int timeout = tool.getTimeout() > 0 ? tool.getTimeout() : configuration.getMcp().getToolCallTimeout();
 
         Map<String, Object> argMap = arguments instanceof Map ? new LinkedHashMap<>((Map<String, Object>) arguments) : new LinkedHashMap<>();
@@ -637,8 +697,7 @@ public class McpGateway implements AutoCloseable {
                 if (mcpTracer != null) mcpTracer.setHttpStatus(attemptSpan, backendResponse.statusCode());
 
                 if (backendResponse.statusCode() >= 200 && backendResponse.statusCode() < 300) {
-                    Map<String, Object> content = Map.of("content",
-                            List.of(Map.of("type", "text", "text", backendResponse.body())));
+                    Object content = buildToolResult(tool, backendResponse.body(), protocolVersion);
                     if (mcpTracer != null) mcpTracer.setOutcome(parentSpan, Constants.CAPI_OUTCOME_SUCCESS);
                     sendJsonRpc(exchange, StatusCodes.OK, JsonRpcResponse.success(request.getId(), content));
                 } else {
@@ -691,7 +750,7 @@ public class McpGateway implements AutoCloseable {
     }
 
     private void handleStreamingToolCall(HttpServerExchange exchange, JsonRpcRequest request,
-                                         String backendUrl, McpTool tool, Object arguments, Span parentSpan) {
+                                         String backendUrl, McpTool tool, Object arguments, Span parentSpan, String protocolVersion) {
         int timeout = tool.getTimeout() > 0 ? tool.getTimeout() : configuration.getMcp().getToolCallTimeout();
         Span attemptSpan = (mcpTracer != null)
                 ? mcpTracer.startUpstreamSpan(parentSpan, backendUrl, tool.getName(), 1)
@@ -758,30 +817,31 @@ public class McpGateway implements AutoCloseable {
         }
     }
 
-    private void handlePing(HttpServerExchange exchange, JsonRpcRequest request) {
+    private void handlePing(HttpServerExchange exchange, JsonRpcRequest request, String protocolVersion) {
         sendJsonRpc(exchange, StatusCodes.OK,
-                JsonRpcResponse.success(request.getId(), Map.of()));
+                JsonRpcResponse.success(request.getId(), decorateResult(new LinkedHashMap<>(), protocolVersion)));
     }
 
     // -----------------------------------------------------------------------
     // Resources / Prompts (passthrough to mcp-type=server backends only)
     // -----------------------------------------------------------------------
 
-    private void handleResourcesList(HttpServerExchange exchange, JsonRpcRequest request) {
+    private void handleResourcesList(HttpServerExchange exchange, JsonRpcRequest request, String protocolVersion) {
         Span span = (mcpTracer != null)
                 ? mcpTracer.startServerSpan(exchange, Constants.GEN_AI_OPERATION_LIST_RESOURCES)
                 : null;
         Scope scope = (span != null) ? span.makeCurrent() : null;
         try {
             if (mcpTracer != null) mcpTracer.setToolCallId(span, request.getId());
-            McpSession session = validateSession(exchange, request);
+            McpSession session = authorizeRequest(exchange, request, protocolVersion);
             if (session == null) {
                 if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_INVALID_REQUEST);
                 return;
             }
             if (resourceRegistry == null) {
                 sendJsonRpc(exchange, StatusCodes.OK,
-                        JsonRpcResponse.success(request.getId(), Map.of("resources", List.of())));
+                        JsonRpcResponse.success(request.getId(),
+                                decorateCacheable(new LinkedHashMap<>(Map.of("resources", List.of())), protocolVersion)));
                 if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_SUCCESS);
                 return;
             }
@@ -789,7 +849,8 @@ public class McpGateway implements AutoCloseable {
             if (span != null) span.setAttribute("mcp.resources.count", resources.size());
             if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_SUCCESS);
             sendJsonRpc(exchange, StatusCodes.OK,
-                    JsonRpcResponse.success(request.getId(), Map.of("resources", resources)));
+                    JsonRpcResponse.success(request.getId(),
+                            decorateCacheable(new LinkedHashMap<>(Map.of("resources", resources)), protocolVersion)));
         } catch (RuntimeException t) {
             if (mcpTracer != null) {
                 mcpTracer.recordError(span, t);
@@ -803,14 +864,14 @@ public class McpGateway implements AutoCloseable {
     }
 
     @SuppressWarnings("unchecked")
-    private void handleResourcesRead(HttpServerExchange exchange, JsonRpcRequest request) {
+    private void handleResourcesRead(HttpServerExchange exchange, JsonRpcRequest request, String protocolVersion) {
         Span span = (mcpTracer != null)
                 ? mcpTracer.startServerSpan(exchange, Constants.GEN_AI_OPERATION_READ_RESOURCE)
                 : null;
         Scope scope = (span != null) ? span.makeCurrent() : null;
         try {
             if (mcpTracer != null) mcpTracer.setToolCallId(span, request.getId());
-            McpSession session = validateSession(exchange, request);
+            McpSession session = authorizeRequest(exchange, request, protocolVersion);
             if (session == null) {
                 if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_INVALID_REQUEST);
                 return;
@@ -847,7 +908,8 @@ public class McpGateway implements AutoCloseable {
             try {
                 Object result = resourceRegistry.readResource(resolved, timeout);
                 if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_SUCCESS);
-                sendJsonRpc(exchange, StatusCodes.OK, JsonRpcResponse.success(request.getId(), result));
+                sendJsonRpc(exchange, StatusCodes.OK,
+                        JsonRpcResponse.success(request.getId(), decorateCacheable(result, protocolVersion)));
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 if (mcpTracer != null) {
@@ -877,21 +939,22 @@ public class McpGateway implements AutoCloseable {
         }
     }
 
-    private void handlePromptsList(HttpServerExchange exchange, JsonRpcRequest request) {
+    private void handlePromptsList(HttpServerExchange exchange, JsonRpcRequest request, String protocolVersion) {
         Span span = (mcpTracer != null)
                 ? mcpTracer.startServerSpan(exchange, Constants.GEN_AI_OPERATION_LIST_PROMPTS)
                 : null;
         Scope scope = (span != null) ? span.makeCurrent() : null;
         try {
             if (mcpTracer != null) mcpTracer.setToolCallId(span, request.getId());
-            McpSession session = validateSession(exchange, request);
+            McpSession session = authorizeRequest(exchange, request, protocolVersion);
             if (session == null) {
                 if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_INVALID_REQUEST);
                 return;
             }
             if (promptRegistry == null) {
                 sendJsonRpc(exchange, StatusCodes.OK,
-                        JsonRpcResponse.success(request.getId(), Map.of("prompts", List.of())));
+                        JsonRpcResponse.success(request.getId(),
+                                decorateCacheable(new LinkedHashMap<>(Map.of("prompts", List.of())), protocolVersion)));
                 if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_SUCCESS);
                 return;
             }
@@ -899,7 +962,8 @@ public class McpGateway implements AutoCloseable {
             if (span != null) span.setAttribute("mcp.prompts.count", prompts.size());
             if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_SUCCESS);
             sendJsonRpc(exchange, StatusCodes.OK,
-                    JsonRpcResponse.success(request.getId(), Map.of("prompts", prompts)));
+                    JsonRpcResponse.success(request.getId(),
+                            decorateCacheable(new LinkedHashMap<>(Map.of("prompts", prompts)), protocolVersion)));
         } catch (RuntimeException t) {
             if (mcpTracer != null) {
                 mcpTracer.recordError(span, t);
@@ -913,14 +977,14 @@ public class McpGateway implements AutoCloseable {
     }
 
     @SuppressWarnings("unchecked")
-    private void handlePromptsGet(HttpServerExchange exchange, JsonRpcRequest request) {
+    private void handlePromptsGet(HttpServerExchange exchange, JsonRpcRequest request, String protocolVersion) {
         Span span = (mcpTracer != null)
                 ? mcpTracer.startServerSpan(exchange, Constants.GEN_AI_OPERATION_GET_PROMPT)
                 : null;
         Scope scope = (span != null) ? span.makeCurrent() : null;
         try {
             if (mcpTracer != null) mcpTracer.setToolCallId(span, request.getId());
-            McpSession session = validateSession(exchange, request);
+            McpSession session = authorizeRequest(exchange, request, protocolVersion);
             if (session == null) {
                 if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_INVALID_REQUEST);
                 return;
@@ -958,7 +1022,8 @@ public class McpGateway implements AutoCloseable {
             try {
                 Object result = promptRegistry.getPrompt(resolved, arguments, timeout);
                 if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_SUCCESS);
-                sendJsonRpc(exchange, StatusCodes.OK, JsonRpcResponse.success(request.getId(), result));
+                sendJsonRpc(exchange, StatusCodes.OK,
+                        JsonRpcResponse.success(request.getId(), decorateCacheable(result, protocolVersion)));
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 if (mcpTracer != null) {
@@ -988,6 +1053,56 @@ public class McpGateway implements AutoCloseable {
         }
     }
 
+    /**
+     * Per-request gate. Which check applies depends on the revision the caller declared.
+     *
+     * <p><b>2025-03-26</b> — handshake-based: the caller must present a live {@code Mcp-Session-Id}
+     * minted by {@code initialize}. The OAuth token was validated once, at {@code initialize}.
+     *
+     * <p><b>2026-07-28</b> — stateless: there is no session to present, so the bearer token is
+     * validated on <em>every</em> request. That is strictly stronger than the handshake model,
+     * which never re-checked the token after {@code initialize} for the life of the session.
+     *
+     * @return a session for the handshake path, a synthetic per-request one for the stateless
+     *         path, or {@code null} when a response has already been written
+     */
+    private McpSession authorizeRequest(HttpServerExchange exchange, JsonRpcRequest request, String protocolVersion) {
+        if (!isStateless(protocolVersion)) {
+            return validateSession(exchange, request);
+        }
+
+        String clientIdentity = "anonymous";
+        if (configuration.getOauth2() != null && configuration.getOauth2().isEnabled()) {
+            String accessToken;
+            try {
+                accessToken = httpUtils.processAuthorizationAccessToken(exchange);
+            } catch (AuthorizationException e) {
+                sendUnauthorized(exchange, request, "Invalid authorization");
+                return null;
+            }
+            if (accessToken == null) {
+                sendUnauthorized(exchange, request, "Authorization required");
+                return null;
+            }
+            clientIdentity = accessToken.substring(0, Math.min(accessToken.length(), 16)) + "...";
+        }
+        // Not stored: nothing outlives the request on this path. It exists only so the
+        // downstream handlers keep one shape regardless of revision.
+        return new McpSession(UUID.randomUUID().toString(), clientIdentity,
+                configuration.getMcp().getSessionTtl());
+    }
+
+    /**
+     * 401 with the RFC 9728 pointer, so a spec-compliant client can discover the authorization
+     * server instead of guessing. Previously this was a bare JSON-RPC error with no hint.
+     */
+    private void sendUnauthorized(HttpServerExchange exchange, JsonRpcRequest request, String message) {
+        exchange.getResponseHeaders().put(Headers.WWW_AUTHENTICATE,
+                "Bearer resource_metadata=\"" + protectedResourceMetadataUrl(exchange) + "\"");
+        sendJsonRpc(exchange, StatusCodes.UNAUTHORIZED,
+                JsonRpcResponse.error(request.getId(), -32000, message));
+    }
+
     private McpSession validateSession(HttpServerExchange exchange, JsonRpcRequest request) {
         String sessionId = null;
         if (exchange.getRequestHeaders().contains(Constants.MCP_SESSION_HEADER)) {
@@ -1012,6 +1127,241 @@ public class McpGateway implements AutoCloseable {
         session.touch();
         sessionStore.put(sessionId, session);
         return session;
+    }
+
+    // ---------------------------------------------------------------------
+    // Protocol version negotiation (2026-07-28)
+    //
+    // CAPI serves two revisions at once. 2025-03-26 is handshake-based: initialize mints a
+    // session and every later call carries Mcp-Session-Id. 2026-07-28 is stateless: there is no
+    // handshake, and each request declares its own version and capabilities in _meta.
+    //
+    // Resolution order is most-specific first: the _meta key, then the transport header, then
+    // the legacy default — so a client that says nothing keeps exactly today's behaviour.
+    // ---------------------------------------------------------------------
+
+    String resolveProtocolVersion(HttpServerExchange exchange, JsonRpcRequest request) {
+        if (request != null && request.getMeta() != null) {
+            Object declared = request.getMeta().get(Constants.MCP_META_KEY_PROTOCOL_VERSION);
+            if (declared instanceof String v && !v.isBlank()) {
+                return v.trim();
+            }
+        }
+        if (exchange != null && exchange.getRequestHeaders().contains(Constants.MCP_PROTOCOL_VERSION_HEADER)) {
+            String header = exchange.getRequestHeaders().get(Constants.MCP_PROTOCOL_VERSION_HEADER).getFirst();
+            if (header != null && !header.isBlank()) {
+                return header.trim();
+            }
+        }
+        return Constants.MCP_PROTOCOL_VERSION;
+    }
+
+    static boolean isSupportedProtocolVersion(String version) {
+        // List.of(...).contains(null) throws rather than returning false, so guard first.
+        return version != null && Constants.MCP_PROTOCOL_VERSIONS_SUPPORTED.contains(version);
+    }
+
+    /** True when the revision has no handshake and no session — nothing to validate per call. */
+    static boolean isStateless(String version) {
+        return Constants.MCP_PROTOCOL_VERSION_CURRENT.equals(version);
+    }
+
+    /**
+     * Adds the fields every 2026-07-28 result must carry. A no-op on 2025-03-26, so legacy
+     * clients see byte-identical responses to before.
+     */
+    @SuppressWarnings("unchecked")
+    private Object decorateResult(Object result, String version) {
+        if (!isStateless(version)) {
+            return result;
+        }
+        // Upstream MCP-server and resource/prompt passthroughs hand back whatever the backend
+        // produced. Decorate only a mutable JSON object; anything else is passed through
+        // untouched rather than reshaped behind the backend's back.
+        if (!(result instanceof Map)) {
+            return result;
+        }
+        Map<String, Object> decorated = new LinkedHashMap<>((Map<String, Object>) result);
+        decorated.put(Constants.MCP_RESULT_TYPE, Constants.MCP_RESULT_TYPE_COMPLETE);
+        decorated.put("_meta", Map.of(Constants.MCP_META_KEY_SERVER_INFO,
+                Map.of("name", Constants.MCP_SERVER_NAME, "version", configuration.getVersion())));
+        return decorated;
+    }
+
+    /**
+     * Marks a list/read result cacheable. {@code cacheScope} is always {@code private}: these
+     * listings are OPA-filtered per caller, so allowing a shared intermediary to cache them
+     * would leak one caller's visible inventory to another.
+     */
+    @SuppressWarnings("unchecked")
+    private Object decorateCacheable(Object result, String version) {
+        if (!isStateless(version) || !(result instanceof Map)) {
+            return result;
+        }
+        Map<String, Object> cacheable = new LinkedHashMap<>((Map<String, Object>) result);
+        cacheable.put(Constants.MCP_CACHE_TTL_MS, cacheTtlMs());
+        cacheable.put(Constants.MCP_CACHE_SCOPE, Constants.MCP_CACHE_SCOPE_PRIVATE);
+        return decorateResult(cacheable, version);
+    }
+
+    /**
+     * Freshness hint for list results. The registries re-derive from {@code serviceCache} on
+     * every call, so this is bounded by how often discovery can change the answer.
+     */
+    private long cacheTtlMs() {
+        long interval = configuration.getConsulCatalogDiscoverInterval();
+        return interval > 0 ? interval : 30_000L;
+    }
+
+    /**
+     * RFC 9728 protected-resource metadata. An MCP client that gets a 401 reads the
+     * {@code resource_metadata} pointer in {@code WWW-Authenticate}, fetches this document, and
+     * learns which authorization server to obtain a token from. Without it a client can only
+     * guess, which is why CAPI's 401 was previously a dead end.
+     */
+    private void handleProtectedResourceMetadata(HttpServerExchange exchange) {
+        exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, APPLICATION_JSON);
+        Map<String, Object> doc = new LinkedHashMap<>();
+        doc.put("resource", mcpResourceIdentifier(exchange));
+        doc.put("authorization_servers", authorizationServers());
+        doc.put("bearer_methods_supported", List.of("header"));
+        try {
+            exchange.setStatusCode(StatusCodes.OK);
+            exchange.getResponseSender().send(objectMapper.writeValueAsString(doc));
+        } catch (JsonProcessingException e) {
+            log.error("Could not serialise protected-resource metadata", e);
+            exchange.setStatusCode(StatusCodes.INTERNAL_SERVER_ERROR);
+            exchange.getResponseSender().send("{}");
+        }
+    }
+
+    /**
+     * Issuers to advertise. Explicit config wins; otherwise derive from the configured JWKS URLs
+     * by trimming the conventional suffixes. The derivation handles the common OIDC layouts
+     * (Keycloak's {@code /protocol/openid-connect/certs}, plain {@code /.well-known/...}); set
+     * {@code capi.mcp.authorizationServers} when a provider does something else.
+     */
+    private List<String> authorizationServers() {
+        CAPIConfiguration.Mcp mcp = configuration.getMcp();
+        if (mcp != null && mcp.getAuthorizationServers() != null && !mcp.getAuthorizationServers().isEmpty()) {
+            return mcp.getAuthorizationServers();
+        }
+        if (configuration.getOauth2() == null || configuration.getOauth2().getKeys() == null) {
+            return List.of();
+        }
+        List<String> issuers = new ArrayList<>();
+        for (String jwksUrl : configuration.getOauth2().getKeys()) {
+            String issuer = deriveIssuer(jwksUrl);
+            if (issuer != null && !issuers.contains(issuer)) {
+                issuers.add(issuer);
+            }
+        }
+        return issuers;
+    }
+
+    static String deriveIssuer(String jwksUrl) {
+        if (jwksUrl == null || jwksUrl.isBlank()) {
+            return null;
+        }
+        String url = jwksUrl.trim();
+        for (String suffix : List.of("/protocol/openid-connect/certs",
+                                     "/.well-known/openid-configuration/jwks",
+                                     "/.well-known/jwks.json",
+                                     "/.well-known/jwks",
+                                     "/oauth2/v1/keys",
+                                     "/discovery/v2.0/keys",
+                                     "/v1/keys",
+                                     "/keys",
+                                     "/jwks.json",
+                                     "/jwks")) {
+            if (url.endsWith(suffix)) {
+                return url.substring(0, url.length() - suffix.length());
+            }
+        }
+        return url;
+    }
+
+    /** Canonical identifier of this MCP resource, as the client sees it. */
+    private String mcpResourceIdentifier(HttpServerExchange exchange) {
+        return externalBaseUrl(exchange) + "/mcp";
+    }
+
+    private String protectedResourceMetadataUrl(HttpServerExchange exchange) {
+        return externalBaseUrl(exchange) + Constants.MCP_PROTECTED_RESOURCE_PATH;
+    }
+
+    /**
+     * Base URL as the caller reached us. Uses the request Host header so the advertised URLs are
+     * reachable from wherever the client sits, rather than from CAPI's own point of view.
+     */
+    private String externalBaseUrl(HttpServerExchange exchange) {
+        String scheme = sslContext != null ? "https" : "http";
+        String host = exchange.getRequestHeaders().contains(Headers.HOST)
+                ? exchange.getRequestHeaders().get(Headers.HOST).getFirst()
+                : exchange.getHostAndPort();
+        return scheme + "://" + host;
+    }
+
+    /**
+     * Result of a successful tool call.
+     *
+     * <p>{@code content} (the human/LLM-readable text block) is always present — that is what
+     * every revision expects and what existing clients read. When the tool declares an
+     * {@code outputSchema} and the backend actually returned JSON, the parsed value is attached
+     * as {@code structuredContent} as well, so a client can consume the result programmatically
+     * instead of re-parsing the text block.
+     *
+     * <p>A non-JSON body is not an error: the tool simply gets no structured half.
+     */
+    private Object buildToolResult(McpTool tool, String body, String protocolVersion) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("content", List.of(Map.of("type", "text", "text", body)));
+        if (tool != null && tool.getOutputSchema() != null && !tool.getOutputSchema().isBlank()
+                && body != null && !body.isBlank()) {
+            try {
+                result.put("structuredContent", objectMapper.readValue(body, Object.class));
+            } catch (JsonProcessingException e) {
+                log.debug("Tool '{}' declares an outputSchema but the backend body is not JSON; " +
+                        "returning text content only", tool.getName());
+            }
+        }
+        return decorateResult(result, protocolVersion);
+    }
+
+    /**
+     * Verifies {@code Mcp-Method} / {@code Mcp-Name} against the JSON-RPC body when the client
+     * sends them. A mismatch means an intermediary routed on the header but the body says
+     * something else — which is exactly the confusion the headers exist to prevent, so it is
+     * refused rather than silently resolved in favour of one or the other.
+     *
+     * @return the error message, or {@code null} when consistent or absent
+     */
+    private String checkStandardHeaders(HttpServerExchange exchange, JsonRpcRequest request) {
+        if (exchange.getRequestHeaders().contains(Constants.MCP_METHOD_HEADER)) {
+            String declared = exchange.getRequestHeaders().get(Constants.MCP_METHOD_HEADER).getFirst();
+            if (declared != null && !declared.equals(request.getMethod())) {
+                return Constants.MCP_METHOD_HEADER + " is '" + declared
+                        + "' but the request method is '" + request.getMethod() + "'";
+            }
+        }
+        if (exchange.getRequestHeaders().contains(Constants.MCP_NAME_HEADER)
+                && "tools/call".equals(request.getMethod())) {
+            String declared = exchange.getRequestHeaders().get(Constants.MCP_NAME_HEADER).getFirst();
+            String actual = toolNameOf(request);
+            if (declared != null && actual != null && !declared.equals(actual)) {
+                return Constants.MCP_NAME_HEADER + " is '" + declared + "' but the tool named in the body is '" + actual + "'";
+            }
+        }
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private String toolNameOf(JsonRpcRequest request) {
+        if (request.getParams() instanceof Map<?, ?> params) {
+            Object name = ((Map<String, Object>) params).get("name");
+            return name instanceof String n ? n : null;
+        }
+        return null;
     }
 
     private String readBody(HttpServerExchange exchange) throws java.io.IOException {

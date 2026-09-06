@@ -725,4 +725,77 @@ class ServiceUtilsTest {
         assertNotNull(service.getOpenAPI().getPaths());
         assertTrue(service.getOpenAPI().getPaths().containsKey("/ping"));
     }
+
+    // === openApiVersionMismatch (match-openapi-version) ===
+
+    private static Service serviceWithSpecVersion(boolean matchEnabled, String metaVersion, String specVersion) {
+        ServiceMeta meta = new ServiceMeta();
+        meta.setGroup("v1");
+        meta.setVersion(metaVersion);
+        meta.setMatchOpenApiVersion(matchEnabled);
+        Service service = new Service();
+        service.setId("my-service:v1");
+        service.setServiceMeta(meta);
+        if (specVersion != null) {
+            service.setOpenAPI(new io.swagger.v3.oas.models.OpenAPI()
+                    .info(new io.swagger.v3.oas.models.info.Info().version(specVersion)));
+        }
+        return service;
+    }
+
+    @Test
+    void openApiVersionMismatch_flagOff_alwaysAccepts() {
+        // The regression guarantee: every existing service keeps today's behavior untouched.
+        assertNull(serviceUtils.openApiVersionMismatch(serviceWithSpecVersion(false, "2.0.1", "1.0.0")));
+    }
+
+    @Test
+    void openApiVersionMismatch_versionsMatch_accepts() {
+        assertNull(serviceUtils.openApiVersionMismatch(serviceWithSpecVersion(true, "2.0.1", "2.0.1")));
+    }
+
+    @Test
+    void openApiVersionMismatch_versionsDiffer_reportsBothSides() {
+        String result = serviceUtils.openApiVersionMismatch(serviceWithSpecVersion(true, "2.0.1", "1.0.0"));
+        assertNotNull(result);
+        assertTrue(result.contains("2.0.1"), "must name the expected version: " + result);
+        assertTrue(result.contains("1.0.0"), "must name the version actually served: " + result);
+    }
+
+    @Test
+    void openApiVersionMismatch_surroundingWhitespaceIgnored() {
+        assertNull(serviceUtils.openApiVersionMismatch(serviceWithSpecVersion(true, " 2.0.1 ", "2.0.1")));
+    }
+
+    @Test
+    void openApiVersionMismatch_isCaseSensitive() {
+        assertNotNull(serviceUtils.openApiVersionMismatch(serviceWithSpecVersion(true, "V1", "v1")));
+    }
+
+    @Test
+    void openApiVersionMismatch_noMetaVersion_failsOpen() {
+        // Opted in but nothing to compare — misconfigured, not stale. Freezing it would be worse.
+        assertNull(serviceUtils.openApiVersionMismatch(serviceWithSpecVersion(true, null, "1.0.0")));
+        assertNull(serviceUtils.openApiVersionMismatch(serviceWithSpecVersion(true, "   ", "1.0.0")));
+    }
+
+    @Test
+    void openApiVersionMismatch_specDeclaresNoVersion_failsOpen() {
+        assertNull(serviceUtils.openApiVersionMismatch(serviceWithSpecVersion(true, "2.0.1", null)));
+        assertNull(serviceUtils.openApiVersionMismatch(serviceWithSpecVersion(true, "2.0.1", "  ")));
+    }
+
+    @Test
+    void openApiVersionMismatch_specHasNoInfoBlock_failsOpen() {
+        Service service = serviceWithSpecVersion(true, "2.0.1", null);
+        service.setOpenAPI(new io.swagger.v3.oas.models.OpenAPI());
+        assertNull(serviceUtils.openApiVersionMismatch(service));
+    }
+
+    @Test
+    void openApiVersionMismatch_nullServiceMeta_accepts() {
+        Service service = new Service();
+        service.setId("no-meta");
+        assertNull(serviceUtils.openApiVersionMismatch(service));
+    }
 }

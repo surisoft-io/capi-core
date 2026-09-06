@@ -21,6 +21,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -64,6 +65,28 @@ public class ConsulCatalogService {
     /** Defense-in-depth: skip a tick if the previous cycle hasn't returned. The scheduler
      *  already serialises runCycle, so this only fires if runCycle is ever driven from more
      *  than one caller — but it makes "never overlap" an enforced invariant, not an assumption. */
+    /**
+     * Services whose fetched spec failed the {@code match-openapi-version} check, and since when.
+     * Kept OUTSIDE {@link #invalidServiceMap} because that map is cleared every cycle — the age of
+     * a mismatch is exactly what separates "rollout in flight, converging" from "misconfigured,
+     * frozen forever", so it has to survive the clear.
+     */
+    private final Map<String, VersionMismatch> versionMismatches = new ConcurrentHashMap<>();
+
+    /** Mismatches tolerated at full cycle rate before the re-fetch backs off. */
+    private static final int MISMATCH_ATTEMPTS_BEFORE_BACKOFF = 3;
+    /** Interval between re-fetches once backed off. Long enough to stop hammering a backend
+     *  whose owner mis-set the flag, short enough that a slow rollout still converges on its own. */
+    private static final Duration MISMATCH_BACKOFF = Duration.ofMinutes(5);
+
+    /**
+     * @param firstSeen      when this service first failed the version check
+     * @param consecutive    consecutive failed checks (reset on success)
+     * @param nextAttemptAt  earliest time the spec may be re-fetched
+     * @param detail         the last mismatch description, re-published each cycle
+     */
+    private record VersionMismatch(Instant firstSeen, int consecutive, Instant nextAttemptAt, String detail) {}
+
     private final AtomicBoolean cycleInProgress = new AtomicBoolean(false);
 
     /**
@@ -132,6 +155,9 @@ public class ConsulCatalogService {
             invalidServiceMap.clear();
             CycleResult result = fetchAndUnion();
             Map<String, Service> incoming = buildServices(result.reconciledObjects());
+            // Drop mismatch state for services that no longer exist, so a deregistered service
+            // does not keep a backoff entry alive forever.
+            versionMismatches.keySet().retainAll(incoming.keySet());
 
             // Reconcile FIRST to identify what's actually new or changed. The old
             // ConsulNodeDiscovery did this — fetching OpenAPI for every service every
@@ -530,7 +556,73 @@ public class ConsulCatalogService {
         if (toFetch.isEmpty()) {
             return Set.of();
         }
-        return prefetchOpenApiSpecs(toFetch);
+
+        // Hold back services that are in mismatch backoff: re-fetching every cycle costs a full
+        // download AND parse, and a service whose owner simply forgot to bump info.version would
+        // pay that forever. They stay failed (so the delta keeps the previous working state) and
+        // stay listed, they are just not re-downloaded yet.
+        Set<String> failed = new HashSet<>();
+        Instant now = Instant.now();
+        Iterator<Map.Entry<String, Service>> it = toFetch.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<String, Service> entry = it.next();
+            VersionMismatch mismatch = versionMismatches.get(entry.getKey());
+            if (mismatch != null && now.isBefore(mismatch.nextAttemptAt())) {
+                recordVersionMismatch(entry.getValue(), mismatch.detail(), mismatch);
+                failed.add(entry.getKey());
+                it.remove();
+            }
+        }
+
+        if (!toFetch.isEmpty()) {
+            failed.addAll(prefetchOpenApiSpecs(toFetch));
+        }
+        return failed;
+    }
+
+    /**
+     * Records (or re-records) a failed {@code match-openapi-version} check.
+     *
+     * <p>The service is left on its previous spec — the caller adds it to the failed set, the
+     * delta drops it, and the cached route keeps serving. Because the cached {@code version} meta
+     * is also left untouched, the next cycle still sees a version change and retries: the rollout
+     * converges on its own once every pod serves the new spec.
+     *
+     * <p>{@code detail} carries both versions so a mismatch is diagnosable from
+     * {@code /info/invalid-services} alone, and the entry reports how long it has been failing —
+     * seconds means a rollout in flight, hours means the owner set the flag without maintaining
+     * {@code info.version}.
+     */
+    private void recordVersionMismatch(Service service, String detail, VersionMismatch previous) {
+        Instant now = Instant.now();
+        Instant firstSeen = previous != null ? previous.firstSeen() : now;
+        int consecutive = previous != null ? previous.consecutive() + 1 : 1;
+        Instant nextAttemptAt = consecutive >= MISMATCH_ATTEMPTS_BEFORE_BACKOFF
+                ? now.plus(MISMATCH_BACKOFF)
+                : now;
+        versionMismatches.put(service.getId(),
+                new VersionMismatch(firstSeen, consecutive, nextAttemptAt, detail));
+
+        Duration failingFor = Duration.between(firstSeen, now);
+        String message = detail + " — keeping the previous spec, failing for "
+                + failingFor.toSeconds() + "s over " + consecutive + " attempt(s)";
+        invalidServiceMap.put(service.getId(), new InvalidService(
+                service.getId(),
+                service.getServiceMeta().getGroup(),
+                service.getServiceMeta().getOpenApiEndpoint(),
+                InvalidService.Reason.OPENAPI_VERSION_MISMATCH,
+                message,
+                now));
+
+        if (consecutive == 1) {
+            log.info("OpenAPI version check failed for {} ({}). Keeping the previous spec; " +
+                    "this is expected while a rolling deploy is in flight.", service.getId(), detail);
+        } else if (consecutive == MISMATCH_ATTEMPTS_BEFORE_BACKOFF) {
+            log.warn("OpenAPI version check still failing for {} after {} attempts ({}). Backing off " +
+                    "re-fetch to every {} minutes. If this persists, the service sets " +
+                    "match-openapi-version but does not keep info.version in step with its version meta.",
+                    service.getId(), consecutive, detail, MISMATCH_BACKOFF.toMinutes());
+        }
     }
 
     /**
@@ -569,6 +661,15 @@ public class ConsulCatalogService {
                             "Failed to build OpenAPI, invalid spec.",
                             Instant.now()));
                     failed.add(e.getKey().getId());
+                } else {
+                    // The spec parsed — but is it the one this version announces? Opt-in only.
+                    String mismatch = serviceUtils.openApiVersionMismatch(e.getKey());
+                    if (mismatch != null) {
+                        recordVersionMismatch(e.getKey(), mismatch, versionMismatches.get(e.getKey().getId()));
+                        failed.add(e.getKey().getId());
+                    } else {
+                        versionMismatches.remove(e.getKey().getId());
+                    }
                 }
             } catch (Exception ex) {
                 invalidServiceMap.put(e.getKey().getId(), new InvalidService(

@@ -53,6 +53,11 @@ public class McpServerClient {
         String backendUrl;
         long createdAt;
         boolean initialized;
+        /**
+         * Revision this backend speaks. {@code 2026-07-28} means stateless — {@link #sessionId}
+         * stays null and no {@code Mcp-Session-Id} header is sent.
+         */
+        String protocolVersion = Constants.MCP_PROTOCOL_VERSION;
 
         McpBackendSession(String backendUrl) {
             this.backendUrl = backendUrl;
@@ -449,8 +454,102 @@ public class McpServerClient {
         throw lastException != null ? lastException : new RuntimeException("All backends failed for tool: " + toolName);
     }
 
+    /**
+     * Asks a backend which protocol revisions it supports via {@code server/discover}
+     * (mandatory from 2026-07-28).
+     *
+     * <p>Deliberately forgiving: any failure — transport error, non-2xx, {@code -32601} from a
+     * backend that predates the method, unparseable body — returns {@code null}, and the caller
+     * falls back to the handshake. The probe must never be able to take a working backend out
+     * of service.
+     *
+     * @return the newest revision CAPI and the backend share, or {@code null} if unknown
+     */
+    /**
+     * Upper bound on the negotiation probe. Discovery is a cheap metadata call, so a backend
+     * that has not answered within this has almost certainly not implemented the method. Kept
+     * well below the caller's timeout: a backend that black-holes the probe must not be able to
+     * double the cost of establishing a session before the handshake even starts. Timing out
+     * here is safe — it just falls back to the handshake, which is today's behaviour.
+     */
+    static final int DISCOVER_PROBE_TIMEOUT_MS = 2000;
+
     @SuppressWarnings("unchecked")
+    String discoverBackendProtocol(String backendUrl, int timeout) {
+        int probeTimeout = Math.min(timeout, DISCOVER_PROBE_TIMEOUT_MS);
+        try {
+            Map<String, Object> discover = new LinkedHashMap<>();
+            discover.put("jsonrpc", "2.0");
+            discover.put("method", "server/discover");
+            discover.put("id", 1);
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(new URI(backendUrl))
+                    .header("Content-Type", APPLICATION_JSON)
+                    .timeout(Duration.ofMillis(probeTimeout))
+                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(discover)))
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                return null;
+            }
+            Map<String, Object> body = objectMapper.readValue(response.body(), Map.class);
+            if (body.get("error") != null || !(body.get("result") instanceof Map)) {
+                return null;
+            }
+            Object versions = ((Map<String, Object>) body.get("result")).get("protocolVersions");
+            if (!(versions instanceof List<?> list)) {
+                return null;
+            }
+            for (String supported : Constants.MCP_PROTOCOL_VERSIONS_SUPPORTED) {
+                if (list.contains(supported)) {
+                    return supported;
+                }
+            }
+            return null;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (Exception e) {
+            log.debug("server/discover probe failed for {} ({}); falling back to the initialize handshake",
+                    backendUrl, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Establishes whatever kind of session a backend needs.
+     *
+     * <p>Handshake first, negotiation second, deliberately. Every MCP server deployed today
+     * speaks the handshake, so trying it first keeps the common path at exactly the cost it has
+     * always had — no extra round-trip, no added latency, and no behaviour change for existing
+     * backends. Probing first would tax every single backend to accommodate the rare new one.
+     *
+     * <p>Only when the handshake produces nothing usable do we ask {@code server/discover} what
+     * the backend actually speaks: a 2026-07-28 server removed {@code initialize} altogether, so
+     * a failed handshake is precisely the signal that it might be one.
+     */
     McpBackendSession initializeBackendSession(String backendUrl, int timeout) {
+        McpBackendSession handshake = handshakeBackendSession(backendUrl, timeout);
+        if (handshake != null) {
+            return handshake;
+        }
+
+        String negotiated = discoverBackendProtocol(backendUrl, timeout);
+        if (Constants.MCP_PROTOCOL_VERSION_CURRENT.equals(negotiated)) {
+            McpBackendSession stateless = new McpBackendSession(backendUrl);
+            stateless.protocolVersion = negotiated;
+            stateless.initialized = true;
+            log.debug("MCP backend {} speaks stateless protocol {}; no session needed", backendUrl, negotiated);
+            return stateless;
+        }
+        return null;
+    }
+
+    /** The 2025-03-26 handshake. Returns {@code null} when the backend cannot or will not do it. */
+    @SuppressWarnings("unchecked")
+    McpBackendSession handshakeBackendSession(String backendUrl, int timeout) {
         try {
             Map<String, Object> initRequest = new LinkedHashMap<>();
             initRequest.put("jsonrpc", "2.0");
@@ -472,7 +571,23 @@ public class McpServerClient {
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                // A JSON-RPC error arrives as HTTP 200 with an "error" member. Treating that as a
+                // successful handshake would mint a session the backend never agreed to — and a
+                // 2026-07-28 backend answers exactly that way, because it removed initialize.
+                try {
+                    Map<String, Object> parsed = objectMapper.readValue(response.body(), Map.class);
+                    if (parsed.get("error") != null) {
+                        log.debug("MCP backend {} rejected the initialize handshake: {}",
+                                backendUrl, parsed.get("error"));
+                        return null;
+                    }
+                } catch (Exception e) {
+                    log.debug("MCP backend {} returned an unparseable initialize response", backendUrl);
+                    return null;
+                }
+
                 McpBackendSession session = new McpBackendSession(backendUrl);
+                session.protocolVersion = Constants.MCP_PROTOCOL_VERSION;
 
                 // Extract Mcp-Session-Id from response header
                 String sessionId = response.headers().firstValue(Constants.MCP_SESSION_HEADER).orElse(null);

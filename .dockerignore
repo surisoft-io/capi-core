@@ -1,0 +1,20 @@
+# Keep the Docker build context small.
+# NOTE: target/ is intentionally NOT ignored — the demo's slim image
+# (demo-instance-filter/Dockerfile) copies the pre-built jar from target/.
+.git/
+.idea/
+*.iml
+blog/
+demo-e2e/
+demo-mcp/
+demo-instance-filter/
+helm/
+tools/
+opa-working-example/
+*.b64
+*.svg
+*.jks
+*.pfx
+*.pem
+*.hprof
+*.log

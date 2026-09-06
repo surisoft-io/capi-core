@@ -246,10 +246,11 @@ Per-service throttle settings are configured via Consul metadata. See [Service R
 |-------|---------|-------------|
 | `mcp.enabled` | `false` | Enable the MCP Gateway. |
 | `mcp.port` | `8383` | Listening port. |
-| `mcp.sessionTtl` | `1800000` | MCP session TTL (ms). Sessions are evicted on inactivity. |
+| `mcp.sessionTtl` | `1800000` | MCP session TTL (ms). Sessions are evicted on inactivity. **Only applies to `2025-03-26` clients** — protocol revision `2026-07-28` is stateless and mints no sessions. |
 | `mcp.toolCallTimeout` | `30000` | Per-tool-call backend timeout (ms). Overridable per tool via Consul metadata. |
 | `mcp.circuitBreakerCooldownMs` | `30000` | Cooldown (ms) before re-trying a failed backend in the per-tool load balancer. |
 | `mcp.mcpServerDiscoveryTimeoutMs` | `10000` | Timeout (ms) for the JSON-RPC `initialize` + `tools/list` probe used to discover tools from upstream MCP servers. |
+| `mcp.authorizationServers` | — (derived) | Issuer URLs advertised as `authorization_servers` in the RFC 9728 protected-resource metadata served at `/.well-known/oauth-protected-resource` on the MCP port. When unset, derived from `oauth2.keys` by trimming the usual JWKS suffixes (covers Keycloak, Okta, Entra and plain `/.well-known/jwks.json`). Set explicitly if your provider uses a different layout. |
 | `mcp.observability.genAi.enabled` | `false` | Emit OpenTelemetry GenAI semconv spans (`gen_ai.system=mcp`, `gen_ai.operation.name`, `gen_ai.tool.name`, `capi.outcome`, …) for every MCP request. Requires `traces.enabled: true`. See [MCP Gateway → Observability](mcp-gateway.md#observability-opentelemetry-genai) for the full attribute list and span model. |
 
 See [MCP Gateway](mcp-gateway.md) for the full design, wire protocol and Consul metadata extensions.

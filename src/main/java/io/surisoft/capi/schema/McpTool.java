@@ -4,6 +4,12 @@ public class McpTool {
     private String name;
     private String description;
     private String inputSchema;
+    /**
+     * JSON Schema for the tool's result, serialised. Optional — when present CAPI also emits
+     * {@code structuredContent} alongside {@code content} on a successful call (protocol
+     * revision 2025-06-18 onwards).
+     */
+    private String outputSchema;
     private String serviceId;
     private boolean streaming;
     private String category;
@@ -94,5 +100,13 @@ public class McpTool {
 
     public boolean isOpenApiPromoted() {
         return httpPathTemplate != null;
+    }
+
+    public String getOutputSchema() {
+        return outputSchema;
+    }
+
+    public void setOutputSchema(String outputSchema) {
+        this.outputSchema = outputSchema;
     }
 }

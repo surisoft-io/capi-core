@@ -98,6 +98,7 @@ public class OpenApiToMcpPromoter {
                 tool.setHttpPathTemplate(path);
                 tool.setDescription(buildDescription(operation, method, path));
                 tool.setInputSchema(buildInputSchema(operation, item));
+                tool.setOutputSchema(buildOutputSchema(operation));
                 result.add(tool);
             }
         }
@@ -172,6 +173,42 @@ public class OpenApiToMcpPromoter {
             log.warn("Failed to serialize inputSchema for promoted tool, falling back: {}", e.getMessage());
             return DEFAULT_INPUT_SCHEMA;
         }
+    }
+
+    /**
+     * Result schema for a promoted tool, taken from the operation's first successful JSON
+     * response. The OpenAPI document already describes what the endpoint returns, so structured
+     * output costs nothing extra here — no new metadata for service owners to maintain.
+     *
+     * @return the serialised schema, or {@code null} when the operation declares no usable 2xx
+     *         JSON body (in which case the tool simply has no {@code outputSchema})
+     */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private String buildOutputSchema(Operation operation) {
+        if (operation.getResponses() == null) {
+            return null;
+        }
+        for (Map.Entry<String, io.swagger.v3.oas.models.responses.ApiResponse> entry : operation.getResponses().entrySet()) {
+            String code = entry.getKey();
+            if (code == null || !code.startsWith("2")) {
+                continue;
+            }
+            io.swagger.v3.oas.models.responses.ApiResponse response = entry.getValue();
+            if (response == null || response.getContent() == null) {
+                continue;
+            }
+            Map<String, Object> schema = extractJsonBodySchema(response.getContent());
+            if (schema == null) {
+                continue;
+            }
+            try {
+                return objectMapper.writeValueAsString(schema);
+            } catch (Exception e) {
+                log.warn("Failed to serialize outputSchema for promoted tool: {}", e.getMessage());
+                return null;
+            }
+        }
+        return null;
     }
 
     private void addParameters(Map<String, Object> properties, List<String> required, List<Parameter> params) {
