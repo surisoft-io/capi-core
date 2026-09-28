@@ -14,6 +14,17 @@ capi:
   adminPort: 8381
   reverseProxyHost:
 
+  admin:
+    protected: true
+    group: capi-admin
+
+  matchOpenApiSpec:
+    enabled: false
+    exempt: []
+
+  apiKeyStore:
+    enabled: false
+
   rest:
     enabled: true
     port: 8380
@@ -118,8 +129,98 @@ capi:
 | `strictToInstanceName` | `false` | Controls services that declare **no** instance metadata: `true` ignores them, `false` routes them on every instance. Has no effect on services that declare `capi-instance` or a `capi-instance-<name>-<property>` key — those are always matched by name. |
 | `publicEndpoint` | — | The externally-reachable URL of this gateway. Used for OpenAPI spec URL rewriting. |
 | `runningMode` | `full` | Service types to proxy: `full` (REST + WebSocket + SSE), `websocket`, or `sse`. |
-| `adminPort` | `8381` | Port for the Admin API (health, metrics, routes). |
+| `adminPort` | `8381` | Port for the Admin API (health, metrics, routes). Bound on `0.0.0.0`. See [Admin listener](#admin-listener) for authentication. |
 | `reverseProxyHost` | — | Override the `X-Forwarded-Host` header sent to upstream services. |
+
+### Admin listener
+
+Authentication on the `adminPort` listener.
+
+```yaml
+capi:
+  admin:
+    protected: true
+    group: capi-admin
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `admin.protected` | *unset* | Require a bearer token on every admin endpoint except `/info/health`. |
+| `admin.group` | — | Subscription group the token must carry. **Required when `protected: true`.** |
+
+`protected` is a nullable boolean, so "absent" and "explicitly false" are different states:
+
+| Config | Behaviour |
+|---|---|
+| no `admin:` block | Unprotected, with a startup `WARN`. Pre-2.23 behaviour, so an upgrade never crash-loops. |
+| `protected: true` + `group` | Protected — token required. |
+| `protected: true`, no `group` | **CAPI refuses to start**, naming `admin.group`. Serving the listener open would contradict the stated intent. |
+| `protected: false` | Unprotected, with a startup `WARN`. |
+
+- The token is validated by the same `oauth2` key set as the data plane, and checked against the
+  **`subscriptions` claim** — roles / `realm_access` are not consulted. So `oauth2.enabled` must be
+  true for the check to ever pass.
+- `/info/health` is the only exempt path: a liveness probe cannot carry a token, and a 401 there
+  would pull the instance out of rotation. **`/info/metrics` is not exempt** — a Prometheus scrape
+  must send a token.
+- Codes: **401** for a missing or unparseable token, **403** for a valid token in the wrong group.
+- **Trust-store writes ignore the opt-out.** `PUT /info/truststore` and
+  `DELETE /info/truststore/{alias}` return **403** on an unprotected listener whatever `protected`
+  says: a certificate added there is pushed to Consul KV and reloaded by every instance in the
+  cluster, so it is a fleet-wide MITM primitive. Reads are unaffected. See
+  [Admin API — Truststore](admin-api.md#truststore).
+- Enforced by one wrapper around the path handler, not per endpoint, so a new admin endpoint is
+  protected by default.
+
+### OpenAPI spec identity
+
+Governance check binding a fetched spec to the service that declared it.
+
+```yaml
+capi:
+  matchOpenApiSpec:
+    enabled: false
+    exempt:
+      - legacy-service
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `matchOpenApiSpec.enabled` | `false` | Hold a service out of routing when its spec does not identify it. |
+| `matchOpenApiSpec.exempt` | — | Consul service **names** that keep routing while enforcing. |
+
+The rule: the fetched spec's `info.title` must equal the Consul service **name** exactly (trimmed, no
+case or separator folding) and `info.version` must be non-blank. Matched on name rather than
+`name:group`, since one spec legitimately describes an API registered into several groups.
+
+**The verdict is computed on every discovery cycle whether or not `enabled` is true**, and published
+at [`GET /info/spec-compliance`](admin-api.md#spec-compliance). That is the migration instrument:
+watch `nonCompliant` reach zero (`safeToEnable: true`), then turn the switch on. Nothing is logged
+while it is off, so enabling the report cannot make an existing deployment noisier.
+
+While enforcing, a non-compliant service is listed in `/info/invalid-services` with reason
+`OPENAPI_IDENTITY_MISMATCH` — the same handling as an unparseable spec. It is deliberately not routed
+spec-less, which would silently disable its operation-security gate.
+
+`exempt` is operator config rather than ServiceMeta on purpose: an exemption a service owner could
+grant themselves is not governance. Exempt services stay listed with their mismatch, so the debt
+remains visible, and they do not block `safeToEnable`.
+
+Distinct from the per-service `match-openapi-version` metadata key, which guards the rolling-deploy
+race (a new pod bumps `version` while the load balancer still serves the spec from an old pod). This
+checks identity; that checks staleness. Both can be on.
+
+### API key store
+
+```yaml
+capi:
+  apiKeyStore:
+    enabled: false
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `apiKeyStore.enabled` | `false` | Enable the API-key gate, with keys held in Consul KV. Services opt in with the `api-key` metadata key. |
 
 ### REST
 
