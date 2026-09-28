@@ -48,7 +48,14 @@ public class OpaWasmService {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /** The single shared pool of OpaPolicy instances loaded from the bundle. */
-    private volatile ConcurrentLinkedQueue<com.styra.opa.wasm.OpaPolicy> sharedPool;
+    private volatile PolicyPool sharedPool;
+
+    /**
+     * How far the pool may grow beyond the configured {@code opa.wasmPoolSize}, as a multiple.
+     * Instantiating a policy is not free, so growth is bounded — but a pool that cannot grow
+     * fails requests the moment concurrency exceeds its size, which is a far worse trade.
+     */
+    private static final int POOL_CEILING_FACTOR = 4;
     /** Entrypoints declared in the bundle's .manifest, e.g. "capi/admin_only/allow". */
     private volatile Set<String> bundleEntrypoints = Collections.emptySet();
     /** Last seen ETag for conditional bundle fetches. */
@@ -114,10 +121,16 @@ public class OpaWasmService {
                     opaRego, bundleEntrypoints);
             return null;
         }
-        ConcurrentLinkedQueue<com.styra.opa.wasm.OpaPolicy> pool = sharedPool;
-        com.styra.opa.wasm.OpaPolicy policy = pool != null ? pool.poll() : null;
+        PolicyPool pool = sharedPool;
+        if (pool == null) {
+            log.trace("OPA Wasm evaluate skipped — no bundle loaded for {}", opaRego);
+            return null;
+        }
+        com.styra.opa.wasm.OpaPolicy policy = pool.acquire();
         if (policy == null) {
-            log.trace("OPA Wasm evaluate skipped — pool empty for {}", opaRego);
+            // Every instance is busy and the pool is at its ceiling. Raise opa.wasmPoolSize.
+            log.warn("OPA Wasm pool exhausted at {} instances evaluating {} — request cannot be " +
+                    "authorized. Raise opa.wasmPoolSize.", pool.liveCount(), opaRego);
             return null;
         }
         try {
@@ -126,12 +139,104 @@ public class OpaWasmService {
             log.trace("OPA Wasm evaluate entrypoint={} input={}", entrypoint, input);
             String resultJson = policy.entrypoint(entrypoint).evaluate(input);
             log.trace("OPA Wasm result for {}: {}", entrypoint, resultJson);
-            pool.offer(policy);
+            pool.release(policy);
             return parseResult(resultJson);
         } catch (Exception e) {
             log.error("OPA Wasm evaluation failed for {}: {}, discarding policy instance", opaRego, e.getMessage());
-            // Don't return the policy to the pool — its internal state may be corrupted.
+            // The instance may be left in a bad state, so it is not reused — but it IS accounted
+            // for as gone, so the pool can mint a replacement. Before this, a discarded instance
+            // was lost permanently and repeated failures drained the shared pool until every
+            // OPA-protected service returned 403.
+            pool.discard(policy);
             return null;
+        }
+    }
+
+    /** Live instance count, for diagnostics. -1 when no bundle is loaded. */
+    public int poolLiveCount() {
+        PolicyPool pool = sharedPool;
+        return pool != null ? pool.liveCount() : -1;
+    }
+
+    /**
+     * Self-healing pool of policy instances.
+     *
+     * <p>Two things it must survive, both of which used to fail the request:
+     * <ul>
+     *   <li><b>Concurrency above the configured size.</b> {@code poll()} on an empty queue returns
+     *       null immediately, so any burst wider than the pool produced a spurious "denied by
+     *       policy". The pool now grows on demand up to {@link #POOL_CEILING_FACTOR}× the
+     *       configured size; instantiation is paid once per instance, not per request.</li>
+     *   <li><b>A discarded instance.</b> An evaluation that throws costs its instance. Accounting
+     *       for it here lets a replacement be minted on the next acquire, instead of shrinking
+     *       the pool permanently until the next bundle reload.</li>
+     * </ul>
+     *
+     * <p>Instances are created through a supplier so this is testable without a Wasm bundle.
+     */
+    static final class PolicyPool {
+
+        private final ConcurrentLinkedQueue<com.styra.opa.wasm.OpaPolicy> idle = new ConcurrentLinkedQueue<>();
+        private final java.util.function.Supplier<com.styra.opa.wasm.OpaPolicy> factory;
+        private final java.util.concurrent.atomic.AtomicInteger live = new java.util.concurrent.atomic.AtomicInteger();
+        private final int ceiling;
+
+        PolicyPool(java.util.function.Supplier<com.styra.opa.wasm.OpaPolicy> factory, int initialSize, int ceiling) {
+            this.factory = factory;
+            this.ceiling = Math.max(ceiling, initialSize);
+            for (int i = 0; i < initialSize; i++) {
+                idle.offer(factory.get());
+                live.incrementAndGet();
+            }
+        }
+
+        /** An idle instance, a newly minted one, or null when at the ceiling. */
+        com.styra.opa.wasm.OpaPolicy acquire() {
+            com.styra.opa.wasm.OpaPolicy policy = idle.poll();
+            return policy != null ? policy : grow();
+        }
+
+        void release(com.styra.opa.wasm.OpaPolicy policy) {
+            idle.offer(policy);
+        }
+
+        /**
+         * Retires an acquired instance instead of returning it. Mirrors {@link #release} so the
+         * two exit paths from an acquire are symmetric and cannot be mispaired.
+         *
+         * <p>The instance is intentionally not reused — a failed evaluation may have left it in a
+         * bad state — but it is accounted for as gone, so the next acquire can mint a replacement.
+         *
+         * @param policy the instance being retired; not reused, taken to make the pairing explicit
+         */
+        void discard(com.styra.opa.wasm.OpaPolicy policy) {
+            live.updateAndGet(n -> n > 0 ? n - 1 : 0);
+        }
+
+        int liveCount() {
+            return live.get();
+        }
+
+        int idleCount() {
+            return idle.size();
+        }
+
+        private com.styra.opa.wasm.OpaPolicy grow() {
+            while (true) {
+                int current = live.get();
+                if (current >= ceiling) {
+                    return null;
+                }
+                // CAS so concurrent growth cannot overshoot the ceiling.
+                if (live.compareAndSet(current, current + 1)) {
+                    try {
+                        return factory.get();
+                    } catch (RuntimeException e) {
+                        live.decrementAndGet();
+                        throw e;
+                    }
+                }
+            }
         }
     }
 
@@ -144,10 +249,17 @@ public class OpaWasmService {
         return isReady() && hasPolicy(opaRego);
     }
 
-    /** Whether the shared pool is loaded (regardless of which entrypoints it declares). */
+    /**
+     * Whether a bundle is loaded (regardless of which entrypoints it declares).
+     *
+     * <p>Deliberately asks whether instances <em>exist</em>, not whether one is idle at this
+     * instant. Readiness must not flap with concurrency: checking the idle queue meant that
+     * whenever every instance was busy, a fully-loaded engine reported "not ready" and the
+     * caller returned 503.
+     */
     public boolean isReady() {
-        ConcurrentLinkedQueue<com.styra.opa.wasm.OpaPolicy> pool = sharedPool;
-        return pool != null && !pool.isEmpty();
+        PolicyPool pool = sharedPool;
+        return pool != null && pool.liveCount() > 0;
     }
 
     /** Whether the loaded bundle declares an entrypoint for this rego path. */
@@ -283,21 +395,26 @@ public class OpaWasmService {
                 ? new String(bundle.data(), StandardCharsets.UTF_8)
                 : null;
 
-        ConcurrentLinkedQueue<com.styra.opa.wasm.OpaPolicy> newPool = new ConcurrentLinkedQueue<>();
-        for (int i = 0; i < poolSize; i++) {
+        // The bundle bytes are captured by the factory, so the pool can mint a replacement
+        // instance later without re-fetching. They are already held ~poolSize times over in
+        // instantiated form, so retaining one copy is cheap by comparison.
+        byte[] wasm = bundle.wasm();
+        java.util.function.Supplier<com.styra.opa.wasm.OpaPolicy> factory = () -> {
             com.styra.opa.wasm.OpaPolicy policy = com.styra.opa.wasm.OpaPolicy.builder()
-                    .withPolicy(new ByteArrayInputStream(bundle.wasm()))
+                    .withPolicy(new ByteArrayInputStream(wasm))
                     .build();
             if (dataJson != null) {
                 policy.data(dataJson);
             }
-            newPool.offer(policy);
-        }
+            return policy;
+        };
+
+        PolicyPool newPool = new PolicyPool(factory, poolSize, poolSize * POOL_CEILING_FACTOR);
         // Atomic swap — readers see the old or new pool consistently, never a mixed view.
         this.sharedPool = newPool;
         this.bundleEntrypoints = bundle.entrypoints();
-        log.info("OPA Wasm shared pool created with {} instances (data: {}, entrypoints: {})",
-                poolSize, dataJson != null ? "present" : "absent", bundle.entrypoints());
+        log.info("OPA Wasm shared pool created with {} instances (ceiling {}, data: {}, entrypoints: {})",
+                poolSize, poolSize * POOL_CEILING_FACTOR, dataJson != null ? "present" : "absent", bundle.entrypoints());
     }
 
     private String buildInput(String serviceId, String value, boolean isAccessToken) {

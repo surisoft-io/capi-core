@@ -225,6 +225,10 @@ else
 fi
 
 route_count_before=$(route_count)
+# Remember how many log lines exist BEFORE the outage. The removal check below must only look at
+# lines written during the outage: earlier scenarios (2-4) deregister services legitimately, and a
+# plain `tail -200 | grep` picks those up and reports a failure that never happened.
+log_lines_before_outage=$(docker logs demo-e2e-capi 2>&1 | wc -l | tr -d ' ')
 note "Stopping Consul container..."
 docker stop demo-e2e-consul > /dev/null 2>&1
 
@@ -251,15 +255,18 @@ else
     fail "Route count drifted during outage: before=$route_count_before during=$route_count_during"
 fi
 
-# Check CAPI logs for absence of "REST client removed" bursts during outage
-recent_removed=$(capi_log_tail 200 | grep -c "REST client removed" | head -1 | tr -dc '0-9')
+# Check CAPI logs for absence of "REST client removed" bursts during outage.
+# Scoped to lines appended since log_lines_before_outage, so pre-outage cleanup from earlier
+# scenarios cannot be mistaken for a route being dropped while Consul was down.
+outage_log=$(docker logs demo-e2e-capi 2>&1 | tail -n "+$((log_lines_before_outage + 1))")
+recent_removed=$(echo "$outage_log" | grep -c "REST client removed" | head -1 | tr -dc '0-9')
 recent_removed=${recent_removed:-0}
 if [ "$recent_removed" = "0" ]; then
     ok "No 'REST client removed' log lines during outage"
 else
     fail "Saw $recent_removed 'REST client removed' lines during outage"
     note "Sample:"
-    capi_log_tail 200 | grep "REST client removed" | head -5
+    echo "$outage_log" | grep "REST client removed" | head -5
 fi
 
 # Check logs for the expected consul-cycle reports with host failures OR the WARN about skipping cleanup.

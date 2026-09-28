@@ -6,11 +6,19 @@ capi:
   runningMode: full
   adminPort: 8381
   reverseProxyHost:
+  # scenarios.sh drives the admin endpoints without a token, so this stack opts out explicitly.
+  # Trust-store writes are still refused on an unprotected listener (verified by the e2e below).
+  admin:
+    protected: false
+  matchOpenApiSpec:
+    enabled: false
+    exempt: []
   rest:
     enabled: true
     port: 8380
     listeningAddress: 0.0.0.0
     contextPath: /api
+    rejectDotSegments: false
     connectionRequestTimeout: 5000
     requestTimeout: 5000
     responseTimeout: 120000
@@ -58,7 +66,10 @@ capi:
     endpoint: http://otel-collector:4318
     extraMetadataPrefix:
     appEnvironment: demo-e2e
-  corsEnabled: false
+  corsEnabled: true
+  # Gateway-wide fallback. `generic-service` overrides it with its own allowed-origins meta.
+  allowedOrigins:
+    - http://gateway-default.example
   allowedHeaders:
     - Origin
     - Accept

@@ -117,6 +117,9 @@ public class RestTransportHandler implements TransportHandler {
         }
 
         restClient.setSecured(service.getServiceMeta().isSecured());
+        // CORS origins belong to whoever owns the service, not to the gateway operator, so they
+        // arrive with the registration. Null here means "inherit capi.allowedOrigins".
+        restClient.setCorsPolicy(io.surisoft.capi.utils.CorsPolicy.fromCsv(service.getServiceMeta().getAllowedOrigins()));
         restClient.setSubscriptionGroup(service.getServiceMeta().getSubscriptionGroup());
         restClient.setOpaRego(service.getServiceMeta().getOpaRego());
         if (service.getServiceMeta().getOpaRego() != null && opaWasmService != null) {

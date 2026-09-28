@@ -443,7 +443,11 @@ treated as a configuration mistake, not as evidence of staleness.
 |-----|---------|-------------|
 | `secured` | `false` | When `true`, requires a valid OAuth2/OIDC Bearer token. |
 | `opa-rego` | — | OPA Rego policy path for fine-grained authorization (e.g. `capi/order_policy`). |
-| `allowed-origins` | — | Comma-separated list of allowed CORS origins for this service. |
+| `allowed-origins` | — | Comma-separated CORS origins for **this service only**. Replaces the gateway-wide `capi.allowedOrigins` for this service rather than adding to it; omit to inherit that list. Exact match on scheme+host+port. Requires `capi.corsEnabled: true` — the master switch overrides per-service origins. |
+
+> **Read since 2.23.** This key was parsed off the service metadata but never consulted by any CORS
+> logic, so registrations that set it had no effect. It is now enforced. Remember that a change to it
+> only takes effect once the `version` meta is bumped, like any other metadata change.
 
 ### Throttling
 

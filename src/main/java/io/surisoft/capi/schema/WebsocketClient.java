@@ -8,6 +8,8 @@ import java.util.Set;
 public class WebsocketClient {
 
     private String serviceId;
+    /** Per-service CORS origins from ServiceMeta; null means inherit the gateway default. */
+    private io.surisoft.capi.utils.CorsPolicy corsPolicy;
     private String path;
     private Set<Mapping> mappingList;
     @JsonIgnore
@@ -73,5 +75,13 @@ public class WebsocketClient {
     }
     public void setRootContext(String rootContext) {
         this.rootContext = rootContext;
+    }
+
+    public io.surisoft.capi.utils.CorsPolicy getCorsPolicy() {
+        return corsPolicy;
+    }
+
+    public void setCorsPolicy(io.surisoft.capi.utils.CorsPolicy corsPolicy) {
+        this.corsPolicy = corsPolicy;
     }
 }

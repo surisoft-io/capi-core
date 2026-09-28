@@ -41,6 +41,7 @@ class WebsocketUtilsTest {
                 List.of(jwtProcessor),
                 null
         );
+        websocketUtils.setCorsEnabled(true);
     }
 
     // ---------------------------------------------------------------
@@ -57,6 +58,7 @@ class WebsocketUtilsTest {
         CAPIConfiguration.Websocket config = new CAPIConfiguration.Websocket();
         config.setContextPath("/ws/sub/*");
         WebsocketUtils utils = new WebsocketUtils(config, List.of(jwtProcessor), null);
+        utils.setCorsEnabled(true);
         assertEquals("wssub", utils.normalizeBaseContextName());
     }
 
@@ -147,6 +149,7 @@ class WebsocketUtilsTest {
         WebsocketUtils utilsNoProcessor = new WebsocketUtils(
                 websocketConfig, null, null
         );
+        utilsNoProcessor.setCorsEnabled(true);
         assertThrows(CapiUndertowException.class, utilsNoProcessor::createWebsocketAuthorization);
     }
 
@@ -320,13 +323,15 @@ class WebsocketUtilsTest {
         List<String> allowedHeaders = new ArrayList<>(List.of("Authorization", "Content-Type"));
         Map<String, String> managedHeaders = new HashMap<>(Constants.CAPI_CORS_MANAGED_HEADERS);
 
+        websocketUtils.setCorsPolicy(new io.surisoft.capi.utils.CorsPolicy(List.of("http://example.com")));
         websocketUtils.handleOptionsRequest(exchange, allowedHeaders, managedHeaders, null);
 
         verify(exchange).setStatusCode(204);
         verify(exchange).endExchange();
-        // Should have set Access-Control-Allow-Origin
+        // Allowlisted origin, so it is echoed back with credentials.
         assertTrue(responseHeaders.contains("Access-Control-Allow-Origin"));
         assertEquals("http://example.com", responseHeaders.get("Access-Control-Allow-Origin").getFirst());
+        assertEquals("true", responseHeaders.get("Access-Control-Allow-Credentials").getFirst());
         // Should have set Access-Control-Max-Age
         assertTrue(responseHeaders.contains("Access-Control-Max-Age"));
     }
@@ -370,6 +375,29 @@ class WebsocketUtilsTest {
         websocketUtils.handleOptionsRequest(exchange, allowedHeaders, managedHeaders, "my-cookie");
 
         verify(exchange).setStatusCode(204);
+    }
+
+    @Test
+    void handleOptionsRequest_masterSwitchOff_emitsNoCorsHeaders() {
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        when(exchange.setStatusCode(204)).thenReturn(exchange);
+
+        websocketUtils.setCorsEnabled(false);
+        // An origin that WOULD be allowed, and a per-request policy that would allow it too: neither
+        // survives the master switch, so a service cannot re-enable CORS the gateway has turned off.
+        websocketUtils.setCorsPolicy(new io.surisoft.capi.utils.CorsPolicy(List.of("http://example.com")));
+
+        websocketUtils.handleOptionsRequest(exchange, new ArrayList<>(List.of("Authorization")),
+                new HashMap<>(Constants.CAPI_CORS_MANAGED_HEADERS), null,
+                new io.surisoft.capi.utils.CorsPolicy(List.of("http://example.com")));
+
+        // The preflight is still answered...
+        verify(exchange).setStatusCode(204);
+        verify(exchange).endExchange();
+        // ...but not one CORS header is written: the response header map is never even asked for,
+        // and neither is the request's Origin.
+        verify(exchange, never()).getResponseHeaders();
+        verify(exchange, never()).getRequestHeaders();
     }
 
     @Test
@@ -421,6 +449,7 @@ class WebsocketUtilsTest {
         CapiSslContextHolder holder = new CapiSslContextHolder(sslContext);
 
         WebsocketUtils utilsWithSsl = new WebsocketUtils(websocketConfig, List.of(jwtProcessor), holder);
+        utilsWithSsl.setCorsEnabled(true);
 
         assertDoesNotThrow(() -> utilsWithSsl.refreshXnioSsl());
         assertNotNull(utilsWithSsl.getXnioSsl());
@@ -430,6 +459,7 @@ class WebsocketUtilsTest {
     void refreshXnioSsl_withNullSslContextInHolder_doesNotUpdateXnioSsl() {
         CapiSslContextHolder holder = new CapiSslContextHolder(null);
         WebsocketUtils utilsWithNullCtx = new WebsocketUtils(websocketConfig, List.of(jwtProcessor), holder);
+        utilsWithNullCtx.setCorsEnabled(true);
 
         assertDoesNotThrow(() -> utilsWithNullCtx.refreshXnioSsl());
         assertNull(utilsWithNullCtx.getXnioSsl());
@@ -441,6 +471,7 @@ class WebsocketUtilsTest {
         CapiSslContextHolder holder = new CapiSslContextHolder(sslContext);
 
         WebsocketUtils utilsWithSsl = new WebsocketUtils(websocketConfig, List.of(jwtProcessor), holder);
+        utilsWithSsl.setCorsEnabled(true);
 
         assertNotNull(utilsWithSsl.getXnioSsl());
     }

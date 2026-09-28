@@ -9,6 +9,8 @@ import java.util.Set;
 public class RestClient {
 
     private String serviceId;
+    /** Per-service CORS origins from ServiceMeta; null means inherit the gateway default. */
+    private io.surisoft.capi.utils.CorsPolicy corsPolicy;
     // Stable Service.id (always "<name>:<group>") for serviceCache lookups — decoupled from context-path order (§5.1/Q6).
     private String canonicalServiceId;
     private Set<Mapping> mappingList;
@@ -184,5 +186,13 @@ public class RestClient {
 
     public void setOpenAPI(OpenAPI openAPI) {
         this.openAPI = openAPI;
+    }
+
+    public io.surisoft.capi.utils.CorsPolicy getCorsPolicy() {
+        return corsPolicy;
+    }
+
+    public void setCorsPolicy(io.surisoft.capi.utils.CorsPolicy corsPolicy) {
+        this.corsPolicy = corsPolicy;
     }
 }

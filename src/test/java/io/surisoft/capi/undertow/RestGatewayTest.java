@@ -79,8 +79,14 @@ class RestGatewayTest {
     }
 
     private RestGateway createGateway(int port) {
+        return createGateway(port, null);
+    }
+
+    private RestGateway createGateway(int port, java.util.List<String> allowedOrigins) {
         RestGateway gw = new RestGateway(port, 2, "/api", restClientMap, httpUtils, serviceCache, null, allowedHeaders, "");
         gw.setWebsocketUtils(websocketUtils);
+        gw.setCorsEnabled(true);
+        gw.setCorsPolicy(new io.surisoft.capi.utils.CorsPolicy(allowedOrigins));
         return gw;
     }
 
@@ -327,22 +333,269 @@ class RestGatewayTest {
     // === CORS ===
 
     @Test
-    void corsHeaders_setOnAllResponses() throws Exception {
+    void corsHeaders_setOnAllResponses_forAllowlistedOrigin() throws Exception {
         int port = pickPort();
         restClientMap.put("/my-service/v1", createOpenRestClient("/my-service/v1"));
-        runningGateway = createGateway(port);
+        runningGateway = createGateway(port, java.util.List.of("http://example.com"));
         runningGateway.runProxy();
 
-        HttpResponse<String> resp = HttpClient.newHttpClient().send(
-                HttpRequest.newBuilder()
-                        .uri(URI.create("http://localhost:" + port + "/api/my-service/v1"))
-                        .header("Origin", "http://example.com")
-                        .GET().build(),
-                HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> resp = corsGet(port, "http://example.com");
 
         assertEquals(200, resp.statusCode());
         assertEquals("http://example.com", resp.headers().firstValue("Access-Control-Allow-Origin").orElse(null));
         assertEquals("true", resp.headers().firstValue("Access-Control-Allow-Credentials").orElse(null));
+        assertEquals("Origin", resp.headers().firstValue("Vary").orElse(null));
+    }
+
+    @Test
+    void corsHeaders_notSetForUnlistedOrigin() throws Exception {
+        int port = pickPort();
+        restClientMap.put("/my-service/v1", createOpenRestClient("/my-service/v1"));
+        runningGateway = createGateway(port, java.util.List.of("http://example.com"));
+        runningGateway.runProxy();
+
+        HttpResponse<String> resp = corsGet(port, "http://evil.example");
+
+        // The request still succeeds — CORS is a browser-side control — but without the header the
+        // browser refuses to hand the body to the calling page.
+        assertEquals(200, resp.statusCode());
+        assertNull(resp.headers().firstValue("Access-Control-Allow-Origin").orElse(null));
+        assertNull(resp.headers().firstValue("Access-Control-Allow-Credentials").orElse(null));
+    }
+
+    @Test
+    void corsHeaders_notSetWhenNoAllowlistConfigured() throws Exception {
+        int port = pickPort();
+        restClientMap.put("/my-service/v1", createOpenRestClient("/my-service/v1"));
+        runningGateway = createGateway(port);   // deny-all default
+        runningGateway.runProxy();
+
+        HttpResponse<String> resp = corsGet(port, "http://example.com");
+
+        assertEquals(200, resp.statusCode());
+        assertNull(resp.headers().firstValue("Access-Control-Allow-Origin").orElse(null));
+    }
+
+    @Test
+    void corsHeaders_wildcardAllowsAnyOriginWithoutCredentials() throws Exception {
+        int port = pickPort();
+        restClientMap.put("/my-service/v1", createOpenRestClient("/my-service/v1"));
+        runningGateway = createGateway(port, java.util.List.of("*"));
+        runningGateway.runProxy();
+
+        HttpResponse<String> resp = corsGet(port, "http://anything.example");
+
+        assertEquals("*", resp.headers().firstValue("Access-Control-Allow-Origin").orElse(null));
+        // A credentialed wildcard is invalid per the Fetch standard and must never be sent.
+        assertNull(resp.headers().firstValue("Access-Control-Allow-Credentials").orElse(null));
+    }
+
+    @Test
+    void corsHeaders_perServiceOriginsOverrideGatewayDefault() throws Exception {
+        int port = pickPort();
+        RestClient owned = createOpenRestClient("/team-a/v1");
+        owned.setCorsPolicy(io.surisoft.capi.utils.CorsPolicy.fromCsv("https://team-a-app.example"));
+        restClientMap.put("/team-a/v1", owned);
+        runningGateway = createGateway(port, java.util.List.of("https://portal.example"));
+        runningGateway.runProxy();
+
+        // The service's own origin is honoured even though the gateway default does not list it.
+        HttpResponse<String> mine = corsGet(port, "https://team-a-app.example", "/api/team-a/v1");
+        assertEquals("https://team-a-app.example", mine.headers().firstValue("Access-Control-Allow-Origin").orElse(null));
+        assertEquals("true", mine.headers().firstValue("Access-Control-Allow-Credentials").orElse(null));
+
+        // Declaring origins replaces the gateway default for this service rather than adding to it.
+        HttpResponse<String> gatewayDefault = corsGet(port, "https://portal.example", "/api/team-a/v1");
+        assertNull(gatewayDefault.headers().firstValue("Access-Control-Allow-Origin").orElse(null));
+    }
+
+    @Test
+    void corsHeaders_oneServicesOriginsDoNotLeakToAnother() throws Exception {
+        int port = pickPort();
+        RestClient teamA = createOpenRestClient("/team-a/v1");
+        teamA.setCorsPolicy(io.surisoft.capi.utils.CorsPolicy.fromCsv("https://team-a-app.example"));
+        restClientMap.put("/team-a/v1", teamA);
+        restClientMap.put("/team-b/v1", createOpenRestClient("/team-b/v1"));   // declares nothing
+        runningGateway = createGateway(port);   // gateway default denies all
+        runningGateway.runProxy();
+
+        assertEquals("https://team-a-app.example",
+                corsGet(port, "https://team-a-app.example", "/api/team-a/v1")
+                        .headers().firstValue("Access-Control-Allow-Origin").orElse(null));
+
+        // The whole point of per-service origins: team A's origin has no access to team B.
+        assertNull(corsGet(port, "https://team-a-app.example", "/api/team-b/v1")
+                .headers().firstValue("Access-Control-Allow-Origin").orElse(null));
+    }
+
+    @Test
+    void corsHeaders_serviceWithoutOriginsInheritsGatewayDefault() throws Exception {
+        int port = pickPort();
+        restClientMap.put("/my-service/v1", createOpenRestClient("/my-service/v1"));   // no policy
+        runningGateway = createGateway(port, java.util.List.of("https://portal.example"));
+        runningGateway.runProxy();
+
+        assertEquals("https://portal.example",
+                corsGet(port, "https://portal.example", "/api/my-service/v1")
+                        .headers().firstValue("Access-Control-Allow-Origin").orElse(null));
+    }
+
+    @Test
+    void corsHeaders_masterSwitchOff_suppressesEverything() throws Exception {
+        int port = pickPort();
+        RestClient owned = createOpenRestClient("/team-a/v1");
+        owned.setCorsPolicy(io.surisoft.capi.utils.CorsPolicy.fromCsv("https://team-a-app.example"));
+        restClientMap.put("/team-a/v1", owned);
+        RestGateway gw = new RestGateway(port, 2, "/api", restClientMap, httpUtils, serviceCache, null, allowedHeaders, "");
+        gw.setWebsocketUtils(websocketUtils);
+        gw.setCorsEnabled(false);                                                    // master off
+        gw.setCorsPolicy(new io.surisoft.capi.utils.CorsPolicy(java.util.List.of("*")));  // would allow all
+        runningGateway = gw;
+        runningGateway.runProxy();
+
+        // Neither the gateway wildcard nor the service's own origins survive the master switch.
+        HttpResponse<String> viaService = corsGet(port, "https://team-a-app.example", "/api/team-a/v1");
+        assertEquals(200, viaService.statusCode());
+        assertNull(viaService.headers().firstValue("Access-Control-Allow-Origin").orElse(null));
+        assertNull(viaService.headers().firstValue("Access-Control-Allow-Credentials").orElse(null));
+        assertNull(viaService.headers().firstValue("Vary").orElse(null));
+
+        assertNull(corsGet(port, "https://anything.example", "/api/team-a/v1")
+                .headers().firstValue("Access-Control-Allow-Origin").orElse(null));
+    }
+
+    // ---- dot-segment guard, end to end through a real listener ----
+
+    /** Captures the path the backend actually received, so "forwarded unchanged" is provable. */
+    private RestClient createPathEchoRestClient(String serviceId, java.util.List<String> seen) {
+        RestClient rc = new RestClient();
+        rc.setServiceId(serviceId);
+        rc.setSecured(false);
+        rc.setHttpHandler(exchange -> {
+            seen.add(exchange.getRequestURI());
+            exchange.setStatusCode(200);
+            exchange.getResponseSender().send("ok");
+        });
+        return rc;
+    }
+
+    @Test
+    void dotSegments_observeOnlyByDefault_forwardsExactlyAsBefore() throws Exception {
+        int port = pickPort();
+        java.util.List<String> seen = new java.util.ArrayList<>();
+        restClientMap.put("/my-service/v1", createPathEchoRestClient("/my-service/v1", seen));
+        runningGateway = createGateway(port);          // rejectDotSegments defaults to false
+        runningGateway.runProxy();
+
+        HttpResponse<String> resp = HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + port + "/api/my-service/v1/../../other"))
+                        .GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        // The whole point of the default: a deployment upgrading to this build sees no change.
+        assertEquals(200, resp.statusCode());
+        assertEquals(1, seen.size(), "request should still have reached the backend");
+        assertTrue(seen.get(0).contains(".."), "path must be forwarded untouched: " + seen.get(0));
+    }
+
+    @Test
+    void dotSegments_rejectedWith400WhenEnabled() throws Exception {
+        int port = pickPort();
+        java.util.List<String> seen = new java.util.ArrayList<>();
+        restClientMap.put("/my-service/v1", createPathEchoRestClient("/my-service/v1", seen));
+        RestGateway gw = createGateway(port);
+        gw.setRejectDotSegments(true);
+        runningGateway = gw;
+        runningGateway.runProxy();
+
+        HttpResponse<String> resp = HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + port + "/api/my-service/v1/../../other"))
+                        .GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(400, resp.statusCode());
+        assertTrue(seen.isEmpty(), "a rejected request must never reach the backend");
+    }
+
+    @Test
+    void dotSegments_encodedFormIsRejectedToo() throws Exception {
+        int port = pickPort();
+        java.util.List<String> seen = new java.util.ArrayList<>();
+        restClientMap.put("/my-service/v1", createPathEchoRestClient("/my-service/v1", seen));
+        RestGateway gw = createGateway(port);
+        gw.setRejectDotSegments(true);
+        runningGateway = gw;
+        runningGateway.runProxy();
+
+        // Undertow decodes %2e%2e to ".." before the handler, so the single rule catches it.
+        HttpResponse<String> resp = HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + port + "/api/my-service/v1/%2e%2e/%2e%2e/other"))
+                        .GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(400, resp.statusCode());
+        assertTrue(seen.isEmpty());
+    }
+
+    @Test
+    void legitimateDottedPaths_stillRouteWhileEnforcing() throws Exception {
+        int port = pickPort();
+        java.util.List<String> seen = new java.util.ArrayList<>();
+        restClientMap.put("/my-service/v1", createPathEchoRestClient("/my-service/v1", seen));
+        RestGateway gw = createGateway(port);
+        gw.setRejectDotSegments(true);
+        runningGateway = gw;
+        runningGateway.runProxy();
+
+        // The false-positive cases that a substring check would have broken.
+        for (String path : java.util.List.of(
+                "/api/my-service/v1/range/1..10",
+                "/api/my-service/v1/files/report..pdf",
+                "/api/my-service/v1/a..b",
+                "/api/my-service/v1/v1.2.3/x",
+                "/api/my-service/v1/.hidden")) {
+            HttpResponse<String> resp = HttpClient.newHttpClient().send(
+                    HttpRequest.newBuilder().uri(URI.create("http://localhost:" + port + path)).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, resp.statusCode(), "must not be rejected: " + path);
+        }
+        assertEquals(5, seen.size(), "all five legitimate paths should have reached the backend");
+    }
+
+    @Test
+    void metricMethod_collapsesUnknownMethodsToOther() throws Exception {
+        java.lang.reflect.Method metricMethod =
+                RestGateway.class.getDeclaredMethod("metricMethod", io.undertow.server.HttpServerExchange.class);
+        metricMethod.setAccessible(true);
+
+        for (String known : java.util.List.of("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE")) {
+            io.undertow.server.HttpServerExchange ex = mock(io.undertow.server.HttpServerExchange.class);
+            when(ex.getRequestMethod()).thenReturn(new io.undertow.util.HttpString(known));
+            assertEquals(known, metricMethod.invoke(null, ex));
+        }
+        // Undertow accepts arbitrary method tokens; each distinct tag value would otherwise be a
+        // permanent Micrometer time series, so anything unrecognised collapses to one bucket.
+        for (String unknown : java.util.List.of("PROPFIND", "FOOBARBAZ", "M12345", "get")) {
+            io.undertow.server.HttpServerExchange ex = mock(io.undertow.server.HttpServerExchange.class);
+            when(ex.getRequestMethod()).thenReturn(new io.undertow.util.HttpString(unknown));
+            assertEquals("OTHER", metricMethod.invoke(null, ex));
+        }
+    }
+
+    private HttpResponse<String> corsGet(int port, String origin) throws Exception {
+        return corsGet(port, origin, "/api/my-service/v1");
+    }
+
+    private HttpResponse<String> corsGet(int port, String origin, String path) throws Exception {
+        return HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + port + path))
+                        .header("Origin", origin)
+                        .GET().build(),
+                HttpResponse.BodyHandlers.ofString());
     }
 
     @Test
@@ -368,8 +621,8 @@ class RestGatewayTest {
         io.surisoft.capi.configuration.CAPIConfiguration.Websocket wsConfig = new io.surisoft.capi.configuration.CAPIConfiguration.Websocket();
         wsConfig.setContextPath("/ws/*");
         WebsocketUtils realUtils = new WebsocketUtils(wsConfig, null, null);
-        doAnswer(inv -> { realUtils.handleOptionsRequest(inv.getArgument(0), inv.getArgument(1), inv.getArgument(2), inv.getArgument(3)); return null; })
-                .when(websocketUtils).handleOptionsRequest(any(), any(), any(), any());
+        doAnswer(inv -> { realUtils.handleOptionsRequest(inv.getArgument(0), inv.getArgument(1), inv.getArgument(2), inv.getArgument(3), inv.getArgument(4)); return null; })
+                .when(websocketUtils).handleOptionsRequest(any(), any(), any(), any(), any());
 
         runningGateway = createGateway(port);
         runningGateway.runProxy();
