@@ -368,6 +368,47 @@ public class ServiceUtils {
                 .build();
     }
 
+    /**
+     * Checks that a fetched spec identifies the service that declared it: {@code info.title} must
+     * equal the Consul service name exactly, and {@code info.version} must be present.
+     *
+     * <p>Two problems at once. The routine one is misregistration — an owner copy-pastes a
+     * registration and leaves someone else's {@code open-api} URL in it, so CAPI silently caches
+     * another API's spec and then drives its operation-security gate from it. The other is that the
+     * spec endpoint is the one URL a service owner can point anywhere: without this, whatever
+     * answers gets parsed and republished on {@code /definitions/openapi/<their service>}.
+     *
+     * <p>Matching is exact after trimming: no case folding, no separator folding. The owner controls
+     * both sides, and a governance rule people have to guess at is not one.
+     *
+     * <p>Matches the Consul service <em>name</em>, not {@code name:group} — one spec legitimately
+     * describes an API registered into several groups.
+     *
+     * @return a human-readable description of the mismatch, or {@code null} when the spec identifies
+     *         the service (including when there is no spec to check)
+     */
+    public String openApiIdentityMismatch(Service service) {
+        OpenAPI openAPI = service.getOpenAPI();
+        if (openAPI == null) {
+            return null;
+        }
+        if (openAPI.getInfo() == null) {
+            return "spec declares no info block";
+        }
+        String title = openAPI.getInfo().getTitle();
+        String version = openAPI.getInfo().getVersion();
+        if (isBlank(title)) {
+            return "spec declares no info.title";
+        }
+        if (isBlank(version)) {
+            return "spec declares no info.version";
+        }
+        if (!title.trim().equals(service.getName())) {
+            return "spec info.title '" + title.trim() + "' does not identify service '" + service.getName() + "'";
+        }
+        return null;
+    }
+
     public boolean processOpenApiSpec(Service service, HttpResponse<String> response) {
         try {
             if (response.statusCode() != 200) {
@@ -442,7 +483,7 @@ public class ServiceUtils {
         }
     }
 
-    private boolean serviceHasOpenApiEndpoint(Service service) {
+    public boolean serviceHasOpenApiEndpoint(Service service) {
         return service.getServiceMeta() != null &&
                 service.getServiceMeta().getOpenApiEndpoint() != null &&
                 !service.getServiceMeta().getOpenApiEndpoint().isEmpty();

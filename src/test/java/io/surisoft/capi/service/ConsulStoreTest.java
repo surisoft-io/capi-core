@@ -773,4 +773,141 @@ class ConsulStoreTest {
         entry.setValue(outerBase64);
         return entry;
     }
+
+    // ---- trust store certificate removal ----
+
+    /** Self-signed CN=capi-test-cert, generated for these tests only; never trusted anywhere. */
+    private static final String TEST_CERT_PEM =
+                    "-----BEGIN CERTIFICATE-----\n" +
+                    "MIIDEzCCAfugAwIBAgIUORFw7bVftVsMnU4CBpj6FFMwKvYwDQYJKoZIhvcNAQEL\n" +
+                    "BQAwGTEXMBUGA1UEAwwOY2FwaS10ZXN0LWNlcnQwHhcNMjYwOTI0MDcyMjQwWhcN\n" +
+                    "NDYwOTE5MDcyMjQwWjAZMRcwFQYDVQQDDA5jYXBpLXRlc3QtY2VydDCCASIwDQYJ\n" +
+                    "KoZIhvcNAQEBBQADggEPADCCAQoCggEBAMj3xaZ/VLywnSTZwjsCfPoCAMEpu1dx\n" +
+                    "YMSTDMux8IixL2G8YWtlRofp2hUVNrWy4nANPz36KGnOqfrcX1LUXac0fwBxreOU\n" +
+                    "Sd5L5yFz9w3+y6/WaXOIyShcSXPVbiYdXoFCBE10TsS7TfJOymUIYP7Gab1bT+TH\n" +
+                    "fGCfva60O0464VGsazD2wBbVZBgD6ZHdLJ5Tn7BF6zuZGsJMTMygav5S/RRTRAfz\n" +
+                    "Mr7JQFXwqfGPWoksk1Pamhmi/dmlVYtPSzvxyDQGW/gi73VOP5zY6huzcq5JdLfA\n" +
+                    "qeEuqoXu5cpuOW+0/8F0VnspDMEUCUh6/YIYCc+k9sDqg309eFavOK0CAwEAAaNT\n" +
+                    "MFEwHQYDVR0OBBYEFEiZK/+LWmlGiRa+N3LpmEWRhFtEMB8GA1UdIwQYMBaAFEiZ\n" +
+                    "K/+LWmlGiRa+N3LpmEWRhFtEMA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZIhvcNAQEL\n" +
+                    "BQADggEBAD5kpaGSwOA7RFPurGyUa1MYjx2NdZUthFz9KgvygLaWiI8VfNN+fg0V\n" +
+                    "N0z9w8KoxaL9ITySW/5J0rY+V10bqW+XoCoir34CbG7ZsbqzPgWeMZJ+5Q8vJuwC\n" +
+                    "BZD9K5jd0jdOMcAlrkT/E8l1OXidNEKTXNiiyoWR98vqKaBh0fowTrQVlAbsxEoQ\n" +
+                    "WmElgRQ2/V+a5e+Rf22YX26oUmt14WjNmcUYe0xNlBOOUrrFwdPGCKa6C0Jcwg+P\n" +
+                    "zWwD7N5fQ7N1SGs8/rAhiiJ8hOMdqm5HVhfrTIIDgCSVdzgQUIaMDHSFbSvJojfq\n" +
+                    "BLchaHO3bQExG+ZzQD5mY3Iz0SyTUh8=\n" +
+                    "-----END CERTIFICATE-----\n";
+
+    private static String doubleBase64(byte[] raw) {
+        String inner = Base64.getEncoder().encodeToString(raw);
+        return Base64.getEncoder().encodeToString(inner.getBytes());
+    }
+
+    private static byte[] jksWith(String alias) throws Exception {
+        java.security.KeyStore keyStore = java.security.KeyStore.getInstance("JKS");
+        keyStore.load(null, "changeit".toCharArray());
+        if (alias != null) {
+            java.security.cert.CertificateFactory cf = java.security.cert.CertificateFactory.getInstance("X.509");
+            java.security.cert.Certificate cert = cf.generateCertificate(
+                    new java.io.ByteArrayInputStream(TEST_CERT_PEM.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            keyStore.setCertificateEntry(alias, cert);
+        }
+        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+        keyStore.store(baos, "changeit".toCharArray());
+        return baos.toByteArray();
+    }
+
+    /** Stubs the Consul KV GET with the given trust store, and the follow-up PUT with the given result. */
+    @SuppressWarnings("unchecked")
+    private java.util.concurrent.atomic.AtomicReference<HttpRequest> stubConsulKv(byte[] jks, int putStatus, String putBody) throws Exception {
+        ConsulKeyStoreEntry remoteEntry = new ConsulKeyStoreEntry();
+        remoteEntry.setModifyIndex(10);
+        remoteEntry.setValue(doubleBase64(jks));
+        String getBody = new ObjectMapper().writeValueAsString(new ConsulKeyStoreEntry[]{remoteEntry});
+
+        HttpResponse<String> getResponse = mock(HttpResponse.class);
+        when(getResponse.statusCode()).thenReturn(200);
+        when(getResponse.body()).thenReturn(getBody);
+
+        HttpResponse<String> putResponse = mock(HttpResponse.class);
+        when(putResponse.statusCode()).thenReturn(putStatus);
+        when(putResponse.body()).thenReturn(putBody);
+
+        java.util.concurrent.atomic.AtomicReference<HttpRequest> putRequest = new java.util.concurrent.atomic.AtomicReference<>();
+        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class))).thenAnswer(invocation -> {
+            HttpRequest request = invocation.getArgument(0);
+            if ("PUT".equals(request.method())) {
+                putRequest.set(request);
+                return putResponse;
+            }
+            return getResponse;
+        });
+        return putRequest;
+    }
+
+    private static String bodyOf(HttpRequest request) {
+        StringBuilder sb = new StringBuilder();
+        request.bodyPublisher().orElseThrow().subscribe(new java.util.concurrent.Flow.Subscriber<>() {
+            public void onSubscribe(java.util.concurrent.Flow.Subscription subscription) { subscription.request(Long.MAX_VALUE); }
+            public void onNext(java.nio.ByteBuffer item) { sb.append(java.nio.charset.StandardCharsets.UTF_8.decode(item)); }
+            public void onError(Throwable throwable) { throw new RuntimeException(throwable); }
+            public void onComplete() { }
+        });
+        return sb.toString();
+    }
+
+    @Test
+    void removeCertificate_existingAlias_pushesStoreWithoutIt() throws Exception {
+        java.util.concurrent.atomic.AtomicReference<HttpRequest> putRequest = stubConsulKv(jksWith("capi-test-cert"), 200, "true");
+
+        ConsulStore.TrustStoreResult result = consulStore.removeCertificate("capi-test-cert");
+
+        assertEquals(ConsulStore.TrustStoreOutcome.SUCCESS, result.outcome());
+        assertNotNull(putRequest.get(), "Expected the updated trust store to be pushed to Consul KV");
+
+        // The pushed value is single-base64 JKS; it must no longer contain the alias
+        java.security.KeyStore pushed = java.security.KeyStore.getInstance("JKS");
+        pushed.load(new java.io.ByteArrayInputStream(Base64.getDecoder().decode(bodyOf(putRequest.get()))), "changeit".toCharArray());
+        assertFalse(pushed.containsAlias("capi-test-cert"));
+        assertFalse(pushed.aliases().hasMoreElements());
+    }
+
+    @Test
+    void removeCertificate_unknownAlias_returnsNotFoundAndPushesNothing() throws Exception {
+        java.util.concurrent.atomic.AtomicReference<HttpRequest> putRequest = stubConsulKv(jksWith("capi-test-cert"), 200, "true");
+
+        ConsulStore.TrustStoreResult result = consulStore.removeCertificate("does-not-exist");
+
+        assertEquals(ConsulStore.TrustStoreOutcome.NOT_FOUND, result.outcome());
+        assertNull(putRequest.get(), "An unknown alias must not rewrite the trust store");
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void removeCertificate_noRemoteTrustStore_returnsNotFound() throws Exception {
+        HttpResponse<String> getResponse = mock(HttpResponse.class);
+        when(getResponse.statusCode()).thenReturn(404);
+        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class))).thenReturn(getResponse);
+
+        ConsulStore.TrustStoreResult result = consulStore.removeCertificate("capi-test-cert");
+
+        assertEquals(ConsulStore.TrustStoreOutcome.NOT_FOUND, result.outcome());
+    }
+
+    @Test
+    void removeCertificate_consulPutFails_returnsError() throws Exception {
+        stubConsulKv(jksWith("capi-test-cert"), 500, "false");
+
+        ConsulStore.TrustStoreResult result = consulStore.removeCertificate("capi-test-cert");
+
+        assertEquals(ConsulStore.TrustStoreOutcome.ERROR, result.outcome());
+        assertTrue(result.message().contains("500"));
+    }
+
+    @Test
+    void removeCertificate_blankAlias_returnsError() {
+        assertEquals(ConsulStore.TrustStoreOutcome.ERROR, consulStore.removeCertificate("  ").outcome());
+        assertEquals(ConsulStore.TrustStoreOutcome.ERROR, consulStore.removeCertificate(null).outcome());
+        verifyNoInteractions(httpClient);
+    }
 }

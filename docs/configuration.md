@@ -19,6 +19,7 @@ capi:
     port: 8380
     listeningAddress: 0.0.0.0
     contextPath: /api
+    rejectDotSegments: false
     connectionRequestTimeout: 5000
     requestTimeout: 5000
     responseTimeout: 120000
@@ -64,7 +65,10 @@ capi:
 
   opa:
     enabled: false
-    endpoint: http://localhost:8181
+    wasmBundleUrl:
+    wasmBundleToken:
+    wasmBundlePollIntervalSeconds: 60
+    wasmPoolSize: 10
 
   traces:
     enabled: false
@@ -73,6 +77,7 @@ capi:
     extraMetadataPrefix:
 
   corsEnabled: false
+  allowedOrigins: []
   allowedHeaders:
     - Origin
     - Accept
@@ -124,6 +129,7 @@ capi:
 | `rest.port` | `8380` | Listening port. |
 | `rest.listeningAddress` | `0.0.0.0` | Bind address. |
 | `rest.contextPath` | `/api` | Base path for all REST routes. |
+| `rest.rejectDotSegments` | `false` | Refuse a request whose path contains a `.` or `..` **segment** with `400`. While false the request is forwarded exactly as before and only counted, via `capi_dot_segment_requests_total{action="observed"}` — watch that stay at zero on real traffic, then turn it on. Segment-wise, so ordinary paths like `/range/1..10` or `/report..pdf` are unaffected. See [Security](security.md#path-handling). |
 | `rest.connectionRequestTimeout` | `5000` | Time (ms) to obtain a connection from the pool. |
 | `rest.requestTimeout` | `5000` | Total request timeout (ms). |
 | `rest.responseTimeout` | `120000` | Time (ms) to wait for a response from the backend. |
@@ -192,7 +198,14 @@ See [Security](security.md) for details.
 | Field | Default | Description |
 |-------|---------|-------------|
 | `opa.enabled` | `false` | Enable OPA authorization. |
-| `opa.endpoint` | — | OPA server endpoint (e.g. `http://opa:8181`). |
+| `opa.wasmBundleUrl` | — | URL of the `.tar.gz` Wasm policy bundle, re-fetched on ETag change. |
+| `opa.wasmBundleToken` | — | Optional bearer token for the bundle server. |
+| `opa.wasmBundlePollIntervalSeconds` | `60` | Bundle poll interval. |
+| `opa.wasmPoolSize` | `10` | Size of the shared policy-instance pool. |
+
+> **`opa.endpoint` does not exist.** This page previously listed it. CAPI evaluates Rego compiled to
+> WebAssembly in-process and has no HTTP OPA mode; setting `endpoint` makes CAPI **fail to start**,
+> because unknown configuration properties are rejected rather than ignored.
 
 See [Security](security.md) for details.
 
@@ -209,8 +222,15 @@ See [Security](security.md) for details.
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `corsEnabled` | `false` | Enable CORS header management. |
-| `allowedHeaders` | — | List of allowed request headers. |
+| `corsEnabled` | `false` | **Master switch.** While false CAPI sends no CORS header at all, and both `allowedOrigins` and any per-service `allowed-origins` metadata are ignored. |
+| `allowedOrigins` | — (**deny all**) | Gateway-wide fallback list of origins allowed CORS headers. Exact match on scheme+host+port. `["*"]` sends the literal wildcard and never credentials. Applies only to services that declare no `allowed-origins` of their own. |
+| `allowedHeaders` | — | List of allowed request headers (preflight `Access-Control-Allow-Headers`). |
+
+> **Changed in 2.23.** `corsEnabled` was previously reporting-only — it appeared in `/info/capi` but
+> gated nothing, so a config reading `corsEnabled: false` still served
+> `Access-Control-Allow-Origin` reflecting whatever `Origin` the caller sent, together with
+> `Access-Control-Allow-Credentials: true`. It is now enforced, and origins must be allowlisted.
+> A browser client calling CAPI cross-origin will stop working until its origin is listed.
 
 See [Security](security.md) for details.
 

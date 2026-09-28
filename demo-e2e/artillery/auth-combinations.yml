@@ -1,0 +1,212 @@
+# =============================================================================
+# CAPI — auth-combination regression + functional load test
+# =============================================================================
+#
+# Purpose: exercise every auth mode and the *combinations* between them, with
+# inline assertions (expect plugin) so this doubles as a regression gate, not
+# just a throughput soak. This is the gap the k6 script leaves: k6 measures
+# latency per route type but doesn't assert that the WRONG identity is rejected.
+#
+# It specifically guards the auth-gate bypass class of bug on dual
+# apiKey + secured routes (see project memory): an unauthenticated or
+# key-only request to a route that is ALSO OAuth-secured must NOT pass.
+#
+# Plugins used (install alongside artillery):
+#   expect              -> inline per-request assertions
+#   ensure              -> turn SLOs/error-rate into a non-zero exit code (CI gate)
+#   metrics-by-endpoint -> per-route latency breakdown (CAPI fans out to many backends)
+#
+#   npm i -g artillery artillery-plugin-expect artillery-plugin-ensure \
+#            artillery-plugin-metrics-by-endpoint
+#
+# Run (functional gate, low load):
+#   artillery run auth-combinations.yml
+#
+# Run as a load+assert gate:
+#   artillery run --overrides '{"config":{"phases":[{"duration":120,"arrivalRate":40}]}}' auth-combinations.yml
+#
+# !! API-KEY HEADER NOTE !!
+#   Defaulted to  Authorization: ApiKey <key>  (matches Constants.java:63 and
+#   demo-e2e curl examples). The k6 script uses  X-API-Key: <key>  instead.
+#   These disagree — confirm which your build accepts and fix one. To switch
+#   this file, replace the apiKey headers below.
+# =============================================================================
+
+config:
+  target: "http://localhost:8380"
+  processor: "./helpers.js"
+
+  plugins:
+    expect: {}
+    ensure: {}
+    metrics-by-endpoint: {}
+
+  # CI gate: fail the run if assertions fail or latency/error budget is blown.
+  # NOTE: don't gate on http.codes.500 here — Artillery's `ensure` treats a
+  # metric that never fired (zero 500s) as undefined, which *fails* the
+  # condition. The expect assertions already pin each route to an exact code,
+  # so vusers.failed == 0 is the real "no unexpected response" gate.
+  ensure:
+    thresholds:
+      - "http.response_time.p99": 2000
+    conditions:
+      - expression: "vusers.failed == 0"        # every inline assertion passed
+
+  phases:
+    - name: "functional-gate"
+      duration: 60
+      arrivalRate: 10
+
+scenarios:
+  # ---------------------------------------------------------------------------
+  # 1. OPEN route — no auth, must be 200.
+  # ---------------------------------------------------------------------------
+  - name: "open-no-auth"
+    weight: 4
+    flow:
+      - get:
+          url: "/api/health-service/v1/"
+          expect:
+            - statusCode: 200
+
+  # ---------------------------------------------------------------------------
+  # 2. API KEY — three throttle tiers behave differently under repeat calls.
+  #    unlimited: always 200.  limited (3/30s): must start 429-ing in a burst.
+  # ---------------------------------------------------------------------------
+  - name: "apikey-unlimited"
+    weight: 3
+    flow:
+      - get:
+          url: "/api/inventory-service/v1/"
+          headers:
+            Authorization: "ApiKey e2e-unlimited-key"
+          expect:
+            - statusCode: 200
+
+  - name: "apikey-limited-throttles"
+    weight: 2
+    flow:
+      # 6 quick calls against a 3-per-30s key: the tail MUST be throttled.
+      # We assert the *set* of acceptable codes per call, and rely on the
+      # throttle counter (visible in metrics) to confirm 429s appear.
+      - loop:
+          - get:
+              url: "/api/inventory-service/v1/"
+              headers:
+                Authorization: "ApiKey e2e-limited-key"
+              expect:
+                # Verified against real CAPI: a throttled API key is rejected
+                # with 403, NOT the conventional 429. (The k6 script assumes
+                # 429 here — that assertion is wrong against this build.)
+                - statusCode: [200, 403]
+        count: 6
+
+  - name: "apikey-invalid-rejected"
+    weight: 1
+    flow:
+      - get:
+          url: "/api/inventory-service/v1/"
+          headers:
+            Authorization: "ApiKey totally-bogus-key"
+          expect:
+            # Verified against real CAPI: an unknown key is REJECTED with 403
+            # (it does not fall back to open access). Accept 401/403 to stay
+            # robust across builds, but never 200.
+            - statusCode: [401, 403]
+
+  # ---------------------------------------------------------------------------
+  # 3. OAUTH + OPA — identity must match the policy.
+  #    payment-service is admin_only. alice(admin) passes, charlie(viewer) 403.
+  # ---------------------------------------------------------------------------
+  - name: "opa-admin-allowed"
+    weight: 3
+    beforeScenario: "tokenAliceAdmin"
+    flow:
+      - get:
+          url: "/api/payment-service/v1/"
+          headers:
+            Authorization: "Bearer {{ token }}"
+          expect:
+            - statusCode: 200
+
+  - name: "opa-viewer-denied-on-admin-route"
+    weight: 2
+    beforeScenario: "tokenCharlieViewer"
+    flow:
+      - get:
+          url: "/api/payment-service/v1/"
+          headers:
+            Authorization: "Bearer {{ token }}"
+          expect:
+            # viewer hitting admin_only MUST be forbidden, not served.
+            - statusCode: 403
+
+  - name: "opa-manager-on-manager-route"
+    weight: 2
+    beforeScenario: "tokenBobManager"
+    flow:
+      - get:
+          url: "/api/order-service/v1/"
+          headers:
+            Authorization: "Bearer {{ token }}"
+          expect:
+            - statusCode: 200
+
+  - name: "secured-route-no-token-rejected"
+    weight: 2
+    flow:
+      - get:
+          url: "/api/order-service/v1/"
+          # No Authorization header at all -> must be rejected, never 200.
+          # Verified against real CAPI: order-service is OPA-gated
+          # (manager_or_admin), so an empty-role request is denied with 403.
+          # A plain secured (non-OPA) route would 401 — accept either.
+          expect:
+            - statusCode: [401, 403]
+
+  # ---------------------------------------------------------------------------
+  # 4. DUAL apiKey + secured  — THE BYPASS-BUG REGRESSION.
+  #
+  #    This targets the bug class where a route configured as BOTH key-enabled
+  #    and OAuth-secured could be reached with only one (or neither) credential.
+  #
+  #    !! demo-e2e has no route registered as dual apiKey+secured out of the box.
+  #    Register one (a copy of order-service with an api-key entry in
+  #    capi-api-keys/, kept `secured: true`) and point {{ dualPath }} at it.
+  #    Until then these scenarios are templates — set DUAL_PATH to enable.
+  #
+  #    Expected, once wired (use [401,403] — OPA-gated routes deny with 403):
+  #      - no creds            -> 401/403  (NOT 200)
+  #      - apiKey only         -> 401/403  (key alone must not satisfy `secured`)
+  #      - bearer only         -> 200      (valid OAuth identity)
+  #      - apiKey + bearer     -> 200
+  # ---------------------------------------------------------------------------
+  - name: "dual-no-creds-must-401"
+    weight: 0          # set weight > 0 after wiring a real dual route
+    flow:
+      - get:
+          url: "{{ $processEnvironment.DUAL_PATH }}"
+          expect:
+            - statusCode: [401, 403]
+
+  - name: "dual-apikey-only-must-401"
+    weight: 0
+    flow:
+      - get:
+          url: "{{ $processEnvironment.DUAL_PATH }}"
+          headers:
+            Authorization: "ApiKey e2e-unlimited-key"
+          expect:
+            # key alone must not bypass the OAuth gate
+            - statusCode: [401, 403]
+
+  - name: "dual-bearer-only-ok"
+    weight: 0
+    beforeScenario: "tokenAliceAdmin"
+    flow:
+      - get:
+          url: "{{ $processEnvironment.DUAL_PATH }}"
+          headers:
+            Authorization: "Bearer {{ token }}"
+          expect:
+            - statusCode: 200

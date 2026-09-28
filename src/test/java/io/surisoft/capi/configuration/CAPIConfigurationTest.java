@@ -1,6 +1,9 @@
 package io.surisoft.capi.configuration;
 
 import org.junit.jupiter.api.Test;
+import org.yaml.snakeyaml.LoaderOptions;
+import org.yaml.snakeyaml.Yaml;
+import org.yaml.snakeyaml.constructor.Constructor;
 
 import java.util.List;
 
@@ -648,5 +651,142 @@ class CAPIConfigurationTest {
         CAPIConfiguration.Mcp mcp = new CAPIConfiguration.Mcp();
         config.setMcp(mcp);
         assertSame(mcp, config.getMcp());
+    }
+
+    // --- Admin ---
+
+    @Test
+    void admin_defaultsToUnset_notFalse() {
+        CAPIConfiguration config = new CAPIConfiguration();
+        assertNotNull(config.getAdmin());
+        // Unset, NOT false: the two must stay distinguishable so an upgrade that never configured
+        // admin keeps working, while an explicit protected:true without a group still fails loudly.
+        assertNull(config.getAdmin().getProtected());
+        assertTrue(config.getAdmin().isUnset());
+        assertFalse(config.getAdmin().isProtectedEnabled());
+        assertNull(config.getAdmin().getGroup());
+    }
+
+    @Test
+    void admin_getterSetter() {
+        CAPIConfiguration config = new CAPIConfiguration();
+        CAPIConfiguration.Admin admin = new CAPIConfiguration.Admin();
+        admin.setProtected(true);
+        admin.setGroup("capi-admin");
+        config.setAdmin(admin);
+        assertSame(admin, config.getAdmin());
+        assertTrue(config.getAdmin().isProtectedEnabled());
+        assertFalse(config.getAdmin().isUnset());
+        assertEquals("capi-admin", config.getAdmin().getGroup());
+    }
+
+    /**
+     * The YAML key is "protected", which cannot be a field name, so the binding rests entirely on
+     * the getProtected/setProtected pair being introspected as that property. Loading real YAML is
+     * the only thing that proves it — a getter/setter test would pass either way. This matters more
+     * now the field is a nullable Boolean: JavaBeans only accepts an is* reader for primitive
+     * boolean, so the accessor had to be renamed and SnakeYAML must still find it.
+     */
+    @Test
+    void admin_bindsFromYaml() {
+        CAPIConfiguration config = loadYaml("""
+                admin:
+                  protected: true
+                  group: capi-admin
+                """);
+        assertEquals(Boolean.TRUE, config.getAdmin().getProtected());
+        assertTrue(config.getAdmin().isProtectedEnabled());
+        assertEquals("capi-admin", config.getAdmin().getGroup());
+    }
+
+    @Test
+    void admin_absentFromYaml_leavesProtectedUnset() {
+        CAPIConfiguration config = loadYaml("instanceName: default\n");
+        assertNotNull(config.getAdmin());
+        assertTrue(config.getAdmin().isUnset());
+        assertFalse(config.getAdmin().isProtectedEnabled());
+    }
+
+    @Test
+    void admin_explicitFalseFromYaml_isDistinctFromUnset() {
+        CAPIConfiguration config = loadYaml("admin:\n  protected: false\n");
+        assertNotNull(config.getAdmin());
+        assertEquals(Boolean.FALSE, config.getAdmin().getProtected());
+        assertFalse(config.getAdmin().isUnset());          // the distinction the fix rests on
+        assertFalse(config.getAdmin().isProtectedEnabled());
+    }
+
+    @Test
+    void rejectDotSegments_defaultsToOff() {
+        // `rest` has no default instance (unlike `admin`), so construct the block directly.
+        CAPIConfiguration.Rest rest = new CAPIConfiguration.Rest();
+        // Observe-only by default: refusing a path an existing deployment forwards today is a
+        // behaviour change, so it has to be opted into.
+        assertFalse(rest.isRejectDotSegments());
+    }
+
+    @Test
+    void rejectDotSegments_absentFromYaml_staysOff() {
+        CAPIConfiguration config = loadYaml("""
+                rest:
+                  enabled: true
+                """);
+        assertFalse(config.getRest().isRejectDotSegments());
+    }
+
+    @Test
+    void rejectDotSegments_bindsFromYaml() {
+        CAPIConfiguration config = loadYaml("""
+                rest:
+                  enabled: true
+                  rejectDotSegments: true
+                """);
+        assertTrue(config.getRest().isRejectDotSegments());
+    }
+
+    @Test
+    void matchOpenApiSpec_defaultsToOff_withNoExemptions() {
+        CAPIConfiguration config = new CAPIConfiguration();
+        assertNotNull(config.getMatchOpenApiSpec());
+        // Four years of production must keep routing until an operator opts in.
+        assertFalse(config.getMatchOpenApiSpec().isEnabled());
+        assertNull(config.getMatchOpenApiSpec().getExempt());
+    }
+
+    @Test
+    void matchOpenApiSpec_bindsFromYaml() {
+        CAPIConfiguration config = loadYaml("""
+                matchOpenApiSpec:
+                  enabled: true
+                  exempt:
+                    - legacy-a
+                    - legacy-b
+                """);
+        assertTrue(config.getMatchOpenApiSpec().isEnabled());
+        assertEquals(List.of("legacy-a", "legacy-b"), config.getMatchOpenApiSpec().getExempt());
+    }
+
+    @Test
+    void matchOpenApiSpec_absentFromYaml_keepsDefaults() {
+        CAPIConfiguration config = loadYaml("instanceName: default\n");
+        assertNotNull(config.getMatchOpenApiSpec());
+        assertFalse(config.getMatchOpenApiSpec().isEnabled());
+    }
+
+    @Test
+    void allowedOrigins_defaultsToNull_meaningDenyAll() {
+        CAPIConfiguration config = new CAPIConfiguration();
+        assertNull(config.getAllowedOrigins());
+    }
+
+    @Test
+    void allowedOrigins_roundTripsFromYaml() {
+        CAPIConfiguration config = loadYaml("allowedOrigins:\n  - https://app.example\n  - https://admin.example\n");
+        assertEquals(List.of("https://app.example", "https://admin.example"), config.getAllowedOrigins());
+    }
+
+    private static CAPIConfiguration loadYaml(String yaml) {
+        Constructor constructor = new Constructor(CAPIConfiguration.class, new LoaderOptions());
+        return new Yaml(constructor).load(yaml);
     }
 }

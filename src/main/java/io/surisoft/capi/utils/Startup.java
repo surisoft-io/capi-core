@@ -168,6 +168,9 @@ public class Startup {
             jwtProcessors = oauth2Provider.getJwtProcessorList();
         }
         websocketUtils = new WebsocketUtils(configuration.getWebsocket(), jwtProcessors, capiSslContextHolder, backendPoolSettings());
+        // Shared with the REST listener: one allowlist governs CORS on both preflight and response.
+        websocketUtils.setCorsEnabled(configuration.isCorsEnabled());
+        websocketUtils.setCorsPolicy(new CorsPolicy(configuration.getAllowedOrigins()));
     }
 
     private void startGrpcUtils() {
@@ -289,6 +292,7 @@ public class Startup {
                 configuration.isStrictToInstanceName(),
                 extrasPrefix,
                 invalidServiceMap);
+        consulCatalogService.setMatchOpenApiSpec(configuration.getMatchOpenApiSpec());
     }
 
     private void createServiceCache() {

@@ -20,6 +20,7 @@ Returns links to all available admin endpoints:
     "invalid-services": { "href": "http://localhost:8381/info/invalid-services" },
     "openapi": { "href": "http://localhost:8381/info/openapi/{serviceId}" },
     "truststore": { "href": "http://localhost:8381/info/truststore" },
+    "spec-compliance": { "href": "http://localhost:8381/info/spec-compliance" },
     "wsroutes": { "href": "http://localhost:8381/info/wsroutes" },
     "mcp": { "href": "http://localhost:8381/info/mcp" },
     "mcp-tools": { "href": "http://localhost:8381/info/mcp/tools" },
@@ -55,6 +56,18 @@ curl http://localhost:8381/info/metrics
 Returns Prometheus-formatted metrics (`text/plain`). Configure your Prometheus scrape target to point at this endpoint.
 
 CAPI tracks per-route request counters and standard JVM metrics.
+
+| Metric | Labels | Meaning |
+|---|---|---|
+| `capi_requests_total` | `service`, `method`, `status`, `status_group` | Requests per route |
+| `capi_request_duration` | `service`, `method` | Request latency |
+| `capi_dot_segment_requests_total` | `service`, `action` | Requests whose path contained a `.`/`..` segment. `action` is `observed` (forwarded — `rest.rejectDotSegments` off) or `rejected` (400). See [Security — Path handling](security.md#path-handling). |
+
+> **Changed in 2.23 — the `method` label is now bounded.** Undertow accepts arbitrary HTTP method
+> tokens, and Micrometer keeps one time series per distinct label value for the life of the process,
+> so tagging with the raw method let an unauthenticated caller grow the registry without limit. Any
+> method outside `GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, TRACE` is now recorded as `OTHER`.
+> A dashboard or alert that filters on an unusual method label needs updating.
 
 ### CAPI Instance Info
 
@@ -146,13 +159,84 @@ This endpoint is **operator-facing**: it serves the spec regardless of `expose-o
 
 For the consumer-facing variant — which respects `expose-open-api-definition`, optionally requires a Bearer token via `secure-open-api-definition`, and lives on the main gateway port — see [`GET /definitions/openapi/<service-id>`](consul-metadata.md#6-expose-openapi-spec).
 
+### Spec compliance
+
+```bash
+curl http://localhost:8381/info/spec-compliance
+```
+
+Where every discovered service stands against the `capi.matchOpenApiSpec` rule (`info.title` must
+equal the Consul service name; `info.version` must be set). Verdicts are computed on every discovery
+cycle **whether or not enforcement is enabled**, so an estate can be measured before the switch is
+turned on.
+
+```json
+{
+  "summary": {
+    "enforcing": false,
+    "compliant": 38,
+    "nonCompliant": 2,
+    "exempt": 1,
+    "notApplicable": 12,
+    "safeToEnable": false
+  },
+  "compliant":     [ { "serviceId": "orders:v1", "serviceName": "orders", "group": "v1", "verdict": "COMPLIANT", "evaluatedAt": "..." } ],
+  "nonCompliant":  [ { "serviceId": "billing:v1", "detail": "spec info.title 'Billing API' does not identify service 'billing'", "...": "..." } ],
+  "exempt":        [ { "serviceId": "legacy:v1", "detail": "...", "...": "..." } ],
+  "notApplicable": [ { "serviceId": "echo:v1", "verdict": "NOT_APPLICABLE", "...": "..." } ]
+}
+```
+
+| Verdict | Meaning |
+|---|---|
+| `compliant` | spec identifies the service |
+| `nonCompliant` | mismatch — **would be blocked** if `matchOpenApiSpec.enabled` were true |
+| `exempt` | mismatch, but named in `matchOpenApiSpec.exempt`, so it keeps routing |
+| `notApplicable` | no `open-api` meta; the rule does not apply |
+
+`safeToEnable` is true when `nonCompliant` is empty — the signal that flipping the switch will not
+strand anything. Exempt services deliberately do not block readiness.
+
+Returns `404` when Consul discovery is not enabled. Once enforcing, blocked services also appear in
+[`/info/invalid-services`](#invalid-services) with reason `OPENAPI_IDENTITY_MISMATCH`.
+
 ### Truststore
 
 ```bash
 curl http://localhost:8381/info/truststore
 ```
 
-Lists all certificates in the custom truststore. Returns `404` if the truststore is not enabled.
+Lists all certificates in the custom truststore — alias, subject DN, issuer DN and validity window. Returns `404` if the truststore is not enabled.
+
+Add a certificate (PEM in the request body):
+
+```bash
+curl -X PUT http://localhost:8381/info/truststore \
+     --data-binary @my-backend.pem
+```
+
+The alias is derived from the certificate CN, lowercased, with anything outside `[a-z0-9._-]` replaced by `_`. Returns `409` if that alias is already present.
+
+Remove a certificate by alias — use the `alias` exactly as `GET /info/truststore` reports it:
+
+```bash
+curl -X DELETE http://localhost:8381/info/truststore/my-backend
+```
+
+| Status | Meaning |
+| --- | --- |
+| `200` | Certificate removed |
+| `404` | Truststore not enabled, Consul KV not configured, or no certificate with that alias |
+| `500` | Truststore could not be pushed back to Consul KV |
+
+Both verbs require an **authenticated** admin listener (`admin.protected: true`). On a listener left
+unauthenticated they return `403` regardless of `trustStore.enabled`: adding a certificate here
+changes what every CAPI instance in the cluster trusts for backend TLS, so it is not something an
+unauthenticated caller may do. Reads (`GET /info/truststore`) are unaffected.
+
+Both `PUT` and `DELETE` write the updated JKS to Consul KV (`capi-trust-store`). Every CAPI instance picks the change up on its next KV poll, which rebuilds the `SSLContext`, the `CapiTrustManager` and the REST/WebSocket/gRPC client handlers — so the change is cluster-wide, not local to the node you called. They require the Consul KV store to be configured; with `trustStore.enabled` off, or no KV store, both return `404`.
+
+`/info/truststore` accepts `GET` and `PUT` only, and `/info/truststore/{alias}` accepts `DELETE` only; anything else returns `405` with an `Allow` header.
 
 ### WebSocket Routes
 

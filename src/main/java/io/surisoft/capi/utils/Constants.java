@@ -103,8 +103,11 @@ public class Constants {
     public static final String ACCESS_CONTROL_ALLOW_METHODS_VALUE = "GET, POST, DELETE, PUT, PATCH";
     public static final String OPTIONS_METHODS_VALUE = "OPTIONS";
     public static final String ACCESS_CONTROL_MAX_AGE_VALUE = "86400";
+    /**
+     * CORS headers that are safe to send to any caller. {@code Access-Control-Allow-Credentials} is
+     * deliberately NOT here: it is emitted per request, only for an allowlisted origin.
+     */
     public static final Map<String, String> CAPI_CORS_MANAGED_HEADERS = Map.of(
-            "Access-Control-Allow-Credentials", "true",
             "Access-Control-Allow-Methods", ACCESS_CONTROL_ALLOW_METHODS_VALUE,
             "Access-Control-Max-Age", ACCESS_CONTROL_MAX_AGE_VALUE
     );

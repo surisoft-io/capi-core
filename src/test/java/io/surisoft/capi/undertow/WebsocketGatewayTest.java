@@ -161,6 +161,8 @@ class WebsocketGatewayTest {
         io.surisoft.capi.configuration.CAPIConfiguration.Websocket wsConfig = new io.surisoft.capi.configuration.CAPIConfiguration.Websocket();
         wsConfig.setContextPath("/ws/*");
         WebsocketUtils realUtils = new WebsocketUtils(wsConfig, null, null);
+        realUtils.setCorsEnabled(true);
+        realUtils.setCorsPolicy(new io.surisoft.capi.utils.CorsPolicy(List.of("http://example.com")));
 
         HttpServerExchange exchange = mock(HttpServerExchange.class);
         HeaderMap responseHeaders = new HeaderMap();
@@ -172,6 +174,26 @@ class WebsocketGatewayTest {
 
         String value = responseHeaders.getFirst(HttpString.tryFromString(Constants.ACCESS_CONTROL_ALLOW_ORIGIN));
         assertEquals("http://example.com", value);
+    }
+
+    @Test
+    void processOrigin_originNotOnAllowlist_doesNotSetHeader() throws Exception {
+        io.surisoft.capi.configuration.CAPIConfiguration.Websocket wsConfig = new io.surisoft.capi.configuration.CAPIConfiguration.Websocket();
+        wsConfig.setContextPath("/ws/*");
+        WebsocketUtils realUtils = new WebsocketUtils(wsConfig, null, null);
+        realUtils.setCorsEnabled(true);
+        realUtils.setCorsPolicy(new io.surisoft.capi.utils.CorsPolicy(List.of("http://example.com")));
+
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        HeaderMap responseHeaders = new HeaderMap();
+        when(exchange.getResponseHeaders()).thenReturn(responseHeaders);
+
+        Method processOrigin = WebsocketUtils.class.getDeclaredMethod("processOrigin", HttpServerExchange.class, String.class);
+        processOrigin.setAccessible(true);
+        // Syntactically valid, but not configured — must not be echoed.
+        processOrigin.invoke(realUtils, exchange, "http://evil.example");
+
+        assertNull(responseHeaders.getFirst(HttpString.tryFromString(Constants.ACCESS_CONTROL_ALLOW_ORIGIN)));
     }
 
     @Test
@@ -220,6 +242,8 @@ class WebsocketGatewayTest {
         io.surisoft.capi.configuration.CAPIConfiguration.Websocket wsConfig = new io.surisoft.capi.configuration.CAPIConfiguration.Websocket();
         wsConfig.setContextPath("/ws/*");
         WebsocketUtils realUtils = new WebsocketUtils(wsConfig, null, null);
+        realUtils.setCorsEnabled(true);
+        realUtils.setCorsPolicy(new io.surisoft.capi.utils.CorsPolicy(List.of("http://example.com")));
 
         HttpServerExchange exchange = mock(HttpServerExchange.class);
         HeaderMap responseHeaders = new HeaderMap();
@@ -229,7 +253,8 @@ class WebsocketGatewayTest {
         processOrigin.setAccessible(true);
         processOrigin.invoke(realUtils, exchange, "http://example.com\n");
 
-        // The newline should be stripped from the header value
+        // The newline is stripped before the allowlist comparison, so the sanitized origin still
+        // matches and the emitted header carries no CR/LF.
         String value = responseHeaders.getFirst(HttpString.tryFromString(Constants.ACCESS_CONTROL_ALLOW_ORIGIN));
         assertNotNull(value);
         assertFalse(value.contains("\n"));
@@ -257,7 +282,7 @@ class WebsocketGatewayTest {
     }
 
     @Test
-    void constructor_managedHeaders_includesCredentialsAndMethods() throws Exception {
+    void constructor_managedHeaders_excludesCredentialsAndIncludesMethods() throws Exception {
         WebsocketGateway gateway = new WebsocketGateway(
                 8080, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
@@ -268,7 +293,8 @@ class WebsocketGatewayTest {
         @SuppressWarnings("unchecked")
         Map<String, String> managedHeaders = (Map<String, String>) managedHeadersField.get(gateway);
 
-        assertTrue(managedHeaders.containsKey("Access-Control-Allow-Credentials"));
+        // Allow-Credentials is emitted per request for an allowlisted origin, never unconditionally.
+        assertFalse(managedHeaders.containsKey("Access-Control-Allow-Credentials"));
         assertTrue(managedHeaders.containsKey("Access-Control-Allow-Methods"));
         assertTrue(managedHeaders.containsKey("Access-Control-Max-Age"));
     }
@@ -470,8 +496,10 @@ class WebsocketGatewayTest {
         io.surisoft.capi.configuration.CAPIConfiguration.Websocket wsConfig = new io.surisoft.capi.configuration.CAPIConfiguration.Websocket();
         wsConfig.setContextPath("/ws/*");
         WebsocketUtils realUtils = new WebsocketUtils(wsConfig, null, null);
-        doAnswer(inv -> { realUtils.handleOptionsRequest(inv.getArgument(0), inv.getArgument(1), inv.getArgument(2), inv.getArgument(3)); return null; })
-                .when(websocketUtils).handleOptionsRequest(any(), any(), any(), any());
+        realUtils.setCorsEnabled(true);
+        realUtils.setCorsPolicy(new io.surisoft.capi.utils.CorsPolicy(List.of("http://example.com")));
+        doAnswer(inv -> { realUtils.handleOptionsRequest(inv.getArgument(0), inv.getArgument(1), inv.getArgument(2), inv.getArgument(3), inv.getArgument(4)); return null; })
+                .when(websocketUtils).handleOptionsRequest(any(), any(), any(), any(), any());
 
         String clientKey = "/test/ws";
         String requestPath = "/capi/test/ws/stream";
@@ -565,8 +593,10 @@ class WebsocketGatewayTest {
         io.surisoft.capi.configuration.CAPIConfiguration.Websocket wsConfig = new io.surisoft.capi.configuration.CAPIConfiguration.Websocket();
         wsConfig.setContextPath("/ws/*");
         WebsocketUtils realUtils = new WebsocketUtils(wsConfig, null, null);
-        doAnswer(inv -> { realUtils.handleOptionsRequest(inv.getArgument(0), inv.getArgument(1), inv.getArgument(2), inv.getArgument(3)); return null; })
-                .when(websocketUtils).handleOptionsRequest(any(), any(), any(), any());
+        realUtils.setCorsEnabled(true);
+        realUtils.setCorsPolicy(new io.surisoft.capi.utils.CorsPolicy(List.of("http://example.com")));
+        doAnswer(inv -> { realUtils.handleOptionsRequest(inv.getArgument(0), inv.getArgument(1), inv.getArgument(2), inv.getArgument(3), inv.getArgument(4)); return null; })
+                .when(websocketUtils).handleOptionsRequest(any(), any(), any(), any(), any());
 
         String clientKey = "/test/ws";
         String requestPath = "/capi/test/ws/stream";

@@ -329,6 +329,59 @@ public class ConsulStore {
         }
     }
 
+    /**
+     * Outcome of a trust store mutation, so the caller can map it to a status code without
+     * parsing an error string.
+     */
+    public enum TrustStoreOutcome { SUCCESS, NOT_FOUND, ERROR }
+
+    public record TrustStoreResult(TrustStoreOutcome outcome, String message) {}
+
+    /**
+     * Removes a certificate from the trust store by alias and pushes the result back to Consul KV.
+     * Blocking (talks to Consul), so callers on an Undertow I/O thread must dispatch first.
+     */
+    public synchronized TrustStoreResult removeCertificate(String alias) {
+        if (alias == null || alias.isBlank()) {
+            return new TrustStoreResult(TrustStoreOutcome.ERROR, "Alias is required");
+        }
+        try {
+            // Load current trust store from Consul; nothing stored means nothing to remove
+            ConsulKeyStoreEntry remote = getRemoteTrustStore();
+            if (remote == null) {
+                return new TrustStoreResult(TrustStoreOutcome.NOT_FOUND, "No trust store found in Consul KV");
+            }
+            KeyStore keyStore = KeyStore.getInstance("JKS");
+            keyStore.load(consulKeyValueToInputStream(remote.getValue()), capiTrustStorePassword.toCharArray());
+
+            if (!keyStore.containsAlias(alias)) {
+                return new TrustStoreResult(TrustStoreOutcome.NOT_FOUND,
+                        "Certificate with alias '" + alias + "' not found in trust store");
+            }
+            keyStore.deleteEntry(alias);
+
+            // Serialize KeyStore to JKS bytes -> Base64 -> push to Consul KV
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            keyStore.store(baos, capiTrustStorePassword.toCharArray());
+            String base64Jks = Base64.getEncoder().encodeToString(baos.toByteArray());
+
+            HttpRequest putRequest = buildConsulPutRequest(base64Jks);
+            HttpResponse<String> response = httpClient.send(putRequest, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200 || !"true".equals(response.body())) {
+                return new TrustStoreResult(TrustStoreOutcome.ERROR,
+                        "Failed to push trust store to Consul KV, status: " + response.statusCode());
+            }
+
+            log.debug("Certificate '{}' removed from trust store and pushed to Consul KV", alias);
+            // The periodic syncTrustStore() will pick up the new ModifyIndex and trigger the SSLContext refresh
+            return new TrustStoreResult(TrustStoreOutcome.SUCCESS,
+                    "Certificate '" + alias + "' removed from trust store");
+        } catch (Exception e) {
+            log.error("Failed to remove certificate '{}': {}", alias, e.getMessage(), e);
+            return new TrustStoreResult(TrustStoreOutcome.ERROR, e.getMessage());
+        }
+    }
+
     private HttpRequest buildConsulPutRequest(String base64Value) {
         URI uri = URI.create(consulKvHost + Constants.CONSUL_KV_STORE_API + Constants.CONSUL_CAPI_TRUST_STORE_GROUP_KEY);
         HttpRequest.Builder builder = HttpRequest.newBuilder()

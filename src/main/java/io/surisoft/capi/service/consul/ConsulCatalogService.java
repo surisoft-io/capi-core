@@ -3,6 +3,7 @@ package io.surisoft.capi.service.consul;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.surisoft.capi.configuration.CAPIConfiguration;
+import jakarta.annotation.Nullable;
 import io.surisoft.capi.processor.ServiceCapiInstanceMapper;
 import io.surisoft.capi.schema.*;
 import io.surisoft.capi.utils.Constants;
@@ -58,6 +59,13 @@ public class ConsulCatalogService {
     private final boolean strictToInstanceName;
     private final String serviceMetaExtrasPrefix; // nullable
     private final Map<String, InvalidService> invalidServiceMap;
+    /**
+     * Spec-identity verdict per service id, rebuilt every cycle and published at
+     * {@code /info/spec-compliance}. Populated whether or not enforcement is on: the point is to be
+     * able to measure an estate before flipping the switch.
+     */
+    private final Map<String, SpecCompliance> specCompliance = new ConcurrentHashMap<>();
+    private CAPIConfiguration.MatchOpenApiSpec matchOpenApiSpec = new CAPIConfiguration.MatchOpenApiSpec();
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private volatile HttpClient httpClient;
@@ -158,6 +166,19 @@ public class ConsulCatalogService {
             // Drop mismatch state for services that no longer exist, so a deregistered service
             // does not keep a backoff entry alive forever.
             versionMismatches.keySet().retainAll(incoming.keySet());
+            // Keep the compliance report in step with what exists, and mark the services the rule
+            // cannot apply to. Services carrying a spec get their verdict from the fetch below;
+            // one whose spec is cached and unchanged keeps the verdict already recorded, which is
+            // still correct because an unchanged spec cannot change verdict.
+            specCompliance.keySet().retainAll(incoming.keySet());
+            for (Service svc : incoming.values()) {
+                if (!serviceUtils.serviceHasOpenApiEndpoint(svc)) {
+                    specCompliance.put(svc.getId(), new SpecCompliance(
+                            svc.getId(), svc.getName(),
+                            svc.getServiceMeta() != null ? svc.getServiceMeta().getGroup() : null,
+                            Verdict.NOT_APPLICABLE, null, Instant.now()));
+                }
+            }
 
             // Reconcile FIRST to identify what's actually new or changed. The old
             // ConsulNodeDiscovery did this — fetching OpenAPI for every service every
@@ -391,6 +412,70 @@ public class ConsulCatalogService {
     // -------------------------------------------------------------------------
     // Build Service objects (per Q6: ID always "<name>:<group>")
     // -------------------------------------------------------------------------
+
+    /** Where a service stands against the spec-identity rule. */
+    public enum Verdict {
+        /** info.title identifies the service and info.version is set. */
+        COMPLIANT,
+        /** Mismatch — blocked once {@code matchOpenApiSpec.enabled} is true. */
+        NON_COMPLIANT,
+        /** Mismatch, but named in {@code matchOpenApiSpec.exempt}, so it keeps routing. */
+        EXEMPT,
+        /** No {@code open-api} meta, so the rule does not apply. */
+        NOT_APPLICABLE
+    }
+
+    public record SpecCompliance(String serviceId, String serviceName, String group, Verdict verdict,
+                                 String detail, Instant evaluatedAt) {}
+
+    public void setMatchOpenApiSpec(@Nullable CAPIConfiguration.MatchOpenApiSpec matchOpenApiSpec) {
+        this.matchOpenApiSpec = matchOpenApiSpec != null ? matchOpenApiSpec : new CAPIConfiguration.MatchOpenApiSpec();
+    }
+
+    public Map<String, SpecCompliance> getSpecCompliance() {
+        return specCompliance;
+    }
+
+    private boolean isExempt(Service service) {
+        List<String> exempt = matchOpenApiSpec.getExempt();
+        return exempt != null && exempt.contains(service.getName());
+    }
+
+    /**
+     * Records the spec-identity verdict for one service.
+     *
+     * @return true when the service must be held back from routing — only ever the case when
+     *         enforcement is on and the service is neither compliant nor exempt
+     */
+    private boolean recordSpecCompliance(Service service, String mismatch) {
+        String group = service.getServiceMeta() != null ? service.getServiceMeta().getGroup() : null;
+        if (mismatch == null) {
+            specCompliance.put(service.getId(), new SpecCompliance(
+                    service.getId(), service.getName(), group, Verdict.COMPLIANT, null, Instant.now()));
+            return false;
+        }
+        if (isExempt(service)) {
+            specCompliance.put(service.getId(), new SpecCompliance(
+                    service.getId(), service.getName(), group, Verdict.EXEMPT, mismatch, Instant.now()));
+            return false;
+        }
+        specCompliance.put(service.getId(), new SpecCompliance(
+                service.getId(), service.getName(), group, Verdict.NON_COMPLIANT, mismatch, Instant.now()));
+        if (!matchOpenApiSpec.isEnabled()) {
+            // Report-only. Deliberately silent: a four-year-old deployment must not start emitting
+            // warnings because the report was switched on.
+            return false;
+        }
+        invalidServiceMap.put(service.getId(), new InvalidService(
+                service.getId(),
+                group,
+                service.getServiceMeta() != null ? service.getServiceMeta().getOpenApiEndpoint() : null,
+                InvalidService.Reason.OPENAPI_IDENTITY_MISMATCH,
+                mismatch,
+                Instant.now()));
+        log.warn("Service {} blocked by matchOpenApiSpec: {}", service.getId(), mismatch);
+        return true;
+    }
 
     private Map<String, Service> buildServices(Map<String, List<ConsulObject>> perService) {
         Map<String, Service> result = new HashMap<>();
@@ -669,6 +754,11 @@ public class ConsulCatalogService {
                         failed.add(e.getKey().getId());
                     } else {
                         versionMismatches.remove(e.getKey().getId());
+                        // ...and does it identify this service? Always evaluated; only blocks when
+                        // matchOpenApiSpec is enabled.
+                        if (recordSpecCompliance(e.getKey(), serviceUtils.openApiIdentityMismatch(e.getKey()))) {
+                            failed.add(e.getKey().getId());
+                        }
                     }
                 }
             } catch (Exception ex) {

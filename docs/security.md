@@ -63,13 +63,24 @@ OPA provides fine-grained, policy-based authorization. CAPI sends request contex
 capi:
   opa:
     enabled: true
-    endpoint: http://opa:8181
+    wasmBundleUrl: http://opa-bundle-server/bundle.tar.gz
+    wasmBundleToken:               # optional; sent as Authorization: Bearer <token>
+    wasmBundlePollIntervalSeconds: 60
+    wasmPoolSize: 10
 ```
 
-| Field | Description |
-|-------|-------------|
-| `enabled` | Enable OPA authorization globally. |
-| `endpoint` | OPA server endpoint. |
+| Field | Default | Description |
+|-------|---------|-------------|
+| `enabled` | `false` | Enable OPA authorization globally. |
+| `wasmBundleUrl` | — | URL of the `.tar.gz` Wasm bundle. Re-fetched on ETag change. |
+| `wasmBundleToken` | — | Optional bearer token for the bundle server. |
+| `wasmBundlePollIntervalSeconds` | `60` | How often the bundle is polled. |
+| `wasmPoolSize` | `10` | Size of the shared policy-instance pool. |
+
+> **There is no `endpoint` key and no HTTP OPA mode.** Earlier revisions of this page documented
+> `opa.endpoint: http://opa:8181` and an "OPA HTTP fallback". Neither exists: CAPI evaluates Rego
+> compiled to WebAssembly, in-process, only. Setting `endpoint` makes CAPI **fail to start** —
+> unknown configuration properties are rejected, not ignored.
 
 ### Per-Service Policies
 
@@ -92,7 +103,9 @@ curl -X PUT http://localhost:8500/v1/agent/service/register \
   }'
 ```
 
-CAPI queries OPA at `http://opa:8181/v1/data/capi/order_policy` with the request context.
+CAPI evaluates the `capi/order_policy` entrypoint from the loaded Wasm bundle. The bundle must
+declare an entrypoint at `<opa-rego>/allow`; a service naming a policy the bundle does not declare is
+rejected with `403 Unknown policy`.
 
 ### OPA Input
 
@@ -131,27 +144,28 @@ allow {
 
 This policy allows all GET requests but restricts POST to users with the `admin` role.
 
-### OPA Wasm vs OPA HTTP
+### Evaluation model
 
-CAPI supports two OPA evaluation modes:
+Rego is compiled to WebAssembly and evaluated **in-process**, on the XNIO I/O thread: sub-millisecond,
+no network call, no thread dispatch. This keeps the whole request path — accept to proxy handoff —
+free of blocking I/O, matching every other pre-proxy check (JWT validation, API key lookup, throttle
+counters).
 
-| Mode | How it works | Threading impact |
-|---|---|---|
-| **OPA Wasm** (recommended) | Rego policies compiled to WebAssembly and evaluated in-process | Runs on the I/O thread — sub-millisecond, no network call, no thread dispatch |
-| **OPA HTTP** (fallback) | Sends request context to an external OPA server via HTTP | Requires async dispatch off the I/O thread — adds latency and a thread hop |
-
-OPA Wasm is strongly recommended for production deployments. It keeps the entire request path (from connection accept to proxy handoff) on the XNIO I/O thread with zero blocking I/O, matching the threading model of all other pre-proxy checks (JWT validation, API key lookup, throttle counters). OPA HTTP introduces the only external network dependency in the pre-proxy pipeline, which adds a failure mode (OPA server down, network timeout, connection pool exhaustion) that does not exist with Wasm.
-
-To use OPA Wasm, compile your Rego policies to `.wasm` bundles and serve them via an OPA bundle server. Services declare their Wasm policy via the `opa-rego` metadata key as usual — CAPI automatically uses Wasm evaluation when a compiled policy is available.
+Compile your Rego to a `.wasm` bundle and serve it from a bundle server; point `wasmBundleUrl` at it.
+Services then name their policy with the `opa-rego` metadata key. Instances are drawn from one shared
+pool (`wasmPoolSize`) that grows under load and self-heals if an evaluation fails.
 
 ### Authorization Flow
 
 1. Client sends a request with a Bearer token
-2. CAPI validates the JWT (OAuth2)
-3. CAPI sends the request context to OPA (Wasm in-process or HTTP to external server)
-4. OPA evaluates the Rego policy and returns `{ "result": { "allow": true/false } }`
-5. If allowed, the request is proxied
-6. If denied, CAPI returns `403 Forbidden`
+2. CAPI extracts the token — **no token is `403`**, the OPA path does not skip authentication
+3. If the policy engine has no bundle loaded yet, CAPI returns **`503` with `Retry-After: 1`**
+   rather than falling back to a weaker check
+4. A service naming a policy the bundle does not declare is rejected with **`403 Unknown policy`**
+5. CAPI **verifies the JWT signature** before trusting any decoded claim, and returns `403 Invalid
+   token signature` if it does not verify
+6. The policy is evaluated in-process and returns allow/deny
+7. Allowed requests are proxied; denied requests get **`403 Access denied by policy`**
 
 ## SSL / TLS
 
@@ -195,13 +209,56 @@ Inspect the loaded certificates via the Admin API:
 curl http://localhost:8381/info/truststore
 ```
 
+When the truststore is backed by Consul KV you can also add and remove certificates at runtime — `PUT /info/truststore` with a PEM body, and `DELETE /info/truststore/{alias}`. See [Admin API — Truststore](admin-api.md#truststore).
+
+## Path handling
+
+CAPI binds the authorization decision to the service prefix in the path (`/api/<service>/<group>`),
+then strips that prefix and forwards the remainder to the backend. A `.` or `..` **segment** in the
+remainder can therefore escape the `root-context` the service was registered with, while the request
+has already been authorized as that service.
+
+```yaml
+capi:
+  rest:
+    rejectDotSegments: false   # true = refuse such paths with 400
+```
+
+- Only a **whole segment** equal to `.` or `..` is refused. Ordinary paths containing dots —
+  `/range/1..10`, `/files/report..pdf`, `/a..b`, `/v1.2.3/x`, `/.hidden` — are unaffected. A
+  substring test would reject all of those, which is why the check is segment-wise.
+- Percent-encoded forms are covered by the same rule: Undertow decodes `%2e%2e`, `%2E%2E` and mixed
+  `.%2e` into `..` before any handler runs. Double-encoded `%252e%252e` arrives as the literal
+  segment `%2e%2e` and is not treated as a dot-segment — reaching `..` from there requires a backend
+  that percent-decodes twice, which is a defect in that backend.
+- **Off by default**, because refusing a request an existing deployment forwards today is a behaviour
+  change. While off, such requests are forwarded unchanged and only counted:
+
+  ```
+  capi_dot_segment_requests_total{service="...",action="observed"}
+  ```
+
+  Watch that stay at zero on real traffic, then set `rejectDotSegments: true` and the same paths
+  return `400` (counted with `action="rejected"`). The check runs before any authorization decision.
+
+> **Encoded slashes (`%2F`) are not currently rejected.** Undertow does not decode them, so
+> `/foo%2F..%2F..%2Fadmin` reaches the backend intact and is treated as a single path segment by the
+> OpenAPI operation gate. A backend that decodes `%2F` will see a different path from the one CAPI
+> validated. Tomcat and Spring reject encoded slashes by default; if yours does not, treat this as an
+> open item.
+
 ## CORS
 
-CAPI supports CORS header management for browser-based clients:
+CORS is controlled by two keys. `corsEnabled` is the **master switch**: while it is false CAPI sends
+no CORS header at all, and both `allowedOrigins` and any per-service `allowed-origins` metadata are
+ignored. With it true, **an origin must be allowlisted to receive any CORS header** — an empty list
+denies every origin:
 
 ```yaml
 capi:
   corsEnabled: true
+  allowedOrigins:
+    - https://app.example.com
   allowedHeaders:
     - Origin
     - Accept
@@ -211,9 +268,41 @@ capi:
     - Authorization
 ```
 
-When enabled, CAPI automatically sets:
+With `corsEnabled: true` and the request's `Origin` on the allowlist, CAPI sets:
+- `Access-Control-Allow-Origin: <that origin>`
 - `Access-Control-Allow-Credentials: true`
+- `Vary: Origin`
+
+And on a preflight, regardless of origin:
 - `Access-Control-Allow-Methods: GET, POST, DELETE, PUT, PATCH`
 - `Access-Control-Max-Age: 86400`
 
-Per-service origin restrictions can be set via the `allowed-origins` metadata key in Consul.
+With `allowedOrigins: ["*"]`, `Access-Control-Allow-Origin: *` is sent and
+`Access-Control-Allow-Credentials` is **never** sent — the pair is invalid per the Fetch standard,
+so cookie-authenticated browser clients need their origin listed explicitly.
+
+`corsEnabled: false` was previously **reporting-only** — it appeared in `/info/capi` but gated
+nothing, so a config reading `corsEnabled: false` could still serve CORS headers. It is now enforced.
+
+### Per-service origins (preferred)
+
+CORS origins belong to whoever owns the service, so they travel with the Consul registration:
+
+```json
+{ "Meta": { "allowed-origins": "https://team-a-app.example,https://team-a-admin.example" } }
+```
+
+- A service that declares `allowed-origins` uses **exactly that list** — it replaces the gateway
+  default rather than adding to it.
+- A service that declares nothing **inherits** `capi.allowedOrigins`.
+- One service's origins never apply to another, so listing an origin for your service does not grant
+  it access to anyone else's.
+- Requires `capi.corsEnabled: true`; the master switch overrides per-service origins.
+- Changing the list is a re-registration, not a CAPI redeploy — but remember CAPI only picks up
+  changed metadata when the `version` meta is bumped (see `capi-service-discovery`).
+
+Use `capi.allowedOrigins` for an origin that genuinely spans the whole gateway, such as a shared
+developer portal, and the ServiceMeta key for everything else.
+
+> **Note:** `allowed-origins` was present in `ServiceMeta` but read by nothing until 2026-09-25 —
+> registrations that set it had no effect before then.

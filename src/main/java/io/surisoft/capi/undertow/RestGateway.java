@@ -18,6 +18,7 @@ import io.surisoft.capi.schema.ServiceMeta;
 import io.surisoft.capi.service.OpaWasmService;
 import io.surisoft.capi.service.RestClientSnapshot;
 import io.surisoft.capi.tracer.CapiTracer;
+import io.surisoft.capi.utils.CorsPolicy;
 import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.HttpUtils;
 import io.surisoft.capi.utils.WebsocketUtils;
@@ -40,6 +41,7 @@ import static net.logstash.logback.argument.StructuredArguments.v;
 import javax.net.ssl.SSLContext;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
@@ -68,6 +70,12 @@ public class RestGateway {
     private CapiTracer capiTracer;
     @Nullable
     private WebsocketUtils websocketUtils;
+    private CorsPolicy corsPolicy = CorsPolicy.denyAll();
+    private boolean corsEnabled;
+    private boolean rejectDotSegments;
+    /** Methods that may appear verbatim as a metric tag value. See {@link #metricMethod}. */
+    private static final Set<String> METRIC_METHODS =
+            Set.of("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE");
     @Nullable
     private String reverseProxyHost;
     @Nullable
@@ -144,6 +152,32 @@ public class RestGateway {
 
     public void setWebsocketUtils(@Nullable WebsocketUtils websocketUtils) {
         this.websocketUtils = websocketUtils;
+    }
+
+    /** Origins allowed to receive CORS headers. Defaults to denying every origin. */
+    public void setCorsPolicy(@Nullable CorsPolicy corsPolicy) {
+        this.corsPolicy = corsPolicy != null ? corsPolicy : CorsPolicy.denyAll();
+    }
+
+    /**
+     * Master switch ({@code capi.corsEnabled}). Off means no CORS header leaves this gateway, no
+     * matter what {@code capi.allowedOrigins} or an individual service's {@code allowed-origins}
+     * say — so an operator has one line to read, and one to flip in an incident.
+     */
+    public void setCorsEnabled(boolean corsEnabled) {
+        this.corsEnabled = corsEnabled;
+    }
+
+    /**
+     * Whether a dot-segment path is refused with 400 ({@code capi.rest.rejectDotSegments}).
+     *
+     * <p>Off by default: rejecting a request that a four-year-old deployment currently forwards is a
+     * behaviour change, so the guard first only counts what it sees, via
+     * {@code capi_dot_segment_requests_total{action="observed"}}. Watch that stay at zero on real
+     * traffic, then turn it on.
+     */
+    public void setRejectDotSegments(boolean rejectDotSegments) {
+        this.rejectDotSegments = rejectDotSegments;
     }
 
     public void setReverseProxyHost(@Nullable String reverseProxyHost) {
@@ -228,8 +262,15 @@ public class RestGateway {
                 }
             });
 
+            // Resolve the route before emitting CORS: the origins allowed for a service come from
+            // that service's own registration, so without knowing the route there is no policy to
+            // apply. Reused for the routing decision below — this is a map lookup, not a second one.
+            String restClientId = extractServiceId(requestPath);
+            Map<String, RestClient> activeRoutes = restClientSnapshot.current();
+            RestClient routedClient = (restClientId == null) ? null : activeRoutes.get(restClientId);
+
             // Add CORS headers to all responses (not just OPTIONS)
-            addCorsHeaders(exchange);
+            addCorsHeaders(exchange, effectiveCorsPolicy(routedClient));
 
             // No aviao - needs review
             /* We want to provide a way for CAPI to set a cookie for human/browser legit request
@@ -255,7 +296,7 @@ public class RestGateway {
 
             // OPTIONS handling for CORS
             if (exchange.getRequestMethod().equals(HttpString.tryFromString(Constants.OPTIONS_METHODS_VALUE))) {
-                handleOptions(exchange);
+                handleOptions(exchange, effectiveCorsPolicy(routedClient));
                 return;
             }
 
@@ -271,10 +312,8 @@ public class RestGateway {
                 return;
             }
 
-            // Parse service ID from path: /api/serviceName/group/...
-            String restClientId = extractServiceId(requestPath);
-            Map<String, RestClient> activeRoutes = restClientSnapshot.current();
-            RestClient restClient = (restClientId == null) ? null : activeRoutes.get(restClientId);
+            // Parse service ID from path: /api/serviceName/group/... (resolved above for CORS)
+            RestClient restClient = routedClient;
             if (restClient == null) {
                 httpErrorHandler.sendError(exchange, 404, "The requested route was not found, please try again later on.", contextPath);
                 return;
@@ -286,9 +325,10 @@ public class RestGateway {
                 exchange.addExchangeCompleteListener((ex, nextListener) -> {
                     try {
                         String statusGroup = (ex.getStatusCode() / 100) + "xx";
+                        String metricMethod = metricMethod(ex);
                         Counter.builder("capi_requests_total")
                                 .tag("service", metricServiceId)
-                                .tag("method", ex.getRequestMethod().toString())
+                                .tag("method", metricMethod)
                                 .tag("status", String.valueOf(ex.getStatusCode()))
                                 .tag("status_group", statusGroup)
                                 .register(meterRegistry)
@@ -296,7 +336,7 @@ public class RestGateway {
                         long durationNanos = System.nanoTime() - startNanos;
                         Timer.builder("capi_request_duration")
                                 .tag("service", metricServiceId)
-                                .tag("method", ex.getRequestMethod().toString())
+                                .tag("method", metricMethod)
                                 .register(meterRegistry)
                                 .record(durationNanos, TimeUnit.NANOSECONDS);
                     } finally {
@@ -315,6 +355,28 @@ public class RestGateway {
                 String prefix = (contextPath != null ? contextPath : "") + restClient.getServiceId();
                 exchange.putAttachment(CAPIProxyHandler.REVERSE_PROXY_HOST, reverseProxyHost);
                 exchange.putAttachment(CAPIProxyHandler.REVERSE_PROXY_PREFIX, prefix);
+            }
+
+            // Dot-segment guard. Must run before any authorization decision: the auth verdict is
+            // keyed on the service prefix, and a `..` that survives lets the forwarded path escape
+            // the root-context that prefix was meant to confine it to.
+            if (containsDotSegment(requestPath)) {
+                String svc = httpUtils.contextToRole(restClient.getServiceId());
+                if (meterRegistry != null) {
+                    Counter.builder("capi_dot_segment_requests_total")
+                            .tag("service", svc)
+                            .tag("action", rejectDotSegments ? "rejected" : "observed")
+                            .register(meterRegistry)
+                            .increment();
+                }
+                if (rejectDotSegments) {
+                    log.warn("Rejected dot-segment path for {}: {}", svc, requestPath);
+                    httpErrorHandler.sendError(exchange, 400, "Malformed path", contextPath);
+                    return;
+                }
+                // Observe-only: counted and logged at debug, forwarded exactly as before, so the
+                // metric can be watched on real traffic before the switch is turned on.
+                log.debug("Dot-segment path observed for {} (not rejected): {}", svc, requestPath);
             }
 
             // Set attachments early for error handler (before auth checks may reject)
@@ -442,6 +504,43 @@ public class RestGateway {
     private void proxyWithTracing(HttpServerExchange exchange, RestClient restClient, String requestPath) throws Exception {
         // Tracing and attachments already set before auth checks
         restClient.getHttpHandler().handleRequest(exchange);
+    }
+
+    /**
+     * Whether any path segment is a dot-segment ({@code .} or {@code ..}).
+     *
+     * <p>Segment-wise on purpose. A substring test for {@code ".."} rejects perfectly ordinary paths
+     * — {@code /range/1..10}, {@code /files/report..pdf}, {@code /a..b}, {@code /...} — none of which
+     * is a dot-segment under RFC 3986. Only an entire segment equal to {@code .} or {@code ..} can
+     * move the path up a level, and only that is refused.
+     *
+     * <p>Reads the <em>decoded</em> path, which is what makes this one rule enough: Undertow decodes
+     * {@code %2e%2e}, {@code %2E%2E} and mixed {@code .%2e} into {@code ..} before a handler sees it,
+     * so no encoding table is needed here. Double-encoded {@code %252e%252e} arrives as the literal
+     * segment {@code %2e%2e} and is not treated as a dot-segment — reaching {@code ..} from there
+     * needs a backend that percent-decodes twice, which is a bug in that backend.
+     */
+    static boolean containsDotSegment(String path) {
+        if (path == null || path.indexOf('.') < 0) {
+            return false;   // fast path: the overwhelming majority of requests
+        }
+        int start = 0;
+        while (start <= path.length()) {
+            int slash = path.indexOf('/', start);
+            int end = (slash < 0) ? path.length() : slash;
+            int len = end - start;
+            if (len == 1 && path.charAt(start) == '.') {
+                return true;
+            }
+            if (len == 2 && path.charAt(start) == '.' && path.charAt(start + 1) == '.') {
+                return true;
+            }
+            if (slash < 0) {
+                return false;
+            }
+            start = slash + 1;
+        }
+        return false;
     }
 
     /**
@@ -670,9 +769,9 @@ public class RestGateway {
         }
     }
 
-    private void handleOptions(HttpServerExchange exchange) {
+    private void handleOptions(HttpServerExchange exchange, CorsPolicy requestPolicy) {
         if (websocketUtils != null) {
-            websocketUtils.handleOptionsRequest(exchange, accessControlAllowHeaders, managedHeaders, oauth2CookieName);
+            websocketUtils.handleOptionsRequest(exchange, accessControlAllowHeaders, managedHeaders, oauth2CookieName, requestPolicy);
         } else {
             exchange.setStatusCode(HttpServletResponse.SC_ACCEPTED);
             exchange.endExchange();
@@ -690,16 +789,63 @@ public class RestGateway {
         return accept != null && accept.getFirst().equalsIgnoreCase("text/event-stream");
     }
 
-    private void addCorsHeaders(HttpServerExchange exchange) {
+    /**
+     * CORS headers for an allowlisted origin only. An origin that is not configured gets no CORS
+     * header at all, so a browser refuses to hand the response to the calling page. Reflecting the
+     * caller's origin with {@code Allow-Credentials: true}, as this did before, let any site read
+     * authenticated responses.
+     */
+    /**
+     * The HTTP method as a metric tag, collapsed to {@code OTHER} for anything unrecognised.
+     * Undertow accepts arbitrary method tokens, and Micrometer keeps one time series per distinct
+     * tag value for the life of the process, so tagging with the raw method let an unauthenticated
+     * caller grow the registry without bound.
+     */
+    private static String metricMethod(HttpServerExchange exchange) {
+        String method = exchange.getRequestMethod().toString();
+        return METRIC_METHODS.contains(method) ? method : "OTHER";
+    }
+
+    /**
+     * The route's own origins when it registered any, otherwise the gateway-wide default. A service
+     * owner publishing {@code allowed-origins} in Consul therefore controls CORS for their service
+     * alone, without the operator editing CAPI's config and without granting that origin access to
+     * every other service on the gateway.
+     */
+    private CorsPolicy effectiveCorsPolicy(@Nullable RestClient restClient) {
+        if (!corsEnabled) {
+            return CorsPolicy.denyAll();
+        }
+        if (restClient != null && restClient.getCorsPolicy() != null) {
+            return restClient.getCorsPolicy();
+        }
+        return corsPolicy;
+    }
+
+    private void addCorsHeaders(HttpServerExchange exchange, CorsPolicy corsPolicy) {
+        if (corsPolicy.isDenyAll()) {
+            return;
+        }
         HeaderValues originHeader = exchange.getRequestHeaders().get("Origin");
-        if (originHeader != null && !originHeader.isEmpty()) {
-            String raw = originHeader.getFirst();
-            // Strip CR/LF (CRLF-injection defense). Almost every Origin header is
-            // already clean, so short-circuit before allocating.
-            String origin = (raw.indexOf('\n') < 0 && raw.indexOf('\r') < 0)
-                    ? raw
-                    : raw.replace("\r", "").replace("\n", "");
-            exchange.getResponseHeaders().put(HttpString.tryFromString(Constants.ACCESS_CONTROL_ALLOW_ORIGIN), origin);
+        if (originHeader == null || originHeader.isEmpty()) {
+            return;
+        }
+        String raw = originHeader.getFirst();
+        // Strip CR/LF (CRLF-injection defense). Almost every Origin header is
+        // already clean, so short-circuit before allocating.
+        String origin = (raw == null || (raw.indexOf('\n') < 0 && raw.indexOf('\r') < 0))
+                ? raw
+                : raw.replace("\r", "").replace("\n", "");
+
+        String allowOrigin = corsPolicy.resolveAllowOrigin(origin);
+        if (allowOrigin == null) {
+            return;
+        }
+        // The response varies by Origin, so a shared cache must not serve one origin's response
+        // to another.
+        exchange.getResponseHeaders().put(Headers.VARY, "Origin");
+        exchange.getResponseHeaders().put(HttpString.tryFromString(Constants.ACCESS_CONTROL_ALLOW_ORIGIN), allowOrigin);
+        if (corsPolicy.allowsCredentials(origin)) {
             exchange.getResponseHeaders().put(HttpString.tryFromString(Constants.ACCESS_CONTROL_ALLOW_CREDENTIALS), "true");
         }
     }

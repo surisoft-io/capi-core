@@ -54,14 +54,16 @@ class AdminGatewayTest {
     private SSLContext sslContext;
     @Mock
     private CapiTrustManager capiTrustManager;
+    @Mock
+    private io.surisoft.capi.utils.HttpUtils httpUtils;
 
     private AdminGateway adminGateway;
     private AdminGateway adminGatewayNoSsl;
 
     @BeforeEach
     void setUp() {
-        adminGateway = new AdminGateway(9090, prometheusRegistry, capiConfiguration, serviceCache, sslContext, capiTrustManager, new java.util.HashMap<>());
-        adminGatewayNoSsl = new AdminGateway(9091, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>());
+        adminGateway = new AdminGateway(9090, prometheusRegistry, capiConfiguration, serviceCache, sslContext, capiTrustManager, new java.util.HashMap<>(), false, null, null);
+        adminGatewayNoSsl = new AdminGateway(9091, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null);
     }
 
     @Test
@@ -166,6 +168,8 @@ class AdminGatewayTest {
                 s.contains("/info/openapi/{serviceId}") &&
                 s.contains("/info/truststore") &&
                 s.contains("/info/wsroutes") &&
+                s.contains("/info/invalid-services") &&
+                s.contains("/info/spec-compliance") &&
                 s.contains("http://localhost:9091")
         ));
         assertEquals("application/json", headerMap.getFirst(Headers.CONTENT_TYPE));
@@ -237,7 +241,7 @@ class AdminGatewayTest {
         ObjectMapper brokenMapper = mock(ObjectMapper.class);
         when(brokenMapper.writeValueAsString(any())).thenThrow(new com.fasterxml.jackson.core.JsonProcessingException("fail") {});
 
-        AdminGateway gw = new AdminGateway(9093, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>());
+        AdminGateway gw = new AdminGateway(9093, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null);
         Field omField = AdminGateway.class.getDeclaredField("objectMapper");
         omField.setAccessible(true);
         omField.set(gw, brokenMapper);
@@ -261,7 +265,7 @@ class AdminGatewayTest {
         ObjectMapper brokenMapper = mock(ObjectMapper.class);
         when(brokenMapper.writeValueAsString(any())).thenThrow(new com.fasterxml.jackson.core.JsonProcessingException("fail") {});
 
-        AdminGateway gw = new AdminGateway(9094, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>());
+        AdminGateway gw = new AdminGateway(9094, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null);
         Field omField = AdminGateway.class.getDeclaredField("objectMapper");
         omField.setAccessible(true);
         omField.set(gw, brokenMapper);
@@ -283,7 +287,7 @@ class AdminGatewayTest {
         ObjectMapper brokenMapper = mock(ObjectMapper.class);
         when(brokenMapper.writeValueAsString(any())).thenThrow(new com.fasterxml.jackson.core.JsonProcessingException("fail") {});
 
-        AdminGateway gw = new AdminGateway(9095, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>());
+        AdminGateway gw = new AdminGateway(9095, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null);
         Field omField = AdminGateway.class.getDeclaredField("objectMapper");
         omField.setAccessible(true);
         omField.set(gw, brokenMapper);
@@ -305,7 +309,7 @@ class AdminGatewayTest {
         ObjectMapper brokenMapper = mock(ObjectMapper.class);
         when(brokenMapper.writeValueAsString(any())).thenThrow(new com.fasterxml.jackson.core.JsonProcessingException("fail") {});
 
-        AdminGateway gw = new AdminGateway(9096, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>());
+        AdminGateway gw = new AdminGateway(9096, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null);
         Field omField = AdminGateway.class.getDeclaredField("objectMapper");
         omField.setAccessible(true);
         omField.set(gw, brokenMapper);
@@ -319,6 +323,7 @@ class AdminGatewayTest {
         when(capiTrustManager.getKeyStore()).thenReturn(keyStore);
 
         HttpServerExchange exchange = mock(HttpServerExchange.class);
+        when(exchange.getRequestMethod()).thenReturn(new HttpString("GET"));
         HeaderMap headerMap = new HeaderMap();
         when(exchange.getResponseHeaders()).thenReturn(headerMap);
 
@@ -334,7 +339,7 @@ class AdminGatewayTest {
         ObjectMapper brokenMapper = mock(ObjectMapper.class);
         when(brokenMapper.writeValueAsString(any())).thenThrow(new com.fasterxml.jackson.core.JsonProcessingException("fail") {});
 
-        AdminGateway gw = new AdminGateway(9097, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>());
+        AdminGateway gw = new AdminGateway(9097, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null);
         Field omField = AdminGateway.class.getDeclaredField("objectMapper");
         omField.setAccessible(true);
         omField.set(gw, brokenMapper);
@@ -619,7 +624,7 @@ class AdminGatewayTest {
         when(capiConfiguration.getTrustStore()).thenReturn(trustStoreConfig);
 
         // Create an AdminGateway with null capiTrustManager
-        AdminGateway gatewayNoTrustManager = new AdminGateway(9092, prometheusRegistry, capiConfiguration, serviceCache, null, null, new java.util.HashMap<>());
+        AdminGateway gatewayNoTrustManager = new AdminGateway(9092, prometheusRegistry, capiConfiguration, serviceCache, null, null, new java.util.HashMap<>(), false, null, null);
 
         HttpServerExchange exchange = mock(HttpServerExchange.class);
         when(exchange.getRequestMethod()).thenReturn(new HttpString("GET"));
@@ -754,7 +759,7 @@ class AdminGatewayTest {
         connectedField.setAccessible(true);
         connectedField.set(null, true);
 
-        try (AdminGateway gw = new AdminGateway(19100, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>())) {
+        try (AdminGateway gw = new AdminGateway(19100, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -775,7 +780,7 @@ class AdminGatewayTest {
         connectedField.setAccessible(true);
         connectedField.set(null, false);
 
-        try (AdminGateway gw = new AdminGateway(19113, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>())) {
+        try (AdminGateway gw = new AdminGateway(19113, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -794,7 +799,7 @@ class AdminGatewayTest {
     void start_withoutSsl_metricsEndpoint() throws Exception {
         when(prometheusRegistry.scrape()).thenReturn("# HELP test_metric\n# TYPE test_metric counter\ntest_metric 42");
 
-        try (AdminGateway gw = new AdminGateway(19101, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>())) {
+        try (AdminGateway gw = new AdminGateway(19101, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -811,7 +816,7 @@ class AdminGatewayTest {
 
     @Test
     void start_withoutSsl_routesEndpoint() throws Exception {
-        try (AdminGateway gw = new AdminGateway(19102, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>())) {
+        try (AdminGateway gw = new AdminGateway(19102, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -832,7 +837,7 @@ class AdminGatewayTest {
         when(capiConfiguration.getVersion()).thenReturn("2.0");
         when(capiConfiguration.getInstanceName()).thenReturn("my-instance");
 
-        try (AdminGateway gw = new AdminGateway(19103, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>())) {
+        try (AdminGateway gw = new AdminGateway(19103, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -853,7 +858,7 @@ class AdminGatewayTest {
         connectedField.setAccessible(true);
         connectedField.set(null, true);
 
-        AdminGateway gw = new AdminGateway(19104, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>());
+        AdminGateway gw = new AdminGateway(19104, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null);
         gw.start();
 
         // Verify the server is running
@@ -884,7 +889,7 @@ class AdminGatewayTest {
 
     @Test
     void stop_afterStart_canBeCalledMultipleTimes() throws Exception {
-        AdminGateway gw = new AdminGateway(19105, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>());
+        AdminGateway gw = new AdminGateway(19105, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null);
         gw.start();
         gw.stop();
         // Second stop should not throw
@@ -901,7 +906,7 @@ class AdminGatewayTest {
         keyStore.load(null, null);
         when(capiTrustManager.getKeyStore()).thenReturn(keyStore);
 
-        try (AdminGateway gw = new AdminGateway(19106, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>())) {
+        try (AdminGateway gw = new AdminGateway(19106, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -921,7 +926,7 @@ class AdminGatewayTest {
         trustStoreConfig.setEnabled(false);
         when(capiConfiguration.getTrustStore()).thenReturn(trustStoreConfig);
 
-        try (AdminGateway gw = new AdminGateway(19107, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>())) {
+        try (AdminGateway gw = new AdminGateway(19107, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -941,7 +946,7 @@ class AdminGatewayTest {
         wsConfig.setEnabled(false);
         when(capiConfiguration.getWebsocket()).thenReturn(wsConfig);
 
-        try (AdminGateway gw = new AdminGateway(19108, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>())) {
+        try (AdminGateway gw = new AdminGateway(19108, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -966,7 +971,7 @@ class AdminGatewayTest {
         client.setServiceId("ws-test");
         clients.put("/ws/test", client);
 
-        try (AdminGateway gw = new AdminGateway(19109, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>())) {
+        try (AdminGateway gw = new AdminGateway(19109, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null)) {
             gw.setWebsocketClients(clients);
             gw.start();
 
@@ -985,7 +990,7 @@ class AdminGatewayTest {
     void start_withoutSsl_routeByIdEndpoint_serviceNotFoundReturns404() throws Exception {
         when(serviceCache.containsKey("nonexistent")).thenReturn(false);
 
-        try (AdminGateway gw = new AdminGateway(19110, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>())) {
+        try (AdminGateway gw = new AdminGateway(19110, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -1007,7 +1012,7 @@ class AdminGatewayTest {
         when(serviceCache.containsKey("my-svc")).thenReturn(true);
         when(serviceCache.get("my-svc")).thenReturn(service);
 
-        try (AdminGateway gw = new AdminGateway(19111, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>())) {
+        try (AdminGateway gw = new AdminGateway(19111, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -1027,7 +1032,7 @@ class AdminGatewayTest {
         when(capiConfiguration.getPublicEndpoint()).thenReturn("http://localhost:8080");
         when(serviceCache.containsKey("unknown")).thenReturn(false);
 
-        try (AdminGateway gw = new AdminGateway(19112, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>())) {
+        try (AdminGateway gw = new AdminGateway(19112, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -1149,7 +1154,7 @@ class AdminGatewayTest {
         when(exchange.getResponseSender()).thenReturn(sender);
 
         // Don't set mcpToolRegistry — it stays null
-        AdminGateway freshGw = new AdminGateway(9098, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>());
+        AdminGateway freshGw = new AdminGateway(9098, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null);
 
         Method handleMcpTools = AdminGateway.class.getDeclaredMethod("handleMcpTools", HttpServerExchange.class);
         handleMcpTools.setAccessible(true);
@@ -1193,7 +1198,7 @@ class AdminGatewayTest {
         Sender sender = mock(Sender.class);
         when(exchange.getResponseSender()).thenReturn(sender);
 
-        AdminGateway freshGw = new AdminGateway(9099, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>());
+        AdminGateway freshGw = new AdminGateway(9099, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null);
 
         Method handleMcpSessions = AdminGateway.class.getDeclaredMethod("handleMcpSessions", HttpServerExchange.class);
         handleMcpSessions.setAccessible(true);
@@ -1211,7 +1216,7 @@ class AdminGatewayTest {
         when(capiConfiguration.getMcp()).thenReturn(mcp);
 
         int mcpAdminPort = findFreePort();
-        try (AdminGateway gw = new AdminGateway(mcpAdminPort, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>())) {
+        try (AdminGateway gw = new AdminGateway(mcpAdminPort, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -1229,7 +1234,7 @@ class AdminGatewayTest {
     @Test
     void start_withoutSsl_mcpToolsEndpoint_noRegistry_returns404() throws Exception {
         int mcpAdminPort = findFreePort();
-        try (AdminGateway gw = new AdminGateway(mcpAdminPort, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>())) {
+        try (AdminGateway gw = new AdminGateway(mcpAdminPort, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -1246,7 +1251,7 @@ class AdminGatewayTest {
     @Test
     void start_withoutSsl_mcpSessionsEndpoint_noStore_returns404() throws Exception {
         int mcpAdminPort = findFreePort();
-        try (AdminGateway gw = new AdminGateway(mcpAdminPort, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>())) {
+        try (AdminGateway gw = new AdminGateway(mcpAdminPort, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -1288,7 +1293,7 @@ class AdminGatewayTest {
 
     @Test
     void start_withoutSsl_infoEndpoint_returnsLinks() throws Exception {
-        try (AdminGateway gw = new AdminGateway(19114, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>())) {
+        try (AdminGateway gw = new AdminGateway(19114, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null)) {
             gw.start();
 
             HttpClient client = HttpClient.newHttpClient();
@@ -1308,7 +1313,456 @@ class AdminGatewayTest {
             assertTrue(body.contains("/info/openapi/{serviceId}"));
             assertTrue(body.contains("/info/truststore"));
             assertTrue(body.contains("/info/wsroutes"));
+            assertTrue(body.contains("/info/invalid-services"));
+            assertTrue(body.contains("/info/spec-compliance"));
             assertTrue(body.contains("http://localhost:19114"));
         }
+    }
+
+    // --- admin.protected authorization ---
+
+    private AdminGateway protectedGateway(int port) {
+        when(capiConfiguration.getOauth2()).thenReturn(oauth2Enabled());
+        return new AdminGateway(port, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), true, "capi-admin", httpUtils);
+    }
+
+    private static CAPIConfiguration.Oauth2 oauth2Enabled() {
+        CAPIConfiguration.Oauth2 oauth2 = new CAPIConfiguration.Oauth2();
+        oauth2.setEnabled(true);
+        return oauth2;
+    }
+
+    private static HttpResponse<String> get(int port, String path, String bearer) throws Exception {
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + port + path))
+                .GET();
+        if(bearer != null) {
+            builder.header("Authorization", "Bearer " + bearer);
+        }
+        return HttpClient.newHttpClient().send(builder.build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    @Test
+    void protected_withoutToken_returns401() throws Exception {
+        when(httpUtils.processAuthorizationAccessToken(any(HttpServerExchange.class))).thenReturn(null);
+        try (AdminGateway gw = protectedGateway(19120)) {
+            gw.start();
+            HttpResponse<String> response = get(19120, "/info", null);
+            assertEquals(401, response.statusCode());
+            assertTrue(response.body().contains("Invalid authentication"));
+        }
+    }
+
+    @Test
+    void protected_withInvalidAuthorizationHeader_returns401() throws Exception {
+        when(httpUtils.processAuthorizationAccessToken(any(HttpServerExchange.class)))
+                .thenThrow(new io.surisoft.capi.exception.AuthorizationException("Invalid authorization provided"));
+        try (AdminGateway gw = protectedGateway(19121)) {
+            gw.start();
+            HttpResponse<String> response = get(19121, "/info", "garbage");
+            assertEquals(401, response.statusCode());
+        }
+    }
+
+    @Test
+    void protected_tokenNotInGroup_returns403() throws Exception {
+        when(httpUtils.processAuthorizationAccessToken(any(HttpServerExchange.class))).thenReturn("token");
+        when(httpUtils.isAuthorized("token", "capi-admin")).thenReturn(false);
+        try (AdminGateway gw = protectedGateway(19122)) {
+            gw.start();
+            HttpResponse<String> response = get(19122, "/info", "token");
+            assertEquals(403, response.statusCode());
+            assertTrue(response.body().contains("Not authorized"));
+        }
+    }
+
+    @Test
+    void protected_tokenInGroup_reachesHandler() throws Exception {
+        when(httpUtils.processAuthorizationAccessToken(any(HttpServerExchange.class))).thenReturn("token");
+        when(httpUtils.isAuthorized("token", "capi-admin")).thenReturn(true);
+        try (AdminGateway gw = protectedGateway(19123)) {
+            gw.start();
+            HttpResponse<String> response = get(19123, "/info", "token");
+            assertEquals(200, response.statusCode());
+            assertTrue(response.body().contains("_links"));
+        }
+    }
+
+    /** Probes cannot carry a bearer token, so health stays open even when the listener is protected. */
+    @Test
+    void protected_healthEndpointIsExempt() throws Exception {
+        Field connectedField = ConsulCatalogService.class.getDeclaredField("connectedToConsul");
+        connectedField.setAccessible(true);
+        connectedField.set(null, true);
+
+        when(httpUtils.processAuthorizationAccessToken(any(HttpServerExchange.class))).thenReturn(null);
+        try (AdminGateway gw = protectedGateway(19124)) {
+            gw.start();
+            HttpResponse<String> response = get(19124, "/info/health", null);
+            assertEquals(200, response.statusCode());
+            assertTrue(response.body().contains("UP"));
+            verify(httpUtils, never()).isAuthorized(anyString(), anyString());
+        }
+    }
+
+    /** Metrics is deliberately NOT exempt — a scraper must carry a token. */
+    @Test
+    void protected_metricsEndpointRequiresToken() throws Exception {
+        when(httpUtils.processAuthorizationAccessToken(any(HttpServerExchange.class))).thenReturn(null);
+        try (AdminGateway gw = protectedGateway(19125)) {
+            gw.start();
+            assertEquals(401, get(19125, "/info/metrics", null).statusCode());
+        }
+    }
+
+    /** The guard must cover prefix-matched paths too, not just the exact ones. */
+    @Test
+    void protected_prefixPathsAreGuarded() throws Exception {
+        when(httpUtils.processAuthorizationAccessToken(any(HttpServerExchange.class))).thenReturn(null);
+        try (AdminGateway gw = protectedGateway(19126)) {
+            gw.start();
+            assertEquals(401, get(19126, "/info/routes/some-service", null).statusCode());
+            assertEquals(401, get(19126, "/info/openapi/some-service", null).statusCode());
+        }
+    }
+
+    @Test
+    void unprotected_needsNoToken() throws Exception {
+        try (AdminGateway gw = new AdminGateway(19127, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null)) {
+            gw.start();
+            assertEquals(200, get(19127, "/info", null).statusCode());
+            verifyNoInteractions(httpUtils);
+        }
+    }
+
+    @Test
+    void withAuthorization_protectedWithoutHttpUtils_refusesToStart() {
+        AdminGateway gw = new AdminGateway(19128, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), true, "capi-admin", null);
+        assertThrows(IllegalStateException.class, gw::start);
+    }
+
+    // ---- /info/spec-compliance ----
+
+    @Test
+    void handleSpecCompliance_reportsVerdictsAndReadiness() throws Exception {
+        ConsulCatalogService catalog = mock(ConsulCatalogService.class);
+        Map<String, ConsulCatalogService.SpecCompliance> verdicts = new java.util.LinkedHashMap<>();
+        verdicts.put("good:v1", new ConsulCatalogService.SpecCompliance(
+                "good:v1", "good", "v1", ConsulCatalogService.Verdict.COMPLIANT, null, java.time.Instant.now()));
+        verdicts.put("bad:v1", new ConsulCatalogService.SpecCompliance(
+                "bad:v1", "bad", "v1", ConsulCatalogService.Verdict.NON_COMPLIANT, "title mismatch", java.time.Instant.now()));
+        verdicts.put("legacy:v1", new ConsulCatalogService.SpecCompliance(
+                "legacy:v1", "legacy", "v1", ConsulCatalogService.Verdict.EXEMPT, "title mismatch", java.time.Instant.now()));
+        verdicts.put("nospec:v1", new ConsulCatalogService.SpecCompliance(
+                "nospec:v1", "nospec", "v1", ConsulCatalogService.Verdict.NOT_APPLICABLE, null, java.time.Instant.now()));
+        when(catalog.getSpecCompliance()).thenReturn(verdicts);
+
+        adminGateway.setSpecComplianceSource(catalog, false);
+
+        Sender sender = mock(Sender.class);
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        when(exchange.getResponseHeaders()).thenReturn(new HeaderMap());
+        when(exchange.getResponseSender()).thenReturn(sender);
+
+        Method handler = AdminGateway.class.getDeclaredMethod("handleSpecCompliance", HttpServerExchange.class);
+        handler.setAccessible(true);
+        handler.invoke(adminGateway, exchange);
+
+        verify(exchange).setStatusCode(200);
+        org.mockito.ArgumentCaptor<String> body = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(sender).send(body.capture());
+        String json = body.getValue();
+
+        assertTrue(json.contains("\"enforcing\":false"), json);
+        assertTrue(json.contains("\"compliant\":1"), json);
+        assertTrue(json.contains("\"nonCompliant\":1"), json);
+        assertTrue(json.contains("\"exempt\":1"), json);
+        assertTrue(json.contains("\"notApplicable\":1"), json);
+        // The whole point of the report: is it safe to turn the switch on yet?
+        assertTrue(json.contains("\"safeToEnable\":false"), json);
+        assertTrue(json.contains("title mismatch"), json);
+    }
+
+    @Test
+    void handleSpecCompliance_safeToEnableWhenNothingWouldBreak() throws Exception {
+        ConsulCatalogService catalog = mock(ConsulCatalogService.class);
+        Map<String, ConsulCatalogService.SpecCompliance> verdicts = new java.util.LinkedHashMap<>();
+        verdicts.put("good:v1", new ConsulCatalogService.SpecCompliance(
+                "good:v1", "good", "v1", ConsulCatalogService.Verdict.COMPLIANT, null, java.time.Instant.now()));
+        // An exempt service must NOT block readiness — that is what exemptions are for.
+        verdicts.put("legacy:v1", new ConsulCatalogService.SpecCompliance(
+                "legacy:v1", "legacy", "v1", ConsulCatalogService.Verdict.EXEMPT, "mismatch", java.time.Instant.now()));
+        verdicts.put("nospec:v1", new ConsulCatalogService.SpecCompliance(
+                "nospec:v1", "nospec", "v1", ConsulCatalogService.Verdict.NOT_APPLICABLE, null, java.time.Instant.now()));
+        when(catalog.getSpecCompliance()).thenReturn(verdicts);
+        adminGateway.setSpecComplianceSource(catalog, true);
+
+        Sender sender = mock(Sender.class);
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        when(exchange.getResponseHeaders()).thenReturn(new HeaderMap());
+        when(exchange.getResponseSender()).thenReturn(sender);
+
+        Method handler = AdminGateway.class.getDeclaredMethod("handleSpecCompliance", HttpServerExchange.class);
+        handler.setAccessible(true);
+        handler.invoke(adminGateway, exchange);
+
+        org.mockito.ArgumentCaptor<String> body = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(sender).send(body.capture());
+        assertTrue(body.getValue().contains("\"safeToEnable\":true"), body.getValue());
+        assertTrue(body.getValue().contains("\"enforcing\":true"), body.getValue());
+    }
+
+    @Test
+    void handleSpecCompliance_withoutConsulDiscovery_returnsNotFound() throws Exception {
+        adminGateway.setSpecComplianceSource(null, false);
+
+        Sender sender = mock(Sender.class);
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        when(exchange.getResponseHeaders()).thenReturn(new HeaderMap());
+        when(exchange.getResponseSender()).thenReturn(sender);
+
+        Method handler = AdminGateway.class.getDeclaredMethod("handleSpecCompliance", HttpServerExchange.class);
+        handler.setAccessible(true);
+        handler.invoke(adminGateway, exchange);
+
+        verify(exchange).setStatusCode(404);
+    }
+
+    // ---- trust store DELETE by alias ----
+
+    /** Exchange mock whose dispatch(Runnable) runs the task inline, so the worker-thread hop is testable. */
+    private HttpServerExchange mockDispatchingExchange(String method, String relativePath, Sender sender) {
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        when(exchange.getRequestMethod()).thenReturn(new HttpString(method));
+        when(exchange.getRelativePath()).thenReturn(relativePath);
+        when(exchange.getResponseHeaders()).thenReturn(new HeaderMap());
+        when(exchange.getResponseSender()).thenReturn(sender);
+        doAnswer(invocation -> {
+            ((Runnable) invocation.getArgument(0)).run();
+            return exchange;
+        }).when(exchange).dispatch(any(Runnable.class));
+        return exchange;
+    }
+
+    /**
+     * Trust-store writes are refused on an unprotected listener, so these exercise the protected
+     * one. {@code endpointProtected} only gates the handler here — the token check itself lives in
+     * the {@code withAuthorization} wrapper applied by {@code start()}, which these tests bypass.
+     */
+    private AdminGateway gatewayWithConsulStore(int port, ConsulStore consulStore, boolean trustStoreEnabled) {
+        return gatewayWithConsulStore(port, consulStore, trustStoreEnabled, true);
+    }
+
+    private AdminGateway gatewayWithConsulStore(int port, ConsulStore consulStore, boolean trustStoreEnabled, boolean endpointProtected) {
+        CAPIConfiguration.TrustStore trustStoreConfig = new CAPIConfiguration.TrustStore();
+        trustStoreConfig.setEnabled(trustStoreEnabled);
+        when(capiConfiguration.getTrustStore()).thenReturn(trustStoreConfig);
+        AdminGateway gw = new AdminGateway(port, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), endpointProtected, "capi-admin", null);
+        gw.setConsulStore(consulStore);
+        return gw;
+    }
+
+    private void invokeTruststoreAlias(AdminGateway gw, HttpServerExchange exchange) throws Exception {
+        Method handler = AdminGateway.class.getDeclaredMethod("handleTruststoreAlias", HttpServerExchange.class);
+        handler.setAccessible(true);
+        handler.invoke(gw, exchange);
+    }
+
+    @Test
+    void handleTruststoreAlias_delete_removesCertificate() throws Exception {
+        ConsulStore consulStore = mock(ConsulStore.class);
+        when(consulStore.removeCertificate("my-cert")).thenReturn(
+                new ConsulStore.TrustStoreResult(ConsulStore.TrustStoreOutcome.SUCCESS, "Certificate 'my-cert' removed from trust store"));
+        AdminGateway gw = gatewayWithConsulStore(9140, consulStore, true);
+
+        Sender sender = mock(Sender.class);
+        HttpServerExchange exchange = mockDispatchingExchange("DELETE", "/my-cert", sender);
+
+        invokeTruststoreAlias(gw, exchange);
+
+        verify(consulStore).removeCertificate("my-cert");
+        verify(exchange).setStatusCode(200);
+        verify(sender).send(contains("removed from trust store"));
+    }
+
+    @Test
+    void handleTruststoreAlias_delete_unknownAlias_returnsNotFound() throws Exception {
+        ConsulStore consulStore = mock(ConsulStore.class);
+        when(consulStore.removeCertificate("nope")).thenReturn(
+                new ConsulStore.TrustStoreResult(ConsulStore.TrustStoreOutcome.NOT_FOUND, "Certificate with alias 'nope' not found in trust store"));
+        AdminGateway gw = gatewayWithConsulStore(9141, consulStore, true);
+
+        Sender sender = mock(Sender.class);
+        HttpServerExchange exchange = mockDispatchingExchange("DELETE", "/nope", sender);
+
+        invokeTruststoreAlias(gw, exchange);
+
+        verify(exchange).setStatusCode(404);
+    }
+
+    @Test
+    void handleTruststoreAlias_delete_storeError_returnsInternalServerError() throws Exception {
+        ConsulStore consulStore = mock(ConsulStore.class);
+        when(consulStore.removeCertificate("my-cert")).thenReturn(
+                new ConsulStore.TrustStoreResult(ConsulStore.TrustStoreOutcome.ERROR, "Failed to push trust store to Consul KV, status: 500"));
+        AdminGateway gw = gatewayWithConsulStore(9142, consulStore, true);
+
+        Sender sender = mock(Sender.class);
+        HttpServerExchange exchange = mockDispatchingExchange("DELETE", "/my-cert", sender);
+
+        invokeTruststoreAlias(gw, exchange);
+
+        verify(exchange).setStatusCode(500);
+    }
+
+    @Test
+    void handleTruststoreAlias_delete_trustStoreDisabled_returnsNotFound() throws Exception {
+        ConsulStore consulStore = mock(ConsulStore.class);
+        AdminGateway gw = gatewayWithConsulStore(9143, consulStore, false);
+
+        Sender sender = mock(Sender.class);
+        HttpServerExchange exchange = mockDispatchingExchange("DELETE", "/my-cert", sender);
+
+        invokeTruststoreAlias(gw, exchange);
+
+        verify(exchange).setStatusCode(404);
+        verifyNoInteractions(consulStore);
+    }
+
+    @Test
+    void handleTruststoreAlias_delete_withoutConsulStore_returnsNotFound() throws Exception {
+        AdminGateway gw = gatewayWithConsulStore(9144, null, true);
+
+        Sender sender = mock(Sender.class);
+        HttpServerExchange exchange = mockDispatchingExchange("DELETE", "/my-cert", sender);
+
+        invokeTruststoreAlias(gw, exchange);
+
+        verify(exchange).setStatusCode(404);
+    }
+
+    @Test
+    void handleTruststoreAlias_delete_blankAlias_returnsBadRequest() throws Exception {
+        ConsulStore consulStore = mock(ConsulStore.class);
+        AdminGateway gw = gatewayWithConsulStore(9145, consulStore, true);
+
+        Sender sender = mock(Sender.class);
+        HttpServerExchange exchange = mockDispatchingExchange("DELETE", "/", sender);
+
+        invokeTruststoreAlias(gw, exchange);
+
+        verify(exchange).setStatusCode(400);
+        verifyNoInteractions(consulStore);
+    }
+
+    @Test
+    void handleTruststoreAlias_nonDelete_returnsMethodNotAllowed() throws Exception {
+        ConsulStore consulStore = mock(ConsulStore.class);
+        AdminGateway gw = gatewayWithConsulStore(9146, consulStore, true);
+
+        Sender sender = mock(Sender.class);
+        HeaderMap headerMap = new HeaderMap();
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        when(exchange.getRequestMethod()).thenReturn(new HttpString("GET"));
+        when(exchange.getResponseHeaders()).thenReturn(headerMap);
+        when(exchange.getResponseSender()).thenReturn(sender);
+
+        invokeTruststoreAlias(gw, exchange);
+
+        verify(exchange).setStatusCode(405);
+        assertEquals("DELETE", headerMap.getFirst(Headers.ALLOW));
+        verifyNoInteractions(consulStore);
+    }
+
+    @Test
+    void handleTruststoreAlias_delete_onUnprotectedListener_isRefused() throws Exception {
+        ConsulStore consulStore = mock(ConsulStore.class);
+        AdminGateway gw = gatewayWithConsulStore(9147, consulStore, true, false);
+
+        Sender sender = mock(Sender.class);
+        HttpServerExchange exchange = mockDispatchingExchange("DELETE", "/my-cert", sender);
+
+        invokeTruststoreAlias(gw, exchange);
+
+        // An unauthenticated admin listener must not be able to change what CAPI trusts.
+        verify(exchange).setStatusCode(403);
+        verifyNoInteractions(consulStore);
+    }
+
+    @Test
+    void handleTruststorePut_onUnprotectedListener_isRefused() throws Exception {
+        ConsulStore consulStore = mock(ConsulStore.class);
+        AdminGateway gw = gatewayWithConsulStore(9148, consulStore, true, false);
+
+        Sender sender = mock(Sender.class);
+        HttpServerExchange exchange = mockDispatchingExchange("PUT", "/", sender);
+
+        Method handleTruststore = AdminGateway.class.getDeclaredMethod("handleTruststore", HttpServerExchange.class);
+        handleTruststore.setAccessible(true);
+        handleTruststore.invoke(gw, exchange);
+
+        verify(exchange).setStatusCode(403);
+        verifyNoInteractions(consulStore);
+    }
+
+    @Test
+    void handleTruststoreGet_onUnprotectedListener_stillWorks() throws Exception {
+        // Reads are unaffected by the write guard.
+        CAPIConfiguration.TrustStore trustStoreConfig = new CAPIConfiguration.TrustStore();
+        trustStoreConfig.setEnabled(true);
+        when(capiConfiguration.getTrustStore()).thenReturn(trustStoreConfig);
+        java.security.KeyStore keyStore = java.security.KeyStore.getInstance("JKS");
+        keyStore.load(null, null);
+        when(capiTrustManager.getKeyStore()).thenReturn(keyStore);
+
+        Sender sender = mock(Sender.class);
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        when(exchange.getRequestMethod()).thenReturn(new HttpString("GET"));
+        when(exchange.getResponseHeaders()).thenReturn(new HeaderMap());
+        when(exchange.getResponseSender()).thenReturn(sender);
+
+        Method handleTruststore = AdminGateway.class.getDeclaredMethod("handleTruststore", HttpServerExchange.class);
+        handleTruststore.setAccessible(true);
+        handleTruststore.invoke(adminGateway, exchange);   // adminGateway is unprotected
+
+        verify(exchange).setStatusCode(200);
+    }
+
+    @Test
+    void handleTruststore_bareDelete_returnsMethodNotAllowed() throws Exception {
+        CAPIConfiguration.TrustStore trustStoreConfig = new CAPIConfiguration.TrustStore();
+        trustStoreConfig.setEnabled(true);
+        when(capiConfiguration.getTrustStore()).thenReturn(trustStoreConfig);
+
+        Sender sender = mock(Sender.class);
+        HeaderMap headerMap = new HeaderMap();
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        when(exchange.getRequestMethod()).thenReturn(new HttpString("DELETE"));
+        when(exchange.getResponseHeaders()).thenReturn(headerMap);
+        when(exchange.getResponseSender()).thenReturn(sender);
+
+        Method handleTruststore = AdminGateway.class.getDeclaredMethod("handleTruststore", HttpServerExchange.class);
+        handleTruststore.setAccessible(true);
+        handleTruststore.invoke(adminGateway, exchange);
+
+        verify(exchange).setStatusCode(405);
+        assertEquals("GET, PUT", headerMap.getFirst(Headers.ALLOW));
+        verify(sender).send(contains("DELETE requires an alias"));
+    }
+
+    @Test
+    void handleTruststore_unsupportedMethod_returnsMethodNotAllowed() throws Exception {
+        Sender sender = mock(Sender.class);
+        HeaderMap headerMap = new HeaderMap();
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        when(exchange.getRequestMethod()).thenReturn(new HttpString("POST"));
+        when(exchange.getResponseHeaders()).thenReturn(headerMap);
+        when(exchange.getResponseSender()).thenReturn(sender);
+
+        Method handleTruststore = AdminGateway.class.getDeclaredMethod("handleTruststore", HttpServerExchange.class);
+        handleTruststore.setAccessible(true);
+        handleTruststore.invoke(adminGateway, exchange);
+
+        verify(exchange).setStatusCode(405);
     }
 }

@@ -3,6 +3,7 @@ package io.surisoft.capi;
 import ch.qos.logback.classic.LoggerContext;
 import io.surisoft.capi.configuration.CAPIConfiguration;
 import io.surisoft.capi.schema.WebsocketClient;
+import io.surisoft.capi.undertow.AdminGateway;
 import io.surisoft.capi.utils.Startup;
 import io.surisoft.capi.utils.WebsocketUtils;
 import org.junit.jupiter.api.Test;
@@ -17,6 +18,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.lang.reflect.InvocationTargetException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -629,6 +631,8 @@ class CAPIMainTest {
         config.setAdminPort(19481);
         config.setVersion("1.0.0");
         config.setInstanceName("test");
+        config.getAdmin().setProtected(true);       // exercise the protected path explicitly
+        config.getAdmin().setGroup("capi-admin");
 
         sun.misc.Unsafe unsafe = getUnsafe();
         CAPIMain instance = (CAPIMain) unsafe.allocateInstance(CAPIMain.class);
@@ -640,6 +644,8 @@ class CAPIMainTest {
         Startup mockStartup = mock(Startup.class);
         io.micrometer.prometheusmetrics.PrometheusMeterRegistry mockRegistry = mock(io.micrometer.prometheusmetrics.PrometheusMeterRegistry.class);
         when(mockStartup.getPrometheusRegistry()).thenReturn(mockRegistry);
+        // A protected listener refuses to start without HttpUtils to validate tokens with.
+        when(mockStartup.getHttpUtils()).thenReturn(mock(io.surisoft.capi.utils.HttpUtils.class));
 
         org.cache2k.Cache<String, io.surisoft.capi.schema.Service> svcCache =
                 org.cache2k.Cache2kBuilder.of(String.class, io.surisoft.capi.schema.Service.class)
@@ -672,11 +678,72 @@ class CAPIMainTest {
     }
 
     @Test
+    void configureAdminGateway_protectedWithoutGroup_refusesToStart() throws Exception {
+        CAPIConfiguration config = new CAPIConfiguration();
+        config.setAdminPort(19483);
+        config.setVersion("1.0.0");
+        config.setInstanceName("test");
+        // Explicitly protected with no group: a contradictory intent, so startup must fail rather
+        // than 403 every admin call (including the operator's own) with no explanation.
+        config.getAdmin().setProtected(true);
+
+        sun.misc.Unsafe unsafe = getUnsafe();
+        CAPIMain instance = (CAPIMain) unsafe.allocateInstance(CAPIMain.class);
+        Field configField = CAPIMain.class.getDeclaredField("capiConfiguration");
+        configField.setAccessible(true);
+        configField.set(instance, config);
+
+        Method configureAdminGateway = CAPIMain.class.getDeclaredMethod("configureAdminGateway", Startup.class);
+        configureAdminGateway.setAccessible(true);
+
+        InvocationTargetException thrown = assertThrows(InvocationTargetException.class,
+                () -> configureAdminGateway.invoke(instance, mock(Startup.class)));
+        assertInstanceOf(IllegalStateException.class, thrown.getCause());
+        assertTrue(thrown.getCause().getMessage().contains("admin.group"));
+    }
+
+    @Test
+    void configureAdminGateway_noAdminBlock_startsUnprotectedRatherThanFailing() throws Exception {
+        CAPIConfiguration config = new CAPIConfiguration();
+        config.setAdminPort(19484);
+        config.setVersion("1.0.0");
+        config.setInstanceName("test");
+        // admin.protected left unset, as in every config written before 2.22. Refusing to start here
+        // would crash-loop a deployment that upgraded without touching its config, and the
+        // fleet-wide MITM path is already closed by AdminGateway#requireProtectedListener.
+        assertTrue(config.getAdmin().isUnset());
+
+        sun.misc.Unsafe unsafe = getUnsafe();
+        CAPIMain instance = (CAPIMain) unsafe.allocateInstance(CAPIMain.class);
+        Field configField = CAPIMain.class.getDeclaredField("capiConfiguration");
+        configField.setAccessible(true);
+        configField.set(instance, config);
+
+        Startup mockStartup = mock(Startup.class);
+        when(mockStartup.getPrometheusRegistry()).thenReturn(mock(io.micrometer.prometheusmetrics.PrometheusMeterRegistry.class));
+
+        // CAPIMain assigns `log` inside loadConfiguration(), which Unsafe.allocateInstance skips;
+        // this path logs a warning, so the harness has to supply the logger itself.
+        Field logField = CAPIMain.class.getDeclaredField("log");
+        logField.setAccessible(true);
+        logField.set(null, org.slf4j.LoggerFactory.getLogger(CAPIMain.class));
+
+        Method configureAdminGateway = CAPIMain.class.getDeclaredMethod("configureAdminGateway", Startup.class);
+        configureAdminGateway.setAccessible(true);
+
+        AdminGateway gw = (AdminGateway) configureAdminGateway.invoke(instance, mockStartup);
+        assertNotNull(gw, "An unconfigured admin block must still yield a running listener");
+        gw.stop();
+    }
+
+    @Test
     void configureAdminGateway_withNullOptionalComponents_doesNotSetOptionals() throws Exception {
         CAPIConfiguration config = new CAPIConfiguration();
         config.setAdminPort(19482);
         config.setVersion("1.0.0");
         config.setInstanceName("test");
+        config.getAdmin().setProtected(true);       // exercise the protected path explicitly
+        config.getAdmin().setGroup("capi-admin");
 
         sun.misc.Unsafe unsafe = getUnsafe();
         CAPIMain instance = (CAPIMain) unsafe.allocateInstance(CAPIMain.class);
@@ -688,6 +755,8 @@ class CAPIMainTest {
         Startup mockStartup = mock(Startup.class);
         io.micrometer.prometheusmetrics.PrometheusMeterRegistry mockRegistry = mock(io.micrometer.prometheusmetrics.PrometheusMeterRegistry.class);
         when(mockStartup.getPrometheusRegistry()).thenReturn(mockRegistry);
+        // A protected listener refuses to start without HttpUtils to validate tokens with.
+        when(mockStartup.getHttpUtils()).thenReturn(mock(io.surisoft.capi.utils.HttpUtils.class));
 
         org.cache2k.Cache<String, io.surisoft.capi.schema.Service> svcCache =
                 org.cache2k.Cache2kBuilder.of(String.class, io.surisoft.capi.schema.Service.class)
@@ -1037,6 +1106,8 @@ class CAPIMainTest {
 
         io.micrometer.prometheusmetrics.PrometheusMeterRegistry mockRegistry = mock(io.micrometer.prometheusmetrics.PrometheusMeterRegistry.class);
         when(mockStartup.getPrometheusRegistry()).thenReturn(mockRegistry);
+        // A protected listener refuses to start without HttpUtils to validate tokens with.
+        when(mockStartup.getHttpUtils()).thenReturn(mock(io.surisoft.capi.utils.HttpUtils.class));
 
         Method getRestGw = CAPIMain.class.getDeclaredMethod("getRestGateway", Startup.class, Map.class);
         getRestGw.setAccessible(true);
@@ -1107,6 +1178,8 @@ class CAPIMainTest {
 
         io.micrometer.prometheusmetrics.PrometheusMeterRegistry mockRegistry = mock(io.micrometer.prometheusmetrics.PrometheusMeterRegistry.class);
         when(mockStartup.getPrometheusRegistry()).thenReturn(mockRegistry);
+        // A protected listener refuses to start without HttpUtils to validate tokens with.
+        when(mockStartup.getHttpUtils()).thenReturn(mock(io.surisoft.capi.utils.HttpUtils.class));
 
         Method getRestGw = CAPIMain.class.getDeclaredMethod("getRestGateway", Startup.class, Map.class);
         getRestGw.setAccessible(true);

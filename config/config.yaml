@@ -9,11 +9,31 @@ capi:
   observability:
     jvm:
       enabled: true
+  admin:
+    protected: true
+    group: capi-admin
+  # Governance: a fetched OpenAPI spec must identify the service that declared it —
+  # info.title == the Consul service name (exact), and info.version must be set.
+  # OFF by default. The verdict is computed every cycle regardless and published at
+  # /info/spec-compliance, so you can watch nonCompliant drain to zero (safeToEnable: true)
+  # before turning this on. Nothing is logged while it is off.
+  # `exempt` lists Consul service NAMES that keep routing even while enforcing — operator
+  # config on purpose, so an owner cannot exempt themselves.
+  matchOpenApiSpec:
+    enabled: false
+    exempt: []
+    #  - legacy-service
   rest:
     enabled: true
     port: 8380
     listeningAddress: 0.0.0.0
     contextPath: /api
+    # Refuse a path containing a `.` or `..` segment with 400. OFF by default: a request that this
+    # build would refuse is one an existing deployment forwards today, so the guard first only
+    # counts what it sees — watch capi_dot_segment_requests_total{action="observed"} stay at zero on
+    # real traffic, then turn this on. Only a WHOLE segment equal to "." or ".." counts; ordinary
+    # paths like /range/1..10 or /report..pdf are unaffected.
+    rejectDotSegments: false
     ioThreads: 4
     connectionRequestTimeout: 5000
     requestTimeout: 5000
@@ -77,7 +97,20 @@ capi:
     # Deployment environment (e.g. dev / acc / prod). Emitted as the "appEnvironment"
     # resource attribute on every span. Omitted from spans when left blank.
     appEnvironment:
+  # MASTER SWITCH. false = CAPI sends no CORS header at all, and both allowedOrigins below and any
+  # per-service `allowed-origins` metadata are ignored. Set true to activate them.
   corsEnabled: false
+  # Gateway-wide FALLBACK for browser origins (requires corsEnabled: true). Prefer the per-service `allowed-origins` key in
+  # Consul ServiceMeta, which lets each service owner set their own and keeps one team's origin
+  # from being trusted on another team's service. This list applies only to services that declare
+  # none. EMPTY OR ABSENT DENIES EVERY ORIGIN.
+  # An origin must match exactly (scheme + host + port) to be echoed back, and only an exact
+  # match is offered Access-Control-Allow-Credentials. A single "*" entry sends the literal
+  # wildcard and never credentials, which is the only spec-valid way to open this up.
+  # CAPI used to reflect whatever Origin the caller sent, together with credentials, which let
+  # any website read authenticated responses.
+  allowedOrigins: []
+  #  - https://app.example.com
   allowedHeaders:
     - Origin
     - Accept

@@ -7,6 +7,7 @@ import io.surisoft.capi.configuration.CAPIConfiguration;
 import io.surisoft.capi.service.McpBackendLoadBalancer;
 import io.surisoft.capi.tracer.CapiTracer;
 import io.surisoft.capi.undertow.*;
+import io.surisoft.capi.utils.CorsPolicy;
 import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.Startup;
 import org.jspecify.annotations.Nullable;
@@ -43,6 +44,7 @@ public class CAPIMain {
         startup.start();
 
         try {
+            warnOnInertCorsConfig();
             Map<String, String> managedHeaders = buildManagedHeaders();
 
             WebsocketGateway websocketGateway = getWebsocketGateway(startup);
@@ -90,6 +92,20 @@ public class CAPIMain {
         }
     }
 
+    /**
+     * Warns when origins are configured but the master switch is off, so "I set allowedOrigins and
+     * nothing happens" shows up in the log rather than in a debugging session.
+     */
+    private void warnOnInertCorsConfig() {
+        if (!capiConfiguration.isCorsEnabled()
+                && capiConfiguration.getAllowedOrigins() != null
+                && !capiConfiguration.getAllowedOrigins().isEmpty()) {
+            log.warn("capi.allowedOrigins is set but capi.corsEnabled is false — no CORS header will "
+                   + "be sent, and any per-service allowed-origins metadata is ignored too. "
+                   + "Set capi.corsEnabled: true to activate them.");
+        }
+    }
+
     private Map<String, String> buildManagedHeaders() {
         Map<String, String> managedHeaders = new HashMap<>(Constants.CAPI_CORS_MANAGED_HEADERS);
         if(capiConfiguration.getAllowedHeaders() != null && !capiConfiguration.getAllowedHeaders().isEmpty()) {
@@ -102,7 +118,35 @@ public class CAPIMain {
     }
 
     private AdminGateway configureAdminGateway(Startup startup) {
-        AdminGateway adminGateway = new AdminGateway(capiConfiguration.getAdminPort(), startup.getPrometheusRegistry(), capiConfiguration, startup.getServiceCache(), startup.getUndertowSslContext(), startup.getCapiTrustManager(), startup.getInvalidServiceMap());
+        // The whole admin block is optional in config.yaml, so a missing section reads as the
+        // defaults (unprotected) rather than an NPE at startup.
+        CAPIConfiguration.Admin admin = capiConfiguration.getAdmin() != null
+                ? capiConfiguration.getAdmin()
+                : new CAPIConfiguration.Admin();
+        boolean adminProtected = admin.isProtectedEnabled();
+        if (adminProtected && (admin.getGroup() == null || admin.getGroup().isBlank())) {
+            // Starting here would 403 every admin call, including an operator's own, with no hint
+            // as to why. The intent is explicit and contradictory, so fail loudly rather than
+            // quietly serving the listener open.
+            throw new IllegalStateException(
+                    "admin.protected is true but admin.group is not set — set capi.admin.group to the "
+                  + "subscription group allowed on the admin listener, or set admin.protected: false "
+                  + "to opt out (read-only; trust store changes stay refused).");
+        }
+        if (admin.isUnset()) {
+            // No admin block at all: keep the pre-2.22 behaviour rather than refusing to start and
+            // crash-looping a deployment that upgraded without touching its config.
+            log.warn("No capi.admin block configured — the admin listener on port {} is "
+                   + "UNAUTHENTICATED and exposes /info/routes, /info/mcp/sessions and /info/jvm/*. "
+                   + "Set capi.admin.protected: true with capi.admin.group to require a token. "
+                   + "Trust store mutation is refused on an unprotected listener either way.",
+                    capiConfiguration.getAdminPort());
+        } else if (!adminProtected) {
+            log.warn("Admin listener on port {} is UNAUTHENTICATED (admin.protected: false). "
+                   + "Restrict it at the network layer; trust store mutation is refused on this listener.",
+                    capiConfiguration.getAdminPort());
+        }
+        AdminGateway adminGateway = new AdminGateway(capiConfiguration.getAdminPort(), startup.getPrometheusRegistry(), capiConfiguration, startup.getServiceCache(), startup.getUndertowSslContext(), startup.getCapiTrustManager(), startup.getInvalidServiceMap(), adminProtected, admin.getGroup(), startup.getHttpUtils());
         if(startup.getWebSocketClientMap() != null) {
             adminGateway.setWebsocketClients(startup.getWebSocketClientMap());
         }
@@ -113,6 +157,8 @@ public class CAPIMain {
             adminGateway.setMcpSessionStore(startup.getMcpSessionStore());
         }
         adminGateway.setRestClients(startup.getRestClientMap());
+        adminGateway.setSpecComplianceSource(startup.getConsulCatalogService(),
+                capiConfiguration.getMatchOpenApiSpec() != null && capiConfiguration.getMatchOpenApiSpec().isEnabled());
         if(startup.getConsulStore() != null) {
             adminGateway.setConsulStore(startup.getConsulStore());
         }
@@ -236,6 +282,9 @@ public class CAPIMain {
                     allowedHeaders,
                     cookieName
             );
+            gateway.setCorsEnabled(capiConfiguration.isCorsEnabled());
+            gateway.setRejectDotSegments(capiConfiguration.getRest().isRejectDotSegments());
+            gateway.setCorsPolicy(new CorsPolicy(capiConfiguration.getAllowedOrigins()));
             if (startup.getOpaWasmService() != null) gateway.setOpaWasmService(startup.getOpaWasmService());
             if (startup.getThrottleProcessor() != null) gateway.setThrottleProcessor(startup.getThrottleProcessor());
             if (startup.getApiKeyCache() != null) gateway.setApiKeyCache(startup.getApiKeyCache());

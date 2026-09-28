@@ -89,7 +89,7 @@ public class WebsocketGateway {
                             if(webClientId != null && webSocketClients.containsKey(webClientId)) { //webSocketClients.containsKey(webClientId)
                                 WebsocketClient websocketClient = webSocketClients.get(webClientId);
                                 if(httpServerExchange.getRequestMethod().equals(HttpString.tryFromString(Constants.OPTIONS_METHODS_VALUE))) {
-                                    websocketUtils.handleOptionsRequest(httpServerExchange, accessControlAllowHeaders, managedHeaders, oauth2CookieName);
+                                    websocketUtils.handleOptionsRequest(httpServerExchange, accessControlAllowHeaders, managedHeaders, oauth2CookieName, websocketClient.getCorsPolicy());
                                 } else {
                                     if (httpServerExchange.getProtocol().equals(Constants.PROTOCOL_HTTP)) {
                                         if (websocketAuthorization != null) {

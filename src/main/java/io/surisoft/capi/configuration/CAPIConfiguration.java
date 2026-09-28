@@ -17,6 +17,7 @@ public class CAPIConfiguration {
     private int adminPort;
     private boolean corsEnabled;
     private List<String> allowedHeaders;
+    private List<String> allowedOrigins;
     private Ssl ssl;
     private Rest rest;
     private Websocket websocket;
@@ -31,6 +32,8 @@ public class CAPIConfiguration {
     private Grpc grpc;
     private ApiKeyStore apiKeyStore;
     private Observability observability = new Observability();
+    private Admin admin = new Admin();
+    private MatchOpenApiSpec matchOpenApiSpec = new MatchOpenApiSpec();
 
     public String getVersion() {
         return version;
@@ -235,6 +238,15 @@ public class CAPIConfiguration {
 
     public static class Rest {
         private boolean enabled;
+        /**
+         * Refuse a request whose path contains a {@code .} or {@code ..} segment with 400.
+         *
+         * <p>Off by default. While off the guard only counts what it sees
+         * ({@code capi_dot_segment_requests_total{action="observed"}}), because refusing a request an
+         * existing deployment currently forwards is a behaviour change. Watch the counter on real
+         * traffic, then turn it on.
+         */
+        private boolean rejectDotSegments = false;
         private int port;
         private String listeningAddress;
         private String contextPath;
@@ -266,6 +278,14 @@ public class CAPIConfiguration {
         }
         public void setEnabled(boolean enabled) {
             this.enabled = enabled;
+        }
+
+        public boolean isRejectDotSegments() {
+            return rejectDotSegments;
+        }
+
+        public void setRejectDotSegments(boolean rejectDotSegments) {
+            this.rejectDotSegments = rejectDotSegments;
         }
         public int getPort() {
             return port;
@@ -551,6 +571,18 @@ public class CAPIConfiguration {
         this.corsEnabled = corsEnabled;
     }
 
+    /**
+     * Browser origins that may receive CORS headers. Empty or absent denies every origin; a single
+     * {@code "*"} entry sends the literal wildcard without credentials. See {@link io.surisoft.capi.utils.CorsPolicy}.
+     */
+    public List<String> getAllowedOrigins() {
+        return allowedOrigins;
+    }
+
+    public void setAllowedOrigins(List<String> allowedOrigins) {
+        this.allowedOrigins = allowedOrigins;
+    }
+
     public List<String> getAllowedHeaders() {
         return allowedHeaders;
     }
@@ -646,6 +678,103 @@ public class CAPIConfiguration {
     }
     public void setObservability(Observability observability) {
         this.observability = observability;
+    }
+
+    public MatchOpenApiSpec getMatchOpenApiSpec() {
+        return matchOpenApiSpec;
+    }
+
+    public void setMatchOpenApiSpec(MatchOpenApiSpec matchOpenApiSpec) {
+        this.matchOpenApiSpec = matchOpenApiSpec;
+    }
+
+    public Admin getAdmin() {
+        return admin;
+    }
+    public void setAdmin(Admin admin) {
+        this.admin = admin;
+    }
+
+    /**
+     * Authorization on the admin listener ({@code adminPort}).
+     *
+     * <p>When on, every admin endpoint except the health probe requires a bearer token whose
+     * subscription claim contains {@code group}; the token is validated by the same OAuth2 key set
+     * the data plane uses, so {@code oauth2.enabled} must be true for the check to ever pass.
+     *
+     * <p>{@code protected} is deliberately a nullable {@link Boolean} so that "absent from the
+     * config" is distinguishable from "explicitly false". An absent value keeps the pre-2.22
+     * behaviour — unprotected, with a warning — because failing startup on every config that never
+     * opted in would crash-loop existing deployments on upgrade. An explicit {@code true} with no
+     * {@code group} is contradictory and does fail startup.
+     *
+     * <p>Either way the trust-store mutation endpoints stay closed on an unprotected listener (see
+     * {@code AdminGateway#requireProtectedListener}), so the fleet-wide MITM path is shut
+     * regardless of what this says. What an unprotected listener still exposes is read access.
+     */
+    public static class Admin {
+        private Boolean protectedEndpoint;
+        private String group;
+
+        // Named getProtected/setProtected so the YAML key is "protected" — the field cannot carry
+        // that name because it is a Java keyword. Must be get* rather than is*: JavaBeans
+        // introspection, which SnakeYAML relies on, only accepts is* for the primitive boolean.
+        public Boolean getProtected() {
+            return protectedEndpoint;
+        }
+        public void setProtected(Boolean protectedEndpoint) {
+            this.protectedEndpoint = protectedEndpoint;
+        }
+
+        /** True only when the operator explicitly asked for protection. */
+        public boolean isProtectedEnabled() {
+            return Boolean.TRUE.equals(protectedEndpoint);
+        }
+
+        /** True when the config says nothing at all about admin protection. */
+        public boolean isUnset() {
+            return protectedEndpoint == null;
+        }
+
+        public String getGroup() {
+            return group;
+        }
+        public void setGroup(String group) {
+            this.group = group;
+        }
+    }
+
+    /**
+     * Governance check binding a fetched OpenAPI spec to the service that declared it: the spec's
+     * {@code info.title} must equal the Consul service name, and {@code info.version} must be set.
+     *
+     * <p>Off by default. The verdict is computed on every cycle regardless, and published at
+     * {@code /info/spec-compliance}, so an estate can be measured before the switch is flipped —
+     * turning it on blind would strand every service whose spec predates the convention. Nothing is
+     * logged while it is off, so enabling the report cannot make an existing deployment noisier.
+     *
+     * <p>{@code exempt} names services that stay routable even while enforcing. It is operator
+     * config on purpose: an exemption a service owner could grant themselves is not governance, and
+     * without one the last unowned service keeps the switch off for everyone else.
+     */
+    public static class MatchOpenApiSpec {
+        private boolean enabled = false;
+        private List<String> exempt;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        /** Consul service names (not name:group) exempt from enforcement. */
+        public List<String> getExempt() {
+            return exempt;
+        }
+        public void setExempt(List<String> exempt) {
+            this.exempt = exempt;
+        }
     }
 
     /** Top-level observability config — currently just JVM-level (JFR). */

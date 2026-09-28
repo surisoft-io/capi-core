@@ -18,6 +18,7 @@ import io.undertow.server.HttpServerExchange;
 import io.undertow.server.handlers.ResponseCodeHandler;
 import io.undertow.util.HeaderValues;
 import io.undertow.util.HttpString;
+import io.undertow.util.Headers;
 import jakarta.annotation.Nullable;
 import jakarta.servlet.http.HttpServletResponse;
 import org.apache.commons.lang3.StringUtils;
@@ -44,6 +45,8 @@ public class WebsocketUtils {
     private volatile XnioSsl xnioSsl;
     private final CAPIConfiguration.Websocket websocketConfiguration;
     private final CAPILoadBalancerProxyClient.PoolSettings poolSettings;
+    private volatile CorsPolicy corsPolicy = CorsPolicy.denyAll();
+    private volatile boolean corsEnabled;
 
     public WebsocketUtils(CAPIConfiguration.Websocket websocketConfiguration,
                           List<DefaultJWTProcessor<SecurityContext>> defaultJWTProcessor,
@@ -144,6 +147,7 @@ public class WebsocketUtils {
         websocketClient.setPath(websocketContext);
         websocketClient.setRequiresSubscription(service.getServiceMeta().isSecured());
         websocketClient.setSubscriptionRole(service.getServiceMeta().getSubscriptionGroup());
+        websocketClient.setCorsPolicy(CorsPolicy.fromCsv(service.getServiceMeta().getAllowedOrigins()));
         websocketClient.setHttpHandler(createClientHttpHandler(websocketClient, service, null));
         return websocketClient;
     }
@@ -178,6 +182,25 @@ public class WebsocketUtils {
                                      List<String> accessControlAllowHeaders,
                                      Map<String, String> managedHeaders,
                                      @Nullable String oauth2CookieName) {
+        handleOptionsRequest(exchange, accessControlAllowHeaders, managedHeaders, oauth2CookieName, null);
+    }
+
+    /**
+     * @param requestPolicy the route's own CORS policy, or null to fall back to the gateway default
+     */
+    public void handleOptionsRequest(HttpServerExchange exchange,
+                                     List<String> accessControlAllowHeaders,
+                                     Map<String, String> managedHeaders,
+                                     @Nullable String oauth2CookieName,
+                                     @Nullable CorsPolicy requestPolicy) {
+        if (!corsEnabled) {
+            // The preflight still gets an answer; it just carries nothing CORS-related, so a
+            // browser blocks the call and `curl -I` shows an operator that CORS really is off.
+            exchange.setStatusCode(HttpServletResponse.SC_NO_CONTENT);
+            exchange.endExchange();
+            return;
+        }
+        CorsPolicy effectivePolicy = requestPolicy != null ? requestPolicy : corsPolicy;
         List<String> localHeaders = new ArrayList<>(accessControlAllowHeaders);
         if (oauth2CookieName != null && !oauth2CookieName.isEmpty()
                 && !localHeaders.contains(oauth2CookieName)) {
@@ -185,8 +208,9 @@ public class WebsocketUtils {
         }
         exchange.getResponseHeaders().put(HttpString.tryFromString("Access-Control-Max-Age"), Constants.ACCESS_CONTROL_MAX_AGE_VALUE);
         HeaderValues originHeader = exchange.getRequestHeaders().get("Origin");
-        if (originHeader != null && !originHeader.isEmpty()) {
-            processOrigin(exchange, originHeader.getFirst());
+        String origin = (originHeader != null && !originHeader.isEmpty()) ? originHeader.getFirst() : null;
+        if (origin != null) {
+            processOrigin(exchange, origin, effectivePolicy);
         }
         managedHeaders.forEach((k, v) -> {
             if (k.equals(Constants.ACCESS_CONTROL_ALLOW_HEADERS)) {
@@ -194,16 +218,48 @@ public class WebsocketUtils {
             }
             exchange.getResponseHeaders().put(HttpString.tryFromString(k), v);
         });
+        // Credentials are offered only to an origin that is actually on the allowlist. This used to
+        // be an unconditional entry in CAPI_CORS_MANAGED_HEADERS, so every preflight advertised
+        // credential support no matter who asked.
+        if (effectivePolicy.allowsCredentials(origin)) {
+            exchange.getResponseHeaders().put(
+                    HttpString.tryFromString(Constants.ACCESS_CONTROL_ALLOW_CREDENTIALS), "true");
+        }
         exchange.setStatusCode(HttpServletResponse.SC_NO_CONTENT);
         exchange.endExchange();
     }
 
+    /** Origins allowed to receive CORS headers. Defaults to denying every origin. */
+    public void setCorsPolicy(@Nullable CorsPolicy corsPolicy) {
+        this.corsPolicy = corsPolicy != null ? corsPolicy : CorsPolicy.denyAll();
+    }
+
+    /** Master switch ({@code capi.corsEnabled}); off suppresses every CORS header. */
+    public void setCorsEnabled(boolean corsEnabled) {
+        this.corsEnabled = corsEnabled;
+    }
+
+    /**
+     * Echoes the origin only when it is both syntactically valid and on the configured allowlist.
+     * The syntax check alone accepted any parseable URL, which is every attacker's origin too.
+     */
     private void processOrigin(HttpServerExchange request, String origin) {
-        if (isValidOrigin(origin)) {
-            request.getResponseHeaders().put(
-                    HttpString.tryFromString(Constants.ACCESS_CONTROL_ALLOW_ORIGIN),
-                    origin.replaceAll("(\r\n|\n)", ""));
+        processOrigin(request, origin, corsEnabled ? corsPolicy : CorsPolicy.denyAll());
+    }
+
+    private void processOrigin(HttpServerExchange request, String origin, CorsPolicy policy) {
+        if (!isValidOrigin(origin)) {
+            return;
         }
+        String sanitized = origin.replaceAll("(\r\n|\n)", "");
+        String allowOrigin = policy.resolveAllowOrigin(sanitized);
+        if (allowOrigin == null) {
+            return;
+        }
+        request.getResponseHeaders().put(Headers.VARY, "Origin");
+        request.getResponseHeaders().put(
+                HttpString.tryFromString(Constants.ACCESS_CONTROL_ALLOW_ORIGIN),
+                allowOrigin);
     }
 
     private boolean isValidOrigin(String origin) {
