@@ -53,7 +53,10 @@ services:
     environment:
       discovery.type: single-node
       DISABLE_SECURITY_PLUGIN: "true"
-      OPENSEARCH_INITIAL_ADMIN_PASSWORD: "C4p1-Admin!2024"
+      # No OPENSEARCH_INITIAL_ADMIN_PASSWORD here on purpose: the security plugin is disabled above,
+      # so it was never read. It used to carry a literal password, which secret scanners flag on a
+      # public repo whether or not it does anything. Set it via the environment if you ever enable
+      # the security plugin.
       OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]

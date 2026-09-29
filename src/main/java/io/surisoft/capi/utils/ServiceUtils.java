@@ -13,7 +13,9 @@ import org.cache2k.Cache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.net.InetAddress;
 import java.net.URI;
+import java.net.UnknownHostException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -34,6 +36,12 @@ public class ServiceUtils {
     private Map<String, RestClient> restClientMap;
     private final Optional<WebsocketUtils> websocketUtils;
     private final String capiRunningMode;
+    /** {@code capi.openApi.allowLocalSpecEndpoints} — see {@link #assertSpecEndpointAllowed}. */
+    private boolean allowLocalSpecEndpoints;
+
+    public void setAllowLocalSpecEndpoints(boolean allowLocalSpecEndpoints) {
+        this.allowLocalSpecEndpoints = allowLocalSpecEndpoints;
+    }
 
     public ServiceUtils(HttpUtils httpUtils,
                         Optional<Map<String, WebsocketClient>> websocketClientMap,
@@ -272,6 +280,7 @@ public class ServiceUtils {
             if (uri.getPath() != null && uri.getPath().contains("..")) {
                 throw new IllegalArgumentException("Path traversal detected in URI path: " + uri.getPath());
             }
+            assertSpecEndpointAllowed(uri);
 
             HttpRequest request =  HttpRequest.newBuilder()
                     .uri(uri)
@@ -356,12 +365,66 @@ public class ServiceUtils {
         return value == null || value.isBlank();
     }
 
+    /**
+     * Refuses a spec endpoint that points somewhere CAPI has no business fetching from.
+     *
+     * <p>The {@code open-api} endpoint is the one URL a service owner supplies that CAPI then
+     * requests itself, with the Consul HTTP client — which carries CAPI's trust store. Without a
+     * check, a registration can aim it at the cloud metadata service or at Consul's own KV API on
+     * loopback, and whatever parses as OpenAPI is republished on
+     * {@code /definitions/openapi/<that service>}.
+     *
+     * <p>Deliberately **not** a private-range block. CAPI's legitimate backends are on RFC 1918
+     * addresses — that is where a spec normally lives — so blanket-blocking them would refuse nearly
+     * every real endpoint. This blocks only the two ranges that are never a legitimate spec host:
+     *
+     * <ul>
+     *   <li><b>link-local</b> (169.254.0.0/16, fe80::/10) — the cloud metadata endpoints;</li>
+     *   <li><b>loopback</b> (127.0.0.0/8, ::1) — CAPI's own admin port and a co-located Consul agent,
+     *       reachable from the gateway but never from the service it claims to describe.</li>
+     * </ul>
+     *
+     * <p>The host is resolved before comparison, so {@code 0177.0.0.1} and {@code 2130706433} — both
+     * accepted by {@code URI} and by the JDK HTTP client — are caught along with the dotted form.
+     * A name that resolves to a blocked address is caught too.
+     *
+     * <p>Set {@code capi.openApi.allowLocalSpecEndpoints: true} for a dev stack that genuinely serves
+     * specs from loopback. Link-local stays blocked either way.
+     *
+     * @throws IllegalArgumentException when the endpoint must not be fetched
+     */
+    void assertSpecEndpointAllowed(URI uri) {
+        String host = uri.getHost();
+        if (host == null) {
+            throw new IllegalArgumentException("OpenAPI endpoint has no host: " + uri);
+        }
+        InetAddress address;
+        try {
+            address = InetAddress.getByName(host);
+        } catch (UnknownHostException e) {
+            // Unresolvable is the fetch's problem, not this check's — let it fail on connect with a
+            // message that says so.
+            return;
+        }
+        if (address.isLinkLocalAddress() || address.isAnyLocalAddress()) {
+            throw new IllegalArgumentException(
+                    "OpenAPI endpoint resolves to a link-local address (" + address.getHostAddress()
+                            + "), which is never a valid spec host: " + uri);
+        }
+        if (address.isLoopbackAddress() && !allowLocalSpecEndpoints) {
+            throw new IllegalArgumentException(
+                    "OpenAPI endpoint resolves to loopback (" + address.getHostAddress()
+                            + "); set capi.openApi.allowLocalSpecEndpoints to allow it: " + uri);
+        }
+    }
+
     public HttpRequest buildOpenApiRequest(Service service) {
         String openApiEndpoint = service.getServiceMeta().getOpenApiEndpoint();
         URI uri = URI.create(openApiEndpoint);
         if (uri.getPath() != null && uri.getPath().contains("..")) {
             throw new IllegalArgumentException("Path traversal detected in URI path: " + uri.getPath());
         }
+        assertSpecEndpointAllowed(uri);
         return HttpRequest.newBuilder()
                 .uri(uri)
                 .timeout(Duration.ofSeconds(10))

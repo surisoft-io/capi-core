@@ -34,6 +34,7 @@ public class CAPIConfiguration {
     private Observability observability = new Observability();
     private Admin admin = new Admin();
     private MatchOpenApiSpec matchOpenApiSpec = new MatchOpenApiSpec();
+    private OpenApi openApi = new OpenApi();
 
     public String getVersion() {
         return version;
@@ -120,11 +121,28 @@ public class CAPIConfiguration {
 
     public static class Oauth2 {
         private boolean enabled;
+        /**
+         * Accept {@code ?access_token=} as a token source. On by default — the clients relying on it
+         * cannot be enumerated from configuration, only from traffic, so switch it off once
+         * {@code capi_query_token_requests_total} shows nobody is using it.
+         *
+         * <p>Regardless of this setting, the parameter is stripped before the request is forwarded,
+         * so it never reaches a backend's access log.
+         */
+        private boolean allowQueryParameterToken = true;
         private String cookieName;
         private List<String> keys;
 
         public boolean isEnabled() {
             return enabled;
+        }
+
+        public boolean isAllowQueryParameterToken() {
+            return allowQueryParameterToken;
+        }
+
+        public void setAllowQueryParameterToken(boolean allowQueryParameterToken) {
+            this.allowQueryParameterToken = allowQueryParameterToken;
         }
         public void setEnabled(boolean enabled) {
             this.enabled = enabled;
@@ -422,6 +440,23 @@ public class CAPIConfiguration {
         }
     }
 
+    public static class OpenApi {
+        /**
+         * Allow a spec endpoint that resolves to loopback. Off by default: the {@code open-api}
+         * endpoint is owner-supplied and CAPI fetches it itself, so loopback means CAPI's own admin
+         * port or a co-located Consul agent. Link-local (cloud metadata) is blocked regardless.
+         */
+        private boolean allowLocalSpecEndpoints = false;
+
+        public boolean isAllowLocalSpecEndpoints() {
+            return allowLocalSpecEndpoints;
+        }
+
+        public void setAllowLocalSpecEndpoints(boolean allowLocalSpecEndpoints) {
+            this.allowLocalSpecEndpoints = allowLocalSpecEndpoints;
+        }
+    }
+
     public static class Opa {
         private boolean enabled;
         private String wasmBundleUrl;
@@ -678,6 +713,14 @@ public class CAPIConfiguration {
     }
     public void setObservability(Observability observability) {
         this.observability = observability;
+    }
+
+    public OpenApi getOpenApi() {
+        return openApi;
+    }
+
+    public void setOpenApi(OpenApi openApi) {
+        this.openApi = openApi;
     }
 
     public MatchOpenApiSpec getMatchOpenApiSpec() {

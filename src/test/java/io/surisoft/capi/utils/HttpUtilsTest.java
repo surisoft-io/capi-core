@@ -290,14 +290,17 @@ class HttpUtilsTest {
     }
 
     @Test
-    void processAuthorizationAccessToken_httpServerExchange_withAccessTokenHeader() throws AuthorizationException {
+    void processAuthorizationAccessToken_accessTokenHeaderIsNoLongerAToken() throws AuthorizationException {
+        // A request HEADER named `access_token` used to be honoured as a credential. It was never a
+        // documented token source — Authorization, the query parameter and the cookie are — and a
+        // header named after a query parameter is a surprising place to accept one.
         io.undertow.server.HttpServerExchange httpServerExchange = mock(io.undertow.server.HttpServerExchange.class);
         io.undertow.util.HeaderMap headerMap = new io.undertow.util.HeaderMap();
         headerMap.put(new io.undertow.util.HttpString(Constants.AUTHORIZATION_REQUEST_PARAMETER), "header-token");
         when(httpServerExchange.getRequestHeaders()).thenReturn(headerMap);
+        when(httpServerExchange.getQueryParameters()).thenReturn(new java.util.TreeMap<>());
 
-        String result = httpUtils.processAuthorizationAccessToken(httpServerExchange);
-        assertEquals("header-token", result);
+        assertNull(httpUtils.processAuthorizationAccessToken(httpServerExchange));
     }
 
     @Test
@@ -869,16 +872,109 @@ class HttpUtilsTest {
     }
 
     @Test
-    void propagateAuthorization_withAccessTokenParam_setsBearer() {
+    void propagateAuthorization_withAccessTokenQueryParam_setsBearer() {
         io.undertow.server.HttpServerExchange exchange = mock(io.undertow.server.HttpServerExchange.class);
         io.undertow.util.HeaderMap headerMap = new io.undertow.util.HeaderMap();
-        headerMap.put(new io.undertow.util.HttpString(Constants.AUTHORIZATION_REQUEST_PARAMETER), "param-token-value");
         when(exchange.getRequestHeaders()).thenReturn(headerMap);
+        java.util.Map<String, java.util.Deque<String>> query = new java.util.TreeMap<>();
+        query.put(Constants.AUTHORIZATION_REQUEST_PARAMETER,
+                new java.util.ArrayDeque<>(java.util.List.of("param-token-value")));
+        when(exchange.getQueryParameters()).thenReturn(query);
 
         httpUtils.propagateAuthorization(exchange);
 
-        String authValue = headerMap.get(Constants.AUTHORIZATION_HEADER).getFirst();
-        assertEquals("Bearer param-token-value", authValue);
+        assertEquals("Bearer param-token-value", headerMap.get(Constants.AUTHORIZATION_HEADER).getFirst());
+    }
+
+    // === stripQueryParameterToken — the token must not travel on to the backend ===
+
+    private static io.undertow.server.HttpServerExchange exchangeWithQuery(String queryString) {
+        io.undertow.server.HttpServerExchange exchange = mock(io.undertow.server.HttpServerExchange.class);
+        when(exchange.getQueryString()).thenReturn(queryString);
+        when(exchange.getQueryParameters()).thenReturn(new java.util.TreeMap<>());
+        return exchange;
+    }
+
+    @Test
+    void stripQueryParameterToken_removesOnlyTheToken() {
+        io.undertow.server.HttpServerExchange exchange =
+                exchangeWithQuery("page=2&access_token=eyJhbGciOi.x.y&sort=name");
+        httpUtils.stripQueryParameterToken(exchange);
+        verify(exchange).setQueryString("page=2&sort=name");
+    }
+
+    @Test
+    void stripQueryParameterToken_whenItIsTheOnlyParameter() {
+        io.undertow.server.HttpServerExchange exchange = exchangeWithQuery("access_token=eyJhbGciOi.x.y");
+        httpUtils.stripQueryParameterToken(exchange);
+        verify(exchange).setQueryString("");
+    }
+
+    @Test
+    void stripQueryParameterToken_preservesRepeatedParameters() {
+        // Rebuilding from getQueryParameters() would collapse these to the first value — which is
+        // why the raw query string is edited instead.
+        io.undertow.server.HttpServerExchange exchange =
+                exchangeWithQuery("id=1&access_token=tok&id=2&id=3");
+        httpUtils.stripQueryParameterToken(exchange);
+        verify(exchange).setQueryString("id=1&id=2&id=3");
+    }
+
+    @Test
+    void stripQueryParameterToken_preservesEncodingByteForByte() {
+        io.undertow.server.HttpServerExchange exchange =
+                exchangeWithQuery("q=a%20b%26c&access_token=tok&path=%2Fdeep%2Fthing");
+        httpUtils.stripQueryParameterToken(exchange);
+        verify(exchange).setQueryString("q=a%20b%26c&path=%2Fdeep%2Fthing");
+    }
+
+    @Test
+    void stripQueryParameterToken_leavesParametersThatMerelyContainTheName() {
+        // `my_access_token` and `access_token_hint` are different parameters; only an exact
+        // parameter-name match is removed.
+        io.undertow.server.HttpServerExchange exchange =
+                exchangeWithQuery("my_access_token=keep&access_token_hint=keep2&access_token=drop");
+        httpUtils.stripQueryParameterToken(exchange);
+        verify(exchange).setQueryString("my_access_token=keep&access_token_hint=keep2");
+    }
+
+    @Test
+    void stripQueryParameterToken_noQueryStringIsANoOp() {
+        io.undertow.server.HttpServerExchange exchange = exchangeWithQuery(null);
+        httpUtils.stripQueryParameterToken(exchange);
+        verify(exchange, never()).setQueryString(anyString());
+    }
+
+    @Test
+    void stripQueryParameterToken_unrelatedQueryIsLeftUntouched() {
+        io.undertow.server.HttpServerExchange exchange = exchangeWithQuery("page=2&sort=name");
+        httpUtils.stripQueryParameterToken(exchange);
+        verify(exchange, never()).setQueryString(anyString());
+    }
+
+    @Test
+    void hasQueryParameterToken_detectsPresenceForTheCounter() {
+        assertTrue(HttpUtils.hasQueryParameterToken(exchangeWithQuery("a=1&access_token=x")));
+        assertFalse(HttpUtils.hasQueryParameterToken(exchangeWithQuery("a=1&b=2")));
+        assertFalse(HttpUtils.hasQueryParameterToken(exchangeWithQuery(null)));
+        assertFalse(HttpUtils.hasQueryParameterToken(exchangeWithQuery("")));
+    }
+
+    @Test
+    void propagateAuthorization_queryParamTokenIgnoredWhenDisabled() {
+        HttpUtils disabled = new HttpUtils(null, null);
+        disabled.setAllowQueryParameterToken(false);
+        io.undertow.server.HttpServerExchange exchange = mock(io.undertow.server.HttpServerExchange.class);
+        io.undertow.util.HeaderMap headerMap = new io.undertow.util.HeaderMap();
+        when(exchange.getRequestHeaders()).thenReturn(headerMap);
+        java.util.Map<String, java.util.Deque<String>> query = new java.util.TreeMap<>();
+        query.put(Constants.AUTHORIZATION_REQUEST_PARAMETER,
+                new java.util.ArrayDeque<>(java.util.List.of("param-token-value")));
+        when(exchange.getQueryParameters()).thenReturn(query);
+
+        disabled.propagateAuthorization(exchange);
+
+        assertFalse(headerMap.contains(Constants.AUTHORIZATION_HEADER));
     }
 
     // === processAuthorizationAccessToken with cookie-based auth (HttpServerExchange) ===

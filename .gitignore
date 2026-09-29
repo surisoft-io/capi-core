@@ -58,5 +58,19 @@ build/
 *.cer
 /.idea/
 
+### Base64-encoded certificate / keystore material ###
+# The extension rules above (*.jks, *.pem, *.p12 …) match on the final extension, so a base64
+# wrapper defeats them: `cacerts.jks.b64` is NOT matched by `*.jks`. These patterns close that gap.
+*.b64
+*_b64
+
+### Security review material — must never be published ###
+# These document unfixed vulnerabilities with working reproductions, on a public repo.
+SECURITY-REVIEW-*.md
+security-review-*.md
+
+### Signed manifests / scratch output ###
+sig.json
+
 ### Internal assets — not for publication ###
 capi-lockups.html

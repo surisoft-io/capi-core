@@ -484,6 +484,19 @@ public class RestGateway {
             // header, so the cookie carrying it (and CAPI's own session cookie) must not travel on.
             httpUtils.stripConsumedCredentialCookies(exchange);
 
+            // Same reasoning for a token in the URL, which would otherwise land in the backend's
+            // access log. Counted first so the metric reflects real usage — that is the signal for
+            // whether capi.oauth2.allowQueryParameterToken can be turned off.
+            if (HttpUtils.hasQueryParameterToken(exchange)) {
+                if (meterRegistry != null) {
+                    Counter.builder("capi_query_token_requests_total")
+                            .tag("service", httpUtils.contextToRole(restClient.getServiceId()))
+                            .register(meterRegistry)
+                            .increment();
+                }
+                httpUtils.stripQueryParameterToken(exchange);
+            }
+
             // --- Async proxy handoff ---
             if (restClient.isKeepGroup()) {
                 exchange.getRequestHeaders().put(HttpString.tryFromString(Constants.CAPI_GROUP_HEADER), restClient.getServiceId());
