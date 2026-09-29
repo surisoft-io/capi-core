@@ -396,9 +396,14 @@ public class RestGateway {
             // stripped); the spec's paths are relative to servers.url, not the backend root context.
             if (restClient.getOpenAPI() != null) {
                 String apiPath = stripToApiPath(restClient, requestPath);
-                String openApiResult = checkOpenApi(exchange, restClient, apiPath);
+                GateRejection openApiResult = checkOpenApi(exchange, restClient, apiPath);
                 if (openApiResult != null) {
-                    httpErrorHandler.sendError(exchange, openApiResult.startsWith("Call not allowed") ? 400 : 401, openApiResult);
+                    if (openApiResult.statusCode() == 503) {
+                        // Same contract as the main OPA gate: transient, so tell a well-behaved
+                        // client to retry rather than letting it treat this as a hard refusal.
+                        exchange.getResponseHeaders().put(Headers.RETRY_AFTER, "1");
+                    }
+                    httpErrorHandler.sendError(exchange, openApiResult.statusCode(), openApiResult.message());
                     return;
                 }
             }
@@ -710,7 +715,10 @@ public class RestGateway {
         }
     }
 
-    private String  checkOpenApi(HttpServerExchange exchange, RestClient restClient, String forwardPath) {
+    /** A refusal from the OpenAPI operation gate: the status to send and why. */
+    record GateRejection(int statusCode, String message) {}
+
+    private GateRejection checkOpenApi(HttpServerExchange exchange, RestClient restClient, String forwardPath) {
         OpenAPI openAPI = restClient.getOpenAPI();
         String callingMethod = exchange.getRequestMethod().toString().toLowerCase();
 
@@ -729,26 +737,39 @@ public class RestGateway {
                         try {
                             String accessToken = httpUtils.processAuthorizationAccessToken(exchange);
                             if (accessToken == null) {
-                                return "No authorization provided";
+                                return new GateRejection(401, "No authorization provided");
                             }
                             String serviceKey = restClient.getCanonicalServiceId();
                             Service service = serviceCache.get(serviceKey);
-                            if (service != null) {
-                                if (!httpUtils.isAuthorized(accessToken, serviceKey, service, opaWasmService)) {
-                                    return "Invalid authentication";
+                            if (service == null) {
+                                return new GateRejection(400, "Call not allowed");
+                            }
+                            // Mirrors the main OPA gate below: an engine that cannot decide must
+                            // not fall through to a weaker check.
+                            HttpUtils.AuthorizationOutcome outcome =
+                                    httpUtils.authorize(accessToken, serviceKey, service, opaWasmService);
+                            switch (outcome) {
+                                case POLICY_UNAVAILABLE -> {
+                                    return new GateRejection(503, "Policy engine not ready");
                                 }
-                            } else {
-                                return "Call not allowed";
+                                case POLICY_UNKNOWN -> {
+                                    return new GateRejection(403,
+                                            "Unknown policy: " + service.getServiceMeta().getOpaRego());
+                                }
+                                case DENIED -> {
+                                    return new GateRejection(401, "Invalid authentication");
+                                }
+                                default -> { /* ALLOWED — fall through */ }
                             }
                         } catch (Exception e) {
-                            return "Invalid authorization provided";
+                            return new GateRejection(401, "Invalid authorization provided");
                         }
                     }
                     return null; // Operation found, no security or authorized
                 }
             }
         }
-        return "Call not allowed"; // No matching operation found
+        return new GateRejection(400, "Call not allowed"); // No matching operation found
     }
 
     private boolean isOpenApiPathMatch(String requestPath, String definedPath) {

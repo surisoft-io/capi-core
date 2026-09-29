@@ -321,8 +321,8 @@ class HttpUtilsTest {
         service.setServiceMeta(meta);
 
         try {
-            boolean result = httpUtils.isAuthorized("some-token", "/context/path", service, null);
-            assertFalse(result);
+            assertEquals(HttpUtils.AuthorizationOutcome.DENIED,
+                    httpUtils.authorize("some-token", "/context/path", service, null));
         } catch (Exception e) {
             assertNotNull(e);
         }
@@ -708,7 +708,8 @@ class HttpUtilsTest {
         OpaWasmService opaWasmService = mock(OpaWasmService.class);
         OpaResult opaResult = new OpaResult();
         opaResult.setResult(true);
-        when(opaWasmService.isReady("my-rego")).thenReturn(true);
+        when(opaWasmService.isReady()).thenReturn(true);
+        when(opaWasmService.hasPolicy("my-rego")).thenReturn(true);
         when(opaWasmService.evaluate("svc-1", "my-rego", "token", true)).thenReturn(opaResult);
 
         Service service = new Service();
@@ -717,8 +718,8 @@ class HttpUtilsTest {
         meta.setOpaRego("my-rego");
         service.setServiceMeta(meta);
 
-        boolean result = httpUtils.isAuthorized("token", "/ctx", service, opaWasmService);
-        assertTrue(result);
+        assertEquals(HttpUtils.AuthorizationOutcome.ALLOWED,
+                httpUtils.authorize("token", "/ctx", service, opaWasmService));
     }
 
     @Test
@@ -726,7 +727,8 @@ class HttpUtilsTest {
         OpaWasmService opaWasmService = mock(OpaWasmService.class);
         OpaResult opaResult = new OpaResult();
         opaResult.setResult(false);
-        when(opaWasmService.isReady("my-rego")).thenReturn(true);
+        when(opaWasmService.isReady()).thenReturn(true);
+        when(opaWasmService.hasPolicy("my-rego")).thenReturn(true);
         when(opaWasmService.evaluate("svc-1", "my-rego", "token", true)).thenReturn(opaResult);
 
         Service service = new Service();
@@ -735,8 +737,8 @@ class HttpUtilsTest {
         meta.setOpaRego("my-rego");
         service.setServiceMeta(meta);
 
-        boolean result = httpUtils.isAuthorized("token", "/ctx", service, opaWasmService);
-        assertFalse(result);
+        assertEquals(HttpUtils.AuthorizationOutcome.DENIED,
+                httpUtils.authorize("token", "/ctx", service, opaWasmService));
     }
 
     // --- Tests for isAuthorized with JWT role checking ---
@@ -757,8 +759,8 @@ class HttpUtilsTest {
         ServiceMeta meta = new ServiceMeta();
         service.setServiceMeta(meta);
 
-        boolean result = httpUtilsWithProcessor.isAuthorized("token", "/ctx", service, null);
-        assertTrue(result);
+        assertEquals(HttpUtils.AuthorizationOutcome.ALLOWED,
+                httpUtilsWithProcessor.authorize("token", "/ctx", service, null));
     }
 
     @SuppressWarnings("unchecked")
@@ -777,8 +779,8 @@ class HttpUtilsTest {
         meta.setSubscriptionGroup("my-group");
         service.setServiceMeta(meta);
 
-        boolean result = httpUtilsWithProcessor.isAuthorized("token", "/ctx", service, null);
-        assertTrue(result);
+        assertEquals(HttpUtils.AuthorizationOutcome.ALLOWED,
+                httpUtilsWithProcessor.authorize("token", "/ctx", service, null));
     }
 
     @SuppressWarnings("unchecked")
@@ -797,8 +799,8 @@ class HttpUtilsTest {
         meta.setSubscriptionGroup("my-group");
         service.setServiceMeta(meta);
 
-        boolean result = httpUtilsWithProcessor.isAuthorized("token", "/ctx", service, null);
-        assertFalse(result);
+        assertEquals(HttpUtils.AuthorizationOutcome.DENIED,
+                httpUtilsWithProcessor.authorize("token", "/ctx", service, null));
     }
 
     @SuppressWarnings("unchecked")
@@ -813,8 +815,8 @@ class HttpUtilsTest {
         ServiceMeta meta = new ServiceMeta();
         service.setServiceMeta(meta);
 
-        boolean result = httpUtilsWithProcessor.isAuthorized("token", "/ctx", service, null);
-        assertFalse(result);
+        assertEquals(HttpUtils.AuthorizationOutcome.DENIED,
+                httpUtilsWithProcessor.authorize("token", "/ctx", service, null));
     }
 
     // --- Tests for isAuthorized two-arg with group matching ---

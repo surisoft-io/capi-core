@@ -344,6 +344,7 @@ public class CAPIMain {
                     startup.getGrpcClientMap(),
                     startup.getUndertowSslContext()
             );
+            gateway.setHttpUtils(startup.getHttpUtils());
             gateway.runProxy();
             return gateway;
         }
