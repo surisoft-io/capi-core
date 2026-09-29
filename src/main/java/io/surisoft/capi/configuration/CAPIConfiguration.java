@@ -370,6 +370,28 @@ public class CAPIConfiguration {
     }
 
     public static class Websocket {
+        /**
+         * Refuse a WebSocket upgrade whose {@code Origin} is not allowlisted.
+         *
+         * <p>Off by default. While off the connection is established as before and only counted, via
+         * {@code capi_websocket_origin_total{action="observed"}} — refusing an upgrade breaks a
+         * client outright, so it is opted into once the counter shows which origins really connect.
+         *
+         * <p>A request with <strong>no</strong> {@code Origin} is always allowed: browsers always
+         * send one on a handshake, so its absence means a non-browser client, which is not what
+         * cross-site hijacking uses. The allowlist is the same one CORS uses — {@code allowedOrigins}
+         * plus the per-service {@code allowed-origins} metadata.
+         */
+        private boolean enforceOriginCheck = false;
+
+        public boolean isEnforceOriginCheck() {
+            return enforceOriginCheck;
+        }
+
+        public void setEnforceOriginCheck(boolean enforceOriginCheck) {
+            this.enforceOriginCheck = enforceOriginCheck;
+        }
+
         private boolean enabled;
         private int port;
         private String listeningAddress;

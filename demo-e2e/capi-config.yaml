@@ -23,6 +23,7 @@ capi:
     requestTimeout: 5000
     responseTimeout: 120000
   websocket:
+    enforceOriginCheck: false
     enabled: true
     port: 8382
     listeningAddress: 0.0.0.0

@@ -245,6 +245,7 @@ capi:
 | `websocket.port` | `8382` | Listening port. |
 | `websocket.listeningAddress` | `0.0.0.0` | Bind address. |
 | `websocket.contextPath` | `/api/*` | Path pattern for WebSocket routes. |
+| `websocket.enforceOriginCheck` | `false` | Refuse a WebSocket upgrade whose `Origin` is not allowlisted, guarding cross-site WebSocket hijacking. Shares the CORS allowlist (`allowedOrigins` + per-service `allowed-origins`). A request with **no** `Origin` is always allowed, since browsers always send one and its absence means a non-browser client. While false the upgrade proceeds and is only counted, via `capi_websocket_origin_total{action="observed"}`. See [Security](security.md#websocket-origins). |
 
 ### gRPC
 

@@ -156,6 +156,84 @@ class WebsocketGatewayTest {
 
     // === New tests to increase coverage ===
 
+    // ---- SEC-07 / F13: cross-site WebSocket hijacking ----
+
+    private java.lang.reflect.Method originAllowedMethod() throws Exception {
+        java.lang.reflect.Method m = WebsocketGateway.class.getDeclaredMethod(
+                "originAllowed", HttpServerExchange.class, WebsocketClient.class);
+        m.setAccessible(true);
+        return m;
+    }
+
+    private WebsocketGateway originGateway(boolean enforce, java.util.List<String> allowed) {
+        WebsocketGateway gw = new WebsocketGateway(
+                8080, 2, webSocketClients, websocketUtils, null, accessControlAllowHeaders, null);
+        gw.setEnforceOriginCheck(enforce);
+        gw.setCorsPolicy(new io.surisoft.capi.utils.CorsPolicy(allowed));
+        return gw;
+    }
+
+    private static HttpServerExchange exchangeWithOrigin(String origin) {
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        HeaderMap headers = new HeaderMap();
+        if (origin != null) {
+            headers.put(HttpString.tryFromString("Origin"), origin);
+        }
+        when(exchange.getRequestHeaders()).thenReturn(headers);
+        return exchange;
+    }
+
+    private static WebsocketClient wsClient() {
+        WebsocketClient client = new WebsocketClient();
+        client.setServiceId("/chat/v1");
+        return client;
+    }
+
+    @Test
+    void noOriginHeader_isAlwaysAllowed() throws Exception {
+        // Browsers always send Origin on a handshake, so its absence means a non-browser client —
+        // which is not what cross-site hijacking uses. Refusing these would break every
+        // server-to-server WebSocket client for no security gain.
+        WebsocketGateway gw = originGateway(true, List.of("https://app.example"));
+        assertTrue((boolean) originAllowedMethod().invoke(gw, exchangeWithOrigin(null), wsClient()));
+    }
+
+    @Test
+    void allowlistedOrigin_isAllowedWhileEnforcing() throws Exception {
+        WebsocketGateway gw = originGateway(true, List.of("https://app.example"));
+        assertTrue((boolean) originAllowedMethod().invoke(gw, exchangeWithOrigin("https://app.example"), wsClient()));
+    }
+
+    @Test
+    void unlistedOrigin_isRefusedWhileEnforcing() throws Exception {
+        WebsocketGateway gw = originGateway(true, List.of("https://app.example"));
+        assertFalse((boolean) originAllowedMethod().invoke(gw, exchangeWithOrigin("https://evil.example"), wsClient()));
+    }
+
+    @Test
+    void unlistedOrigin_isAllowedWhileObserving() throws Exception {
+        // The default: counted, not refused, so an upgrade that works today keeps working.
+        WebsocketGateway gw = originGateway(false, List.of("https://app.example"));
+        assertTrue((boolean) originAllowedMethod().invoke(gw, exchangeWithOrigin("https://evil.example"), wsClient()));
+    }
+
+    @Test
+    void perServiceOriginsOverrideTheGatewayList() throws Exception {
+        WebsocketGateway gw = originGateway(true, List.of("https://portal.example"));
+        WebsocketClient owned = wsClient();
+        owned.setCorsPolicy(io.surisoft.capi.utils.CorsPolicy.fromCsv("https://team-app.example"));
+
+        assertTrue((boolean) originAllowedMethod().invoke(gw, exchangeWithOrigin("https://team-app.example"), owned));
+        // Declaring origins replaces the gateway list for that service, as it does for CORS.
+        assertFalse((boolean) originAllowedMethod().invoke(gw, exchangeWithOrigin("https://portal.example"), owned));
+    }
+
+    @Test
+    void wildcardAllowsAnyOrigin() throws Exception {
+        WebsocketGateway gw = originGateway(true, List.of("*"));
+        assertTrue((boolean) originAllowedMethod().invoke(gw, exchangeWithOrigin("https://anything.example"), wsClient()));
+    }
+
     @Test
     void processOrigin_validOrigin_setsResponseHeader() throws Exception {
         io.surisoft.capi.configuration.CAPIConfiguration.Websocket wsConfig = new io.surisoft.capi.configuration.CAPIConfiguration.Websocket();

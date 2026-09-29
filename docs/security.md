@@ -298,6 +298,33 @@ namespace. **If you deployed a chart before that, rotate the Consul and OPA toke
 
 The Secret mounts exactly as the ConfigMap did, so no other change is needed.
 
+## WebSocket origins
+
+A page the victim happens to visit can open a WebSocket to the gateway. Without a check the socket is
+established in the victim's network position — which matters most for services needing no
+subscription, since those are reachable with no credential at all.
+
+```yaml
+capi:
+  websocket:
+    enforceOriginCheck: false   # true = refuse an upgrade from an unlisted Origin
+```
+
+- Uses the **same allowlist as CORS** — `capi.allowedOrigins`, overridden per service by the
+  `allowed-origins` metadata key.
+- **A request with no `Origin` is always allowed.** Browsers always send one on a handshake, so its
+  absence identifies a non-browser client — not what this attack uses. Refusing them would break
+  every server-to-server WebSocket client for no security gain.
+- **Off by default**, because refusing an upgrade breaks a client outright rather than degrading it.
+  While off, an unlisted origin connects as before and is counted via
+  `capi_websocket_origin_total{action="observed"}`; watch that, then enable.
+
+> **Scope worth being precise about.** CAPI's WebSocket authentication accepts only the
+> `Authorization` header or the `access_token` query parameter — **not cookies**. A browser cannot set
+> headers on a WebSocket handshake, so a cross-site page has no ambient credential to ride and cannot
+> authenticate to a `secured` service. The real exposure is unsecured services plus the victim's
+> network position, which is what this setting addresses.
+
 ## gRPC
 
 The gRPC listener routes by the `x-capi-service` header. A service registered with `secured: "true"`
