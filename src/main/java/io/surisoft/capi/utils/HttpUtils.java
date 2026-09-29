@@ -42,6 +42,14 @@ public class HttpUtils {
     private static final Logger log = LoggerFactory.getLogger(HttpUtils.class);
 
     private final String authorizationCookieName;
+    /**
+     * Whether {@code ?access_token=} is accepted ({@code capi.oauth2.allowQueryParameterToken}).
+     *
+     * <p>Defaults to true: unlike a config-driven change, the clients relying on this cannot be
+     * enumerated from configuration, only from traffic. Watch
+     * {@code capi_query_token_requests_total} before turning it off.
+     */
+    private boolean allowQueryParameterToken = true;
     private final List<DefaultJWTProcessor<SecurityContext>> jwtProcessorList;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -120,13 +128,18 @@ public class HttpUtils {
         if (authorization != null) {
             return getBearerTokenFromHeader(authorization);
         }
-        if (httpServerExchange.getRequestHeaders().contains(Constants.AUTHORIZATION_REQUEST_PARAMETER)) {
-            return httpServerExchange.getRequestHeaders().get(Constants.AUTHORIZATION_REQUEST_PARAMETER).getFirst();
-        }
-        // Try query parameter (e.g. ?access_token=...)
-        java.util.Deque<String> queryToken = httpServerExchange.getQueryParameters().get(Constants.AUTHORIZATION_REQUEST_PARAMETER);
-        if (queryToken != null && !queryToken.isEmpty()) {
-            return queryToken.getFirst();
+        // `access_token` as a REQUEST HEADER is deliberately no longer accepted. It was never a
+        // documented token source, and a header named after a query parameter is a surprising place
+        // for a credential to be honoured. Use Authorization, the query parameter, or the cookie.
+
+        // Query parameter (e.g. ?access_token=...). A token in a URL lands in every access log and
+        // Referer header along the way, so this source can be switched off — see
+        // capi.oauth2.allowQueryParameterToken.
+        if (allowQueryParameterToken) {
+            java.util.Deque<String> queryToken = httpServerExchange.getQueryParameters().get(Constants.AUTHORIZATION_REQUEST_PARAMETER);
+            if (queryToken != null && !queryToken.isEmpty()) {
+                return queryToken.getFirst();
+            }
         }
         // Try cookie-based authorization
         if (authorizationCookieName != null && httpServerExchange.getRequestHeaders().contains(Constants.COOKIE_HEADER)) {
@@ -139,6 +152,52 @@ public class HttpUtils {
             }
         }
         return null;
+    }
+
+    public void setAllowQueryParameterToken(boolean allowQueryParameterToken) {
+        this.allowQueryParameterToken = allowQueryParameterToken;
+    }
+
+    /** True when the request carried {@code ?access_token=}, whether or not it was used. */
+    public static boolean hasQueryParameterToken(HttpServerExchange exchange) {
+        String queryString = exchange.getQueryString();
+        return queryString != null
+                && !queryString.isEmpty()
+                && queryString.contains(Constants.AUTHORIZATION_REQUEST_PARAMETER);
+    }
+
+    /**
+     * Removes {@code access_token} from the query string before the request is forwarded.
+     *
+     * <p>Without this the token travels on to the backend and lands in its access log — CAPI has
+     * already consumed it and put it in the {@code Authorization} header, so the copy in the URL
+     * buys nothing. The WebSocket path has always done this; the REST path did not.
+     *
+     * <p>Operates on the raw query string rather than rebuilding from the parsed map, so every other
+     * parameter survives byte-for-byte — including its original encoding, and including repeated
+     * parameters, which a rebuild from {@code getQueryParameters()} would collapse to the first value.
+     */
+    public void stripQueryParameterToken(HttpServerExchange exchange) {
+        String queryString = exchange.getQueryString();
+        if (queryString == null || queryString.isEmpty()
+                || !queryString.contains(Constants.AUTHORIZATION_REQUEST_PARAMETER)) {
+            return;
+        }
+        StringBuilder kept = new StringBuilder(queryString.length());
+        for (String pair : queryString.split("&")) {
+            int equals = pair.indexOf('=');
+            String name = equals >= 0 ? pair.substring(0, equals) : pair;
+            if (Constants.AUTHORIZATION_REQUEST_PARAMETER.equals(name)) {
+                continue;
+            }
+            if (!kept.isEmpty()) {
+                kept.append('&');
+            }
+            kept.append(pair);
+        }
+        exchange.setQueryString(kept.toString());
+        // Keep the parsed view consistent with the raw string for anything reading it later.
+        exchange.getQueryParameters().remove(Constants.AUTHORIZATION_REQUEST_PARAMETER);
     }
 
     public void propagateAuthorization(HttpServerExchange exchange) {

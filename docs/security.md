@@ -36,8 +36,17 @@ capi:
 
 CAPI looks for tokens in this order:
 1. `Authorization: Bearer <token>` header
-2. `access_token` query parameter
+2. `access_token` query parameter — unless `oauth2.allowQueryParameterToken: false`
 3. Cookie (if `cookieName` is configured)
+
+> **A token in a URL** ends up in access logs, browser history and `Referer` headers along the way.
+> CAPI now **strips `access_token` from the query string before forwarding**, so it no longer reaches
+> the backend's own logs — CAPI has already re-emitted it as `Authorization: Bearer …`. Set
+> `oauth2.allowQueryParameterToken: false` to stop accepting it entirely; `capi_query_token_requests_total{service}`
+> tells you who still relies on it first.
+>
+> An `access_token` **request header** was also honoured until 2026-09-29. It was never a documented
+> source and is no longer accepted.
 
 ### Example
 
@@ -246,6 +255,36 @@ capi:
 > OpenAPI operation gate. A backend that decodes `%2F` will see a different path from the one CAPI
 > validated. Tomcat and Spring reject encoded slashes by default; if yours does not, treat this as an
 > open item.
+
+## OpenAPI spec endpoints
+
+The `open-api` service metadata key is the one URL a service owner supplies that CAPI then requests
+itself — using the Consul HTTP client, which carries CAPI's trust store. Endpoints are checked before
+they are fetched:
+
+```yaml
+capi:
+  openApi:
+    allowLocalSpecEndpoints: false
+```
+
+| Target | Allowed |
+|---|---|
+| Public addresses | yes |
+| **Private / RFC 1918** (`10.x`, `172.16-31.x`, `192.168.x`) | **yes** — this is where a spec normally lives |
+| **Loopback** (`127.0.0.0/8`, `::1`, `localhost`) | no, unless `allowLocalSpecEndpoints: true` |
+| **Link-local** (`169.254.0.0/16`, `fe80::/10`) | **never** — the cloud metadata endpoints |
+
+Deliberately *not* a blanket private-range block. CAPI's legitimate backends are on RFC 1918
+addresses, so refusing them would break the feature rather than secure it. What is refused is the two
+ranges that are never a valid spec host: cloud metadata, and loopback — which from the gateway means
+CAPI's own admin port or a co-located Consul agent, neither of which the service describing itself
+could legitimately point at.
+
+The host is **resolved** before comparison, so `2130706433` and `127.1` are caught along with the
+dotted form, as is a hostname that resolves to a blocked address. Note that Java does not parse octal
+dotted-quads: `0177.0.0.1` resolves to `177.0.0.1`, an ordinary public address, and is allowed —
+which matches what the HTTP client would connect to.
 
 ## CORS
 

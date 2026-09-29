@@ -278,6 +278,11 @@ Both instances route the service; `production` requires a token, `staging` does 
 | `secured` | `capi-instance-production-secured` | OAuth2 requirement for this instance only. |
 | `scheme` | `capi-instance-production-scheme` | Protocol used to reach the backend. |
 | `open-api` | `capi-instance-production-open-api` | A different OpenAPI spec URL for this instance. |
+
+> The endpoint is validated before CAPI fetches it: link-local (cloud metadata) is always refused,
+> and loopback unless `capi.openApi.allowLocalSpecEndpoints` is set. Private addresses are allowed.
+> See [Security — OpenAPI spec endpoints](security.md#openapi-spec-endpoints).
+
 | `ignore-open-api` | `capi-instance-staging-ignore-open-api` | Drop the spec entirely for this instance. |
 | `route-group-first` | `capi-instance-production-route-group-first` | Path order for this instance only. |
 | `ingress` | `capi-instance-internal-ingress` | Point this instance at a **different backend**, e.g. an internal vs. external hostname. Port is derived from the scheme (`http`→80, `https`→443); arbitrary ports are not supported here. |

@@ -19,6 +19,13 @@ capi:
   # before turning this on. Nothing is logged while it is off.
   # `exempt` lists Consul service NAMES that keep routing even while enforcing — operator
   # config on purpose, so an owner cannot exempt themselves.
+  # The `open-api` endpoint is owner-supplied and CAPI fetches it itself, with the Consul HTTP
+  # client and its trust store. Endpoints resolving to link-local (cloud metadata) are always
+  # refused; loopback (CAPI's own admin port, a co-located Consul agent) is refused unless you
+  # opt in here. Private/RFC1918 addresses are allowed — that is where a spec normally lives.
+  openApi:
+    allowLocalSpecEndpoints: false
+
   matchOpenApiSpec:
     enabled: false
     exempt: []
@@ -73,6 +80,11 @@ capi:
   apiKeyStore:
     enabled: false
   oauth2:
+    # Accept ?access_token= as a token source. On by default: unlike a config change, the clients
+    # relying on it can only be found from traffic — watch capi_query_token_requests_total, then
+    # switch it off. Either way the parameter is stripped before forwarding, so it never reaches a
+    # backend's access log.
+    allowQueryParameterToken: true
     enabled: false
     cookieName:
     keys:

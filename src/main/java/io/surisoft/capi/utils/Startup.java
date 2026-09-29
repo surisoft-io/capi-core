@@ -309,6 +309,7 @@ public class Startup {
     private void startHttpUtils() {
         log.info("Configuring HTTP Utils");
         httpUtils = new HttpUtils(configuration.getOauth2().getCookieName(), jwtProcessorList);
+        httpUtils.setAllowQueryParameterToken(configuration.getOauth2().isAllowQueryParameterToken());
     }
 
     private void startOauth2Service() {
@@ -363,6 +364,8 @@ public class Startup {
 
     private void startServiceUtils() {
         serviceUtils = new ServiceUtils(httpUtils, Optional.empty(), routeUtils, Optional.empty(), configuration.getRunningMode());
+        serviceUtils.setAllowLocalSpecEndpoints(
+                configuration.getOpenApi() != null && configuration.getOpenApi().isAllowLocalSpecEndpoints());
         serviceUtils.setRestClientMap(restClientMap);
     }
 
