@@ -330,6 +330,9 @@ public class CAPIMain {
             List<String> allowedHeaders = capiConfiguration.getAllowedHeaders() != null ? capiConfiguration.getAllowedHeaders() : new ArrayList<>();
             String cookieName = capiConfiguration.getOauth2() != null && capiConfiguration.getOauth2().getCookieName() != null ? capiConfiguration.getOauth2().getCookieName() : "";
             websocketGateway = new WebsocketGateway(capiConfiguration.getWebsocket().getPort(), capiConfiguration.getWebsocket().getIoThreads(), startup.getWebSocketClientMap(), startup.getWebsocketUtils(), startup.getUndertowSslContext(), allowedHeaders, cookieName);
+            websocketGateway.setCorsPolicy(new CorsPolicy(capiConfiguration.getAllowedOrigins()));
+            websocketGateway.setEnforceOriginCheck(capiConfiguration.getWebsocket().isEnforceOriginCheck());
+            websocketGateway.setMeterRegistry(startup.getPrometheusRegistry());
             websocketGateway.runProxy();
         }
         return websocketGateway;

@@ -50,6 +50,12 @@ capi:
     # without FIN or RST, and a socket reused after such a drop stalls until responseTimeout (504).
     connectionIdleTimeout: 30000
   websocket:
+    # Refuse a WebSocket upgrade whose Origin is not allowlisted (cross-site hijacking). OFF by
+    # default: refusing an upgrade breaks a client outright, so watch
+    # capi_websocket_origin_total{action="observed"} first. A request with NO Origin is always
+    # allowed — browsers always send one, so its absence means a non-browser client. Uses the same
+    # allowlist as CORS: allowedOrigins + the per-service allowed-origins metadata.
+    enforceOriginCheck: false
     enabled: false
     port: 8382
     listeningAddress: 0.0.0.0
