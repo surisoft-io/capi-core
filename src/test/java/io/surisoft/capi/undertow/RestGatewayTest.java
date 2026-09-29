@@ -75,7 +75,7 @@ class RestGatewayTest {
     }
 
     private int pickPort() {
-        return 19100 + ThreadLocalRandom.current().nextInt(100);
+        return io.surisoft.capi.TestPorts.next();
     }
 
     private RestGateway createGateway(int port) {

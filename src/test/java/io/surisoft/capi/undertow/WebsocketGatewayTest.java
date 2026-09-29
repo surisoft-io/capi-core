@@ -324,7 +324,7 @@ class WebsocketGatewayTest {
     // === Integration tests: start real Undertow server and send HTTP requests ===
 
     private int pickPort() {
-        return 18900 + ThreadLocalRandom.current().nextInt(100);
+        return io.surisoft.capi.TestPorts.next();
     }
 
     @Test

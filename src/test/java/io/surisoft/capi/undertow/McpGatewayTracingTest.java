@@ -277,9 +277,7 @@ class McpGatewayTracingTest {
     }
 
     private static int findFreePort() throws Exception {
-        try (ServerSocket s = new ServerSocket(0)) {
-            return s.getLocalPort();
-        }
+        return io.surisoft.capi.TestPorts.next();
     }
 
     private static class CapturingSpanProcessor implements SpanProcessor {

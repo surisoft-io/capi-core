@@ -1031,11 +1031,7 @@ class McpServerClientTest {
     }
 
     private static int findFreePort() {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        return io.surisoft.capi.TestPorts.next();
     }
 
     // === Upstream protocol negotiation (2026-07-28) ===

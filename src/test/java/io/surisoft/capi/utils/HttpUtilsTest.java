@@ -113,12 +113,15 @@ class HttpUtilsTest {
 
     @Test
     void isSafeUri_httpScheme_returnsTrue() {
-        assertTrue(httpUtils.isSafeUri(URI.create("http://example.com/api"), true));
+        // A literal address, not a hostname: isSafeUri resolves the host, so a name here makes the
+        // test depend on live DNS. It failed on a stalled resolver after a 30s timeout.
+        // 203.0.113.0/24 is TEST-NET-3 (RFC 5737) — a public-range literal that never routes.
+        assertTrue(httpUtils.isSafeUri(URI.create("http://203.0.113.10/api"), true));
     }
 
     @Test
     void isSafeUri_httpsScheme_returnsTrue() {
-        assertTrue(httpUtils.isSafeUri(URI.create("https://example.com/api"), true));
+        assertTrue(httpUtils.isSafeUri(URI.create("https://203.0.113.10/api"), true));
     }
 
     @Test
