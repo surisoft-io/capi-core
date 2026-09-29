@@ -540,6 +540,8 @@ capi:
     enabled: true
     port: 8383
     sessionTtl: 1800000      # 30 minutes (milliseconds)
+    maxRequestSize: 1048576  # largest JSON-RPC body (bytes); bounded because it is buffered before auth
+    maxSessions: 10000       # concurrent sessions; past this, initialize returns 503
     toolCallTimeout: 30000   # 30 seconds (milliseconds)
     observability:
       genAi:

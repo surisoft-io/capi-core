@@ -1,11 +1,17 @@
 apiVersion: v1
-kind: ConfigMap
+kind: Secret
+type: Opaque
 metadata:
   name: {{ include "capi-core.fullname" . }}-config
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "capi-core.labels" . | nindent 4 }}
-data:
+stringData:
+  # A Secret rather than a ConfigMap: this file embeds the Consul tokens, the OPA bundle token and
+  # the keystore/truststore passwords. A ConfigMap is readable by anything holding `get`/`list` on
+  # the namespace, is not encrypted at rest by default, and is printed in full by
+  # `kubectl describe configmap` — so any of those credentials was available to every workload in
+  # the namespace. `stringData` keeps the template readable; Kubernetes base64-encodes it.
   config.yaml: |
     capi:
       version: {{ .Values.capi.version | quote }}
@@ -77,8 +83,6 @@ data:
           {{- end }}
       opa:
         enabled: {{ .Values.capi.opa.enabled }}
-        endpoint: {{ .Values.capi.opa.endpoint }}
-        wasmEnabled: {{ .Values.capi.opa.wasmEnabled }}
         wasmBundleUrl: {{ .Values.capi.opa.wasmBundleUrl | quote }}
         wasmBundleToken: {{ .Values.capi.opa.wasmBundleToken | quote }}
         wasmBundlePollIntervalSeconds: {{ .Values.capi.opa.wasmBundlePollIntervalSeconds }}

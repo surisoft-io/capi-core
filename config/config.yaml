@@ -148,6 +148,12 @@ capi:
     kubernetesNamespace:
     kubernetesServiceName:
   mcp:
+    # The JSON-RPC body is buffered whole before the request is authenticated, so it is bounded:
+    # without this one unauthenticated POST can exhaust the heap. 1 MiB is far above a real call.
+    maxRequestSize: 1048576
+    # Sessions live for sessionTtl, so cap how many can exist at once; past it, initialize is
+    # refused rather than the process failing.
+    maxSessions: 10000
     enabled: false
     port: 8383
     sessionTtl: 1800000

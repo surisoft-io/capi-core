@@ -103,8 +103,10 @@ spec:
               mountPath: /capi/logs
       volumes:
         - name: config
-          configMap:
-            name: {{ include "capi-core.fullname" . }}-config
+          # A Secret, not a ConfigMap: the rendered config embeds Consul/OPA tokens and keystore
+          # passwords. Mounts identically.
+          secret:
+            secretName: {{ include "capi-core.fullname" . }}-config
         {{- if or .Values.capi.ssl.enabled .Values.capi.trustStore.enabled }}
         - name: certs
           secret:

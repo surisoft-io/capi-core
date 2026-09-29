@@ -368,6 +368,8 @@ Per-service throttle settings are configured via Consul metadata. See [Service R
 | `mcp.enabled` | `false` | Enable the MCP Gateway. |
 | `mcp.port` | `8383` | Listening port. |
 | `mcp.sessionTtl` | `1800000` | MCP session TTL (ms). Sessions are evicted on inactivity. **Only applies to `2025-03-26` clients** — protocol revision `2026-07-28` is stateless and mints no sessions. |
+| `mcp.maxRequestSize` | `1048576` | Largest JSON-RPC request body, in bytes. Enforced by Undertow before the handler runs. The body is buffered whole **before the request is authenticated**, so leaving it unbounded let a single unauthenticated POST exhaust the heap. |
+| `mcp.maxSessions` | `10000` | Cap on concurrent sessions. Sessions live for `sessionTtl`, so without a cap a client can mint them faster than they expire; past the cap `initialize` returns `503`. |
 | `mcp.toolCallTimeout` | `30000` | Per-tool-call backend timeout (ms). Overridable per tool via Consul metadata. |
 | `mcp.circuitBreakerCooldownMs` | `30000` | Cooldown (ms) before re-trying a failed backend in the per-tool load balancer. |
 | `mcp.mcpServerDiscoveryTimeoutMs` | `10000` | Timeout (ms) for the JSON-RPC `initialize` + `tools/list` probe used to discover tools from upstream MCP servers. |

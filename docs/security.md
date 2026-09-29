@@ -286,6 +286,39 @@ dotted form, as is a hostname that resolves to a blocked address. Note that Java
 dotted-quads: `0177.0.0.1` resolves to `177.0.0.1`, an ordinary public address, and is allowed —
 which matches what the HTTP client would connect to.
 
+## Kubernetes deployment
+
+The rendered CAPI configuration embeds the Consul token, the OPA bundle token and the keystore /
+truststore passwords, so the Helm chart writes it to a **Secret**, not a ConfigMap.
+
+A ConfigMap would be the wrong object for it: anything holding `get`/`list` on the namespace can read
+one, it is not encrypted at rest by default, and `kubectl describe configmap` prints it in full. Until
+2026-09-29 the chart used a ConfigMap, so those credentials were readable by every workload in the
+namespace. **If you deployed a chart before that, rotate the Consul and OPA tokens.**
+
+The Secret mounts exactly as the ConfigMap did, so no other change is needed.
+
+## gRPC
+
+The gRPC listener routes by the `x-capi-service` header. A service registered with `secured: "true"`
+now requires a valid token whose `subscriptions` claim contains its `subscriptionGroup`, matching the
+REST and WebSocket gateways. Until 2026-09-29 this listener dispatched straight to the backend, so any
+client that could reach the port could invoke RPC methods on internal services.
+
+Refusals use gRPC semantics rather than HTTP status codes, because a gRPC client reads `grpc-status`
+and would surface a bare 401 as an opaque transport error:
+
+| Situation | Response |
+|---|---|
+| No token on a `secured` service | HTTP 200, `grpc-status: 16` (UNAUTHENTICATED) |
+| Token not in the subscription group | HTTP 200, `grpc-status: 7` (PERMISSION_DENIED) |
+| `oauth2` not configured, service `secured` | HTTP 200, `grpc-status: 16` — refused, not passed through |
+
+Services without `secured` are unaffected and still route without a token.
+
+> Note this listener still has **no OPA, throttle or request-time watchdog**. Only the subscription
+> gate is applied. Treat the gRPC port as internal.
+
 ## CORS
 
 CORS is controlled by two keys. `corsEnabled` is the **master switch**: while it is false CAPI sends

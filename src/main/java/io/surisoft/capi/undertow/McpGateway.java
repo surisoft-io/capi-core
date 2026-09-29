@@ -19,6 +19,7 @@ import io.surisoft.capi.tracer.McpTracer;
 import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.HttpUtils;
 import io.undertow.Undertow;
+import io.undertow.UndertowOptions;
 import io.undertow.server.HttpServerExchange;
 import io.undertow.server.handlers.PathHandler;
 import io.undertow.util.Headers;
@@ -43,6 +44,14 @@ public class McpGateway implements AutoCloseable {
     private static final HttpString MCP_SESSION_ID_HEADER = new HttpString(Constants.MCP_SESSION_HEADER);
     private static final String APPLICATION_JSON = "application/json";
     private static final String TEXT_EVENT_STREAM = "text/event-stream";
+    /**
+     * Concurrent SSE streams allowed. Each one occupies a worker thread for its lifetime, and
+     * Undertow's default pool is 8x cores — so this sits well below it, leaving threads for
+     * everything else on the listener.
+     */
+    private static final int MAX_CONCURRENT_SSE_STREAMS = 16;
+    private final java.util.concurrent.Semaphore sseStreamSlots =
+            new java.util.concurrent.Semaphore(MAX_CONCURRENT_SSE_STREAMS);
     private static final String ACCEPT_HEADER = "Accept";
 
     private final int port;
@@ -122,6 +131,10 @@ public class McpGateway implements AutoCloseable {
         } else {
             builder.addHttpListener(port, "0.0.0.0");
         }
+        // Undertow's default entity size is unlimited, and readBody() buffers the whole body before
+        // the request is authenticated — so one unauthenticated POST could take the heap with it.
+        // Undertow refuses anything larger before a byte reaches the handler.
+        builder.setServerOption(UndertowOptions.MAX_ENTITY_SIZE, configuration.getMcp().getMaxRequestSize());
         server = builder.setHandler(pathHandler).build();
         server.start();
         log.info("MCP Gateway started on port {}", port);
@@ -306,8 +319,19 @@ public class McpGateway implements AutoCloseable {
                 }
             }
 
+            int maxSessions = configuration.getMcp().getMaxSessions();
+            if (maxSessions > 0 && sessionStore.size() >= maxSessions) {
+                // Sessions live for sessionTtl, so without this a client can mint them faster than
+                // they expire. Refusing initialize is recoverable; running out of heap is not.
+                log.warn("MCP session limit reached ({}); refusing initialize", maxSessions);
+                sendJsonRpc(exchange, StatusCodes.SERVICE_UNAVAILABLE,
+                        JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INTERNAL_ERROR,
+                                "Session limit reached, try again later"));
+                return;
+            }
+
             String sessionId = UUID.randomUUID().toString();
-            String clientIdentity = accessToken != null ? accessToken.substring(0, Math.min(accessToken.length(), 16)) + "..." : "anonymous";
+            String clientIdentity = clientIdentityOf(accessToken);
             long ttl = configuration.getMcp().getSessionTtl();
 
             McpSession session = new McpSession(sessionId, clientIdentity, ttl);
@@ -369,7 +393,7 @@ public class McpGateway implements AutoCloseable {
                 // must not leak inventory to unidentified callers. Services without a
                 // rego are unaffected.
                 McpToolRegistry.McpToolResolution resolution = toolRegistry.resolveToolByName(tool.getName());
-                if (resolution != null && !isOpaAllowed(exchange, resolution.getService(), true)) {
+                if (resolution != null && !isOpaAllowed(exchange, resolution.getService())) {
                     filtered++;
                     continue;
                 }
@@ -536,25 +560,32 @@ public class McpGateway implements AutoCloseable {
         }
     }
 
+    /**
+     * Whether the service's OPA policy allows this request.
+     *
+     * <p>A missing token is a <strong>refusal</strong>. There used to be a call-time variant that
+     * returned "allowed" instead, on the reasoning that the call was already gated upstream by
+     * OAuth2 and session validation. That reasoning does not hold for the session-based revision:
+     * {@code initialize} requires a token, but every later request is authorized by the
+     * {@code Mcp-Session-Id} alone, so a caller could authenticate once and then simply
+     * <em>omit the Authorization header</em> on {@code tools/call} — and the policy was never
+     * consulted. Policies like {@code admin_only} or {@code owner_only} decide on token claims, so
+     * no token means no decision, and no decision means no.
+     */
     private boolean isOpaAllowed(HttpServerExchange exchange, Service service) {
-        // Call-time variant: missing token defaults to allow (call-time is gated
-        // upstream by OAuth2 + session validation).
-        return isOpaAllowed(exchange, service, false);
-    }
-
-    private boolean isOpaAllowed(HttpServerExchange exchange, Service service, boolean denyOnMissingToken) {
         String opaRego = service.getServiceMeta().getOpaRego();
         if (opaWasmService == null || opaRego == null) {
-            return true;
+            return true;   // no policy declared for this service
         }
         String accessToken = null;
         try {
             accessToken = httpUtils.processAuthorizationAccessToken(exchange);
         } catch (AuthorizationException e) {
-            // no token available
+            // no usable token available — falls through to the refusal below
         }
         if (accessToken == null) {
-            return !denyOnMissingToken;
+            log.warn("OPA policy {} for {} could not be evaluated: no token on the request", opaRego, service.getId());
+            return false;
         }
         OpaResult opaResult = opaWasmService.evaluate(service.getId(), opaRego, accessToken, true);
         return opaResult != null && opaResult.isAllowed();
@@ -772,17 +803,40 @@ public class McpGateway implements AutoCloseable {
             exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, TEXT_EVENT_STREAM);
             exchange.getResponseHeaders().put(new HttpString("Cache-Control"), "no-cache");
 
-            HttpResponse<java.util.stream.Stream<String>> backendResponse =
-                    httpClient.send(backendRequest, HttpResponse.BodyHandlers.ofLines());
-
-            if (mcpTracer != null) mcpTracer.setHttpStatus(attemptSpan, backendResponse.statusCode());
-
-            try (java.util.stream.Stream<String> body = backendResponse.body()) {
-                body.forEach(line ->
-                    exchange.getResponseSender().send("data: " + line + "\n\n")
-                );
+            // One SSE stream holds one worker thread for as long as it runs: the exchange is in
+            // blocking mode, so each send() blocks until flushed. Without a cap, enough concurrent
+            // streams exhaust the worker pool and every other request on this listener queues —
+            // including /health, so the pod is killed while reporting healthy.
+            if (!sseStreamSlots.tryAcquire()) {
+                log.warn("SSE stream slots exhausted ({}); refusing a streaming tool call", MAX_CONCURRENT_SSE_STREAMS);
+                sendJsonRpc(exchange, StatusCodes.OK, JsonRpcResponse.error(
+                        request.getId(), Constants.JSONRPC_INTERNAL_ERROR, "Too many concurrent streams, try again later"));
+                return;
             }
-            exchange.endExchange();
+            try {
+                HttpResponse<java.util.stream.Stream<String>> backendResponse =
+                        httpClient.send(backendRequest, HttpResponse.BodyHandlers.ofLines());
+
+                if (mcpTracer != null) mcpTracer.setHttpStatus(attemptSpan, backendResponse.statusCode());
+
+                // The HttpRequest timeout bounds the response HEADERS only; ofLines() keeps
+                // streaming afterwards, so a backend that trickles forever would hold this thread
+                // forever. This deadline is what actually bounds the stream.
+                long deadline = System.currentTimeMillis() + timeout;
+                try (java.util.stream.Stream<String> body = backendResponse.body()) {
+                    java.util.Iterator<String> lines = body.iterator();
+                    while (lines.hasNext()) {
+                        if (System.currentTimeMillis() > deadline) {
+                            log.warn("SSE stream for tool {} exceeded {}ms; closing", tool.getName(), timeout);
+                            break;
+                        }
+                        exchange.getResponseSender().send("data: " + lines.next() + "\n\n");
+                    }
+                }
+                exchange.endExchange();
+            } finally {
+                sseStreamSlots.release();
+            }
             loadBalancer.reportSuccess(backendUrl);
             if (mcpTracer != null) mcpTracer.setOutcome(parentSpan, Constants.CAPI_OUTCOME_SUCCESS);
 
@@ -1084,7 +1138,7 @@ public class McpGateway implements AutoCloseable {
                 sendUnauthorized(exchange, request, "Authorization required");
                 return null;
             }
-            clientIdentity = accessToken.substring(0, Math.min(accessToken.length(), 16)) + "...";
+            clientIdentity = clientIdentityOf(accessToken);
         }
         // Not stored: nothing outlives the request on this path. It exists only so the
         // downstream handlers keep one shape regardless of revision.
@@ -1101,6 +1155,18 @@ public class McpGateway implements AutoCloseable {
                 "Bearer resource_metadata=\"" + protectedResourceMetadataUrl(exchange) + "\"");
         sendJsonRpc(exchange, StatusCodes.UNAUTHORIZED,
                 JsonRpcResponse.error(request.getId(), -32000, message));
+    }
+
+    /**
+     * A stable, non-reversible handle for the caller behind a token, used to bind a session to the
+     * identity it was issued to. Both the mint and the check must derive it identically, which is
+     * why it lives in one place.
+     */
+    private static String clientIdentityOf(String accessToken) {
+        if (accessToken == null) {
+            return "anonymous";
+        }
+        return HttpUtils.hashApiKey(accessToken).substring(0, 32);
     }
 
     private McpSession validateSession(HttpServerExchange exchange, JsonRpcRequest request) {
@@ -1122,6 +1188,24 @@ public class McpGateway implements AutoCloseable {
             sendJsonRpc(exchange, StatusCodes.OK,
                     JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INVALID_REQUEST, "Session expired or not found"));
             return null;
+        }
+
+        // The session id is a bearer credential: anyone who observes one could otherwise use it.
+        // Re-check that the caller is still the identity the session was minted for, so a leaked id
+        // is not on its own enough. Only enforced when oauth2 is on — with it off every session is
+        // "anonymous" and there is nothing to compare.
+        if (configuration.getOauth2() != null && configuration.getOauth2().isEnabled()) {
+            String callerIdentity;
+            try {
+                callerIdentity = clientIdentityOf(httpUtils.processAuthorizationAccessToken(exchange));
+            } catch (AuthorizationException e) {
+                callerIdentity = null;
+            }
+            if (callerIdentity == null || !callerIdentity.equals(session.getClientIdentity())) {
+                log.warn("MCP session {} presented by a different identity than it was issued to", sessionId);
+                sendUnauthorized(exchange, request, "Session does not belong to this caller");
+                return null;
+            }
         }
 
         session.touch();

@@ -866,6 +866,20 @@ public class CAPIConfiguration {
         private boolean enabled;
         private int port = 8383;
         private long sessionTtl = 1800000;
+        /**
+         * Largest JSON-RPC request body accepted on the MCP listener, in bytes.
+         *
+         * <p>The body is buffered whole before the request is authenticated, so without a limit a
+         * single unauthenticated POST can exhaust the heap. 1 MiB is far above any real JSON-RPC
+         * call; raise it only if a tool genuinely takes large arguments.
+         */
+        private long maxRequestSize = 1_048_576L;
+        /**
+         * Largest number of concurrent sessions held. Sessions are created by {@code initialize} and
+         * live for {@code sessionTtl}, so without a cap a client can mint them faster than they
+         * expire. Past the cap, {@code initialize} is refused rather than the process failing.
+         */
+        private int maxSessions = 10_000;
         private int toolCallTimeout = 30000;
         private long circuitBreakerCooldownMs = 30000;
         private int mcpServerDiscoveryTimeoutMs = 10000;
@@ -901,6 +915,22 @@ public class CAPIConfiguration {
         }
         public long getSessionTtl() {
             return sessionTtl;
+        }
+
+        public long getMaxRequestSize() {
+            return maxRequestSize;
+        }
+
+        public void setMaxRequestSize(long maxRequestSize) {
+            this.maxRequestSize = maxRequestSize;
+        }
+
+        public int getMaxSessions() {
+            return maxSessions;
+        }
+
+        public void setMaxSessions(int maxSessions) {
+            this.maxSessions = maxSessions;
         }
         public void setSessionTtl(long sessionTtl) {
             this.sessionTtl = sessionTtl;
