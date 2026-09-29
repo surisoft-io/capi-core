@@ -328,9 +328,7 @@ class McpGatewayResourcesPromptsTest {
     }
 
     private static int freePort() throws Exception {
-        try (ServerSocket s = new ServerSocket(0)) {
-            return s.getLocalPort();
-        }
+        return io.surisoft.capi.TestPorts.next();
     }
 
     @Test

@@ -205,8 +205,6 @@ class CAPILoadBalancerProxyClientDrainTest {
     }
 
     private static int freePort() throws Exception {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
-        }
+        return io.surisoft.capi.TestPorts.next();
     }
 }

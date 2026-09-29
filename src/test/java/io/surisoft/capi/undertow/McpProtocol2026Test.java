@@ -359,8 +359,6 @@ class McpProtocol2026Test {
     }
 
     private static int findFreePort() throws Exception {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
-        }
+        return io.surisoft.capi.TestPorts.next();
     }
 }
