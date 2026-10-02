@@ -1294,6 +1294,7 @@ class CAPIMainTest {
         Method registerHook = CAPIMain.class.getDeclaredMethod("registerShutdownHook",
                 io.surisoft.capi.undertow.WebsocketGateway.class,
                 io.surisoft.capi.undertow.GrpcGateway.class,
+                io.surisoft.capi.undertow.WebDavGateway.class,
                 io.surisoft.capi.undertow.McpGateway.class,
                 io.surisoft.capi.undertow.RestGateway.class,
                 java.util.concurrent.ScheduledExecutorService.class,
@@ -1308,7 +1309,7 @@ class CAPIMainTest {
         io.surisoft.capi.utils.Startup mockStartup = mock(io.surisoft.capi.utils.Startup.class);
 
         // This registers a shutdown hook but shouldn't throw
-        assertDoesNotThrow(() -> registerHook.invoke(null, null, null, null, null, scheduler, mockAdmin, mockStartup));
+        assertDoesNotThrow(() -> registerHook.invoke(null, null, null, null, null, null, scheduler, mockAdmin, mockStartup));
         scheduler.shutdownNow();
     }
 

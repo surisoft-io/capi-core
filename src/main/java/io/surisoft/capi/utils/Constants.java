@@ -95,6 +95,22 @@ public class Constants {
     public static final String WEBSOCKET_TYPE = "websocket";
     public static final String SSE_TYPE = "sse";
     public static final String GRPC_TYPE = "grpc";
+    public static final String WEBDAV_TYPE = "webdav";
+
+    // WebDAV service metadata. See WEBDAV-DESIGN.md.
+    /** Hostname that selects this service in host-routing mode; absent means path routing. */
+    public static final String WEBDAV_META_HOST = "webdav-host";
+    /** Owner's assertion that every instance shares storage AND the lock database. */
+    public static final String WEBDAV_META_SHARED_STATE = "webdav-shared-state";
+    /** Refuse the mutating verbs for this service regardless of backend capability. */
+    public static final String WEBDAV_META_READ_ONLY = "webdav-read-only";
+
+    /** RFC 4918 request headers CAPI reads (it forwards all of them either way). */
+    public static final String WEBDAV_HEADER_DEPTH = "Depth";
+    public static final String WEBDAV_HEADER_DESTINATION = "Destination";
+    public static final String WEBDAV_HEADER_OVERWRITE = "Overwrite";
+
+    public static final int MULTI_STATUS_CODE = 207;
     public static final String FULL_TYPE = "full";
     public static final String ACCESS_CONTROL_ALLOW_ORIGIN = "Access-Control-Allow-Origin";
     public static final String ACCESS_CONTROL_ALLOW_CREDENTIALS = "Access-Control-Allow-Credentials";

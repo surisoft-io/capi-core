@@ -61,6 +61,20 @@ public class GrpcGateway {
         exchange.endExchange();
     }
 
+    /**
+     * Largest request body accepted, in bytes; {@code -1} means unlimited.
+     *
+     * <p>Pinned explicitly rather than inherited: Undertow changed {@code DEFAULT_MAX_ENTITY_SIZE}
+     * from unlimited to 2 MiB in 2.3.21, so the 2.23 bump silently began rejecting every upload over
+     * 2 MiB with {@code 400 Bad Request} — proxied streaming bodies included. Defaulted to unlimited
+     * here as well as in configuration so a missed wiring cannot reintroduce the cap.
+     */
+    private long maxRequestSize = -1L;
+
+    public void setMaxRequestSize(long maxRequestSize) {
+        this.maxRequestSize = maxRequestSize;
+    }
+
     public void runProxy() {
         Undertow.Builder builder = Undertow.builder();
 
@@ -71,6 +85,7 @@ public class GrpcGateway {
         }
 
         builder.setServerOption(UndertowOptions.ENABLE_HTTP2, true);
+        builder.setServerOption(UndertowOptions.MAX_ENTITY_SIZE, maxRequestSize);
         builder.setHandler(httpServerExchange -> {
             String requestPath = httpServerExchange.getRequestPath();
 

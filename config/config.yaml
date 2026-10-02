@@ -49,6 +49,10 @@ capi:
     # on the path to the backend (corporate proxy / firewall / NAT / LB): those drop idle flows
     # without FIN or RST, and a socket reused after such a drop stalls until responseTimeout (504).
     connectionIdleTimeout: 30000
+    # Largest request body, in bytes. -1 = unlimited (the pre-2.23 behaviour).
+    # Pinned explicitly: Undertow changed its own default from unlimited to 2 MiB in 2.3.21, which
+    # silently broke every upload over 2 MiB in 2.23.
+    maxRequestSize: -1
   websocket:
     # Refuse a WebSocket upgrade whose Origin is not allowlisted (cross-site hijacking). OFF by
     # default: refusing an upgrade breaks a client outright, so watch
@@ -65,6 +69,32 @@ capi:
   grpc:
     enabled: false
     port: 8384
+    # -1 = unlimited. Pinned because Undertow's own default became 2 MiB in 2.3.21.
+    maxRequestSize: -1
+  # WebDAV (RFC 4918). Own listener; nothing here affects the REST gateway.
+  # Internal-network only by design — it is a write protocol. See WEBDAV-DESIGN.md.
+  webdav:
+    enabled: false
+    port: 8385
+    # host = resolve by the service's webdav-host metadata (no rewriting needed, the client's URL
+    #        space is the backend's; recommended for Windows/Finder)
+    # path = resolve by /{service}/{group} (needs the backend to know its public base URI)
+    # both = host first, then path
+    routing: both
+    # Depth: infinity is an amplification lever, but some sync clients use it legitimately, so this
+    # ships observing only. Watch capi_webdav_depth_total{action="observed"} before enforcing.
+    maxDepth: 1
+    enforceMaxDepth: false
+    # Far larger than the REST timeout: a large PUT is the normal case and 180s would kill an upload.
+    maxRequestTime: 3600000
+    # -1 = unlimited. A large PUT is the normal case for WebDAV.
+    maxRequestSize: -1
+    basicAuth:
+      # No GUI WebDAV client can send a bearer token, so the password field carries a raw JWT.
+      # Requires TLS in front: Windows refuses Basic over plaintext by default (BasicAuthLevel).
+      # NOTE: phase 2 — not yet implemented.
+      enabled: false
+      realm: CAPI WebDAV
   ssl:
     enabled: false
     keyStoreType: PKCS12

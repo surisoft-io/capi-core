@@ -23,6 +23,7 @@ import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.HttpUtils;
 import io.surisoft.capi.utils.WebsocketUtils;
 import io.undertow.Undertow;
+import io.undertow.UndertowOptions;
 import io.undertow.server.handlers.Cookie;
 import io.undertow.util.*;
 import io.undertow.server.HttpServerExchange;
@@ -202,6 +203,20 @@ public class RestGateway {
         this.opaWasmService = opaWasmService;
     }
 
+    /**
+     * Largest request body accepted, in bytes; {@code -1} means unlimited.
+     *
+     * <p>Pinned explicitly rather than inherited: Undertow changed {@code DEFAULT_MAX_ENTITY_SIZE}
+     * from unlimited to 2 MiB in 2.3.21, so the 2.23 bump silently began rejecting every upload over
+     * 2 MiB with {@code 400 Bad Request} — proxied streaming bodies included. Defaulted to unlimited
+     * here as well as in configuration so a missed wiring cannot reintroduce the cap.
+     */
+    private long maxRequestSize = -1L;
+
+    public void setMaxRequestSize(long maxRequestSize) {
+        this.maxRequestSize = maxRequestSize;
+    }
+
     public void runProxy() {
         Undertow.Builder builder = Undertow.builder()
                 .setIoThreads(ioThreads);
@@ -212,10 +227,13 @@ public class RestGateway {
             builder.addHttpListener(port, Constants.UNDERTOW_LISTENING_ADDRESS);
         }
 
+        builder.setServerOption(UndertowOptions.MAX_ENTITY_SIZE, maxRequestSize);
+
         builder.setHandler(this::handleRequest);
         server = builder.build();
         server.start();
-        log.info("REST Gateway started on port {} (ioThreads={})", port, ioThreads);
+        log.info("REST Gateway started on port {} (ioThreads={}, maxRequestSize={})", port, ioThreads,
+                maxRequestSize < 0 ? "unlimited" : maxRequestSize);
     }
 
     public void stop() {

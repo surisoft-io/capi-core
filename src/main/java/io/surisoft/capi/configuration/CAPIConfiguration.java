@@ -30,6 +30,7 @@ public class CAPIConfiguration {
     private Throttle throttle;
     private Mcp mcp;
     private Grpc grpc;
+    private WebDav webdav;
     private ApiKeyStore apiKeyStore;
     private Observability observability = new Observability();
     private Admin admin = new Admin();
@@ -256,6 +257,24 @@ public class CAPIConfiguration {
 
     public static class Rest {
         private boolean enabled;
+        /**
+         * Largest request body accepted on this listener, in bytes. {@code -1} means unlimited.
+         *
+         * <p>Explicitly set, and defaulted to unlimited, because Undertow changed
+         * {@code DEFAULT_MAX_ENTITY_SIZE} from {@code -1} to 2 MiB in 2.3.21. CAPI never set the
+         * option, so the 2.23 dependency bump silently started rejecting every upload over 2 MiB with
+         * {@code 400 Bad Request} — including proxied, streamed bodies. Pinning it here restores the
+         * pre-2.23 behaviour and makes CAPI immune to the default moving again.
+         */
+        private long maxRequestSize = -1L;
+
+        public long getMaxRequestSize() {
+            return maxRequestSize;
+        }
+        public void setMaxRequestSize(long maxRequestSize) {
+            this.maxRequestSize = maxRequestSize;
+        }
+
         /**
          * Refuse a request whose path contains a {@code .} or {@code ..} segment with 400.
          *
@@ -709,6 +728,14 @@ public class CAPIConfiguration {
         this.throttle = throttle;
     }
 
+    public WebDav getWebdav() {
+        return webdav;
+    }
+
+    public void setWebdav(WebDav webdav) {
+        this.webdav = webdav;
+    }
+
     public Mcp getMcp() {
         return mcp;
     }
@@ -870,6 +897,25 @@ public class CAPIConfiguration {
         private boolean enabled;
         private int port = 8384;
 
+        /**
+         * Largest request body accepted on this listener, in bytes. {@code -1} means unlimited.
+         *
+         * <p>Explicitly set, and defaulted to unlimited, because Undertow changed
+         * {@code DEFAULT_MAX_ENTITY_SIZE} from {@code -1} to 2 MiB in 2.3.21. CAPI never set the
+         * option, so the 2.23 dependency bump silently started rejecting every upload over 2 MiB with
+         * {@code 400 Bad Request} — including proxied, streamed bodies. Pinning it here restores the
+         * pre-2.23 behaviour and makes CAPI immune to the default moving again.
+         */
+        private long maxRequestSize = -1L;
+
+        public long getMaxRequestSize() {
+            return maxRequestSize;
+        }
+        public void setMaxRequestSize(long maxRequestSize) {
+            this.maxRequestSize = maxRequestSize;
+        }
+
+
         public boolean isEnabled() {
             return enabled;
         }
@@ -881,6 +927,144 @@ public class CAPIConfiguration {
         }
         public void setPort(int port) {
             this.port = port;
+        }
+    }
+
+    /**
+     * WebDAV (RFC 4918) transport. Its own listener, sharing nothing with the REST gateway beyond the
+     * proxy plumbing. See WEBDAV-DESIGN.md for the full design and the decisions behind it.
+     */
+    public static class WebDav {
+        private boolean enabled;
+        private int port = 8385;
+        /**
+         * {@code host} resolves a service by its {@code webdav-host} metadata, {@code path} by
+         * {@code /{service}/{group}}, {@code both} tries host first and falls back to path.
+         *
+         * <p>Host mode needs no rewriting at all: the client's URL space is the backend's, so hrefs
+         * in a 207 and the Destination header on COPY/MOVE are already correct. Path mode requires
+         * both rewrites and is phase 3.
+         */
+        private String routing = "both";
+        /**
+         * Largest {@code Depth} accepted. Observed only while {@code enforceMaxDepth} is false.
+         *
+         * <p>{@code Depth: infinity} is an amplification lever — one small request, unbounded backend
+         * work and an unbounded response — but some sync clients use it legitimately, and the listener
+         * is internal-only, so this ships observing rather than enforcing.
+         */
+        private int maxDepth = 1;
+        private boolean enforceMaxDepth = false;
+        /**
+         * Wall-clock budget for a WebDAV exchange. Far larger than the REST default because a large
+         * PUT or GET is the normal case here; the 180s that bounds an SSE stream would kill an upload
+         * mid-flight. Entity size is deliberately NOT capped for the same reason.
+         */
+        private long maxRequestTime = 3_600_000L;
+        /**
+         * Largest request body, in bytes; {@code -1} (the default) means unlimited.
+         *
+         * <p>Unlimited on purpose: a large PUT is the normal case for WebDAV. Undertow's own default
+         * became 2 MiB in 2.3.21, which would reject essentially every real upload, so this is pinned
+         * rather than inherited.
+         */
+        private long maxRequestSize = -1L;
+        private BasicAuth basicAuth = new BasicAuth();
+
+        /**
+         * Accepts {@code Authorization: Basic} and reads the password field as a raw JWT, which then
+         * goes down the normal Bearer validation path. The username is ignored.
+         *
+         * <p>This exists because no mainstream GUI WebDAV client can send a bearer token — Windows
+         * WebClient, Finder, davfs2 and Cyberduck do Basic/Digest/NTLM only. Digest is impossible
+         * (it needs the server to hold the shared secret) and NTLM/Negotiate are out of scope.
+         *
+         * <p>Note the token-lifetime problem: a mount is long-lived, an access token usually is not,
+         * and there is no refresh token in a Basic exchange, so CAPI cannot refresh for the client.
+         * WebDAV callers need a deliberately long-lived token. Phase 2.
+         */
+        public static class BasicAuth {
+            private boolean enabled;
+            private String realm = "CAPI WebDAV";
+
+            public boolean isEnabled() {
+                return enabled;
+            }
+            public void setEnabled(boolean enabled) {
+                this.enabled = enabled;
+            }
+            public String getRealm() {
+                return realm;
+            }
+            public void setRealm(String realm) {
+                this.realm = realm;
+            }
+        }
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public int getPort() {
+            return port;
+        }
+        public void setPort(int port) {
+            this.port = port;
+        }
+
+        public String getRouting() {
+            return routing;
+        }
+        public void setRouting(String routing) {
+            this.routing = routing;
+        }
+
+        /** True when a service may be selected by its {@code webdav-host} metadata. */
+        public boolean isHostRoutingEnabled() {
+            return "host".equalsIgnoreCase(routing) || "both".equalsIgnoreCase(routing);
+        }
+
+        /** True when a service may be selected by {@code /{service}/{group}}. */
+        public boolean isPathRoutingEnabled() {
+            return "path".equalsIgnoreCase(routing) || "both".equalsIgnoreCase(routing);
+        }
+
+        public int getMaxDepth() {
+            return maxDepth;
+        }
+        public void setMaxDepth(int maxDepth) {
+            this.maxDepth = maxDepth;
+        }
+
+        public boolean isEnforceMaxDepth() {
+            return enforceMaxDepth;
+        }
+        public void setEnforceMaxDepth(boolean enforceMaxDepth) {
+            this.enforceMaxDepth = enforceMaxDepth;
+        }
+
+        public long getMaxRequestTime() {
+            return maxRequestTime;
+        }
+        public void setMaxRequestTime(long maxRequestTime) {
+            this.maxRequestTime = maxRequestTime;
+        }
+
+        public long getMaxRequestSize() {
+            return maxRequestSize;
+        }
+        public void setMaxRequestSize(long maxRequestSize) {
+            this.maxRequestSize = maxRequestSize;
+        }
+
+        public BasicAuth getBasicAuth() {
+            return basicAuth;
+        }
+        public void setBasicAuth(BasicAuth basicAuth) {
+            this.basicAuth = basicAuth;
         }
     }
 

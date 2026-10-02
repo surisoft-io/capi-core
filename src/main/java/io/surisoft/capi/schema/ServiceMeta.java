@@ -33,6 +33,22 @@ public class ServiceMeta {
     @JsonProperty("type")
     private String type;
 
+    // WebDAV (type = webdav). See WEBDAV-DESIGN.md.
+    @JsonProperty("webdav-host")
+    private String webdavHost;
+    /**
+     * Owner's assertion that every registered instance shares both storage and the lock database.
+     *
+     * <p>Required on a multi-instance webdav service: CAPI round-robins across instances and cannot
+     * replicate files, so with independent storage a PUT to one instance is simply absent from the
+     * next, and a LOCK taken on one is unknown to the others. Absent this assertion a multi-instance
+     * service is refused rather than published — see WebDavTransportHandler.
+     */
+    @JsonProperty("webdav-shared-state")
+    private boolean webdavSharedState;
+    @JsonProperty("webdav-read-only")
+    private boolean webdavReadOnly;
+
     private String subscriptionGroup;
     private boolean allowSubscriptions;
 
@@ -138,6 +154,27 @@ public class ServiceMeta {
 
     public void setIngress(String ingress) {
         this.ingress = ingress;
+    }
+
+    public String getWebdavHost() {
+        return webdavHost;
+    }
+    public void setWebdavHost(String webdavHost) {
+        this.webdavHost = webdavHost;
+    }
+
+    public boolean isWebdavSharedState() {
+        return webdavSharedState;
+    }
+    public void setWebdavSharedState(boolean webdavSharedState) {
+        this.webdavSharedState = webdavSharedState;
+    }
+
+    public boolean isWebdavReadOnly() {
+        return webdavReadOnly;
+    }
+    public void setWebdavReadOnly(boolean webdavReadOnly) {
+        this.webdavReadOnly = webdavReadOnly;
     }
 
     public String getType() {

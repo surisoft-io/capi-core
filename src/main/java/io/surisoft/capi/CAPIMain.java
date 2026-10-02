@@ -49,13 +49,14 @@ public class CAPIMain {
 
             WebsocketGateway websocketGateway = getWebsocketGateway(startup);
             GrpcGateway grpcGateway = getGrpcGateway(startup);
+            WebDavGateway webDavGateway = getWebDavGateway(startup);
             AdminGateway adminGateway = configureAdminGateway(startup);
             McpGateway mcpGateway = getMcpGateway(startup);
             RestGateway restGateway = getRestGateway(startup, managedHeaders);
 
             ScheduledExecutorService scheduler = startSchedulers(startup);
 
-            registerShutdownHook(websocketGateway, grpcGateway, mcpGateway, restGateway, scheduler, adminGateway, startup);
+            registerShutdownHook(websocketGateway, grpcGateway, webDavGateway, mcpGateway, restGateway, scheduler, adminGateway, startup);
 
             log.info("CAPI Gateway started successfully.");
             Thread.currentThread().join();
@@ -169,11 +170,12 @@ public class CAPIMain {
         return adminGateway;
     }
 
-    private static void registerShutdownHook(@Nullable WebsocketGateway websocketGateway, @Nullable GrpcGateway grpcGateway, @Nullable McpGateway mcpGateway, @Nullable RestGateway restGateway, ScheduledExecutorService scheduler, AdminGateway adminGateway, Startup startup) {
+    private static void registerShutdownHook(@Nullable WebsocketGateway websocketGateway, @Nullable GrpcGateway grpcGateway, @Nullable WebDavGateway webDavGateway, @Nullable McpGateway mcpGateway, @Nullable RestGateway restGateway, ScheduledExecutorService scheduler, AdminGateway adminGateway, Startup startup) {
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             log.info("Shutting down CAPI Gateway...");
             if(websocketGateway != null) websocketGateway.stop();
             if(grpcGateway != null) grpcGateway.stop();
+            if(webDavGateway != null) webDavGateway.stop();
             if(mcpGateway != null) mcpGateway.stop();
             if(restGateway != null) restGateway.stop();
             scheduler.shutdownNow();
@@ -284,6 +286,7 @@ public class CAPIMain {
             );
             gateway.setCorsEnabled(capiConfiguration.isCorsEnabled());
             gateway.setRejectDotSegments(capiConfiguration.getRest().isRejectDotSegments());
+            gateway.setMaxRequestSize(capiConfiguration.getRest().getMaxRequestSize());
             gateway.setCorsPolicy(new CorsPolicy(capiConfiguration.getAllowedOrigins()));
             if (startup.getOpaWasmService() != null) gateway.setOpaWasmService(startup.getOpaWasmService());
             if (startup.getThrottleProcessor() != null) gateway.setThrottleProcessor(startup.getThrottleProcessor());
@@ -348,6 +351,31 @@ public class CAPIMain {
                     startup.getUndertowSslContext()
             );
             gateway.setHttpUtils(startup.getHttpUtils());
+            gateway.setMaxRequestSize(capiConfiguration.getGrpc().getMaxRequestSize());
+            gateway.runProxy();
+            return gateway;
+        }
+        return null;
+    }
+
+    /**
+     * WebDAV listener. Its own port, and — unlike the other transports — a {@code 401} challenge on a
+     * missing credential rather than {@code 403}, because a {@code 403} does not make Explorer or
+     * Finder prompt. See WEBDAV-DESIGN.md.
+     */
+    private @Nullable WebDavGateway getWebDavGateway(Startup startup) {
+        if(capiConfiguration.getWebdav() != null
+                && capiConfiguration.getWebdav().isEnabled()
+                && startup.getWebDavUtils() != null) {
+            WebDavGateway gateway = new WebDavGateway(
+                    capiConfiguration.getWebdav().getPort(),
+                    startup.getWebDavClientMap(),
+                    startup.getUndertowSslContext(),
+                    capiConfiguration.getWebdav()
+            );
+            gateway.setHttpUtils(startup.getHttpUtils());
+            gateway.setOpaWasmService(startup.getOpaWasmService());
+            gateway.setMeterRegistry(startup.getPrometheusRegistry());
             gateway.runProxy();
             return gateway;
         }
