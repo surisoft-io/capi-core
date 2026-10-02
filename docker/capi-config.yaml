@@ -47,7 +47,6 @@ capi:
       - http://keycloak:8080/realms/capi/protocol/openid-connect/certs
   opa:
     enabled: false
-    endpoint: http://opa:8181
   traces:
     enabled: true
     serviceName: capi

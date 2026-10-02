@@ -59,10 +59,12 @@ public class Startup {
     private WebsocketUtils websocketUtils;
     @Nullable
     private GrpcUtils grpcUtils;
+    private WebDavUtils webDavUtils;
     private final Map<String, WebsocketClient> webSocketClientMap = new java.util.concurrent.ConcurrentHashMap<>();
     private final Map<String, RestClient> restClientMap = new java.util.concurrent.ConcurrentHashMap<>();
     private final RestClientSnapshot restClientSnapshot = new RestClientSnapshot();
     private final Map<String, GrpcClient> grpcClientMap = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<String, io.surisoft.capi.schema.WebDavClient> webDavClientMap = new java.util.concurrent.ConcurrentHashMap<>();
     private final Map<String, InvalidService> invalidServiceMap = new java.util.concurrent.ConcurrentHashMap<>();
     @Nullable
     private io.surisoft.capi.observability.JvmObservability jvmObservability;
@@ -107,6 +109,7 @@ public class Startup {
         startTraceService();
         startWebsocketUtils();
         startGrpcUtils();
+        startWebDavUtils();
         createRouteProcessors();
         startRouteUtils();
         startServiceUtils();
@@ -171,6 +174,15 @@ public class Startup {
         // Shared with the REST listener: one allowlist governs CORS on both preflight and response.
         websocketUtils.setCorsEnabled(configuration.isCorsEnabled());
         websocketUtils.setCorsPolicy(new CorsPolicy(configuration.getAllowedOrigins()));
+    }
+
+    private void startWebDavUtils() {
+        if (configuration.getWebdav() != null && configuration.getWebdav().isEnabled()) {
+            webDavUtils = new WebDavUtils(
+                    capiSslContextHolder,
+                    backendPoolSettings(),
+                    configuration.getWebdav().getMaxRequestTime());
+        }
     }
 
     private void startGrpcUtils() {
@@ -276,6 +288,13 @@ public class Startup {
                     configuration.getGrpc().isEnabled(),
                     grpcClientMap,
                     grpcUtils));
+        }
+        if (configuration.getWebdav() != null) {
+            handlers.add(new WebDavTransportHandler(
+                    configuration.getWebdav().isEnabled(),
+                    webDavClientMap,
+                    webDavUtils,
+                    invalidServiceMap));
         }
 
         String extrasPrefix = configuration.getTraces() != null
@@ -455,6 +474,14 @@ public class Startup {
 
     public Map<String, GrpcClient> getGrpcClientMap() {
         return grpcClientMap;
+    }
+
+    public @Nullable WebDavUtils getWebDavUtils() {
+        return webDavUtils;
+    }
+
+    public Map<String, io.surisoft.capi.schema.WebDavClient> getWebDavClientMap() {
+        return webDavClientMap;
     }
 
     public @Nullable SSLContext getUndertowSslContext() {

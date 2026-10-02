@@ -18,6 +18,7 @@ import io.surisoft.capi.service.McpToolRegistry;
 import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.HttpUtils;
 import io.undertow.Undertow;
+import io.undertow.UndertowOptions;
 import io.undertow.server.HttpHandler;
 import io.undertow.server.HttpServerExchange;
 import io.undertow.server.handlers.PathHandler;
@@ -98,6 +99,9 @@ public class AdminGateway implements AutoCloseable {
 
 
         Undertow.Builder builder = Undertow.builder();
+        // Unlimited, as it was before 2.23: Undertow's default became 2 MiB in 2.3.21 and a trust
+        // store PUT carries a certificate bundle. No knob — this listener is internal by design.
+        builder.setServerOption(UndertowOptions.MAX_ENTITY_SIZE, -1L);
         if(sslContext != null) {
             builder.addHttpsListener(port, "0.0.0.0", sslContext);
         } else {
