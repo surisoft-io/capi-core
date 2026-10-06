@@ -486,6 +486,13 @@
         <h3>gRPC Gateway <span style="font-size:0.7rem;background:#333333;color:#ffffff;padding:2px 8px;border-radius:4px;vertical-align:middle;font-weight:700;margin-left:6px;">EXPERIMENTAL</span></h3>
         <p>Transparent HTTP/2 reverse proxy for gRPC services. Header-based routing via <code>x-capi-service</code> forwards requests to backends discovered from Consul — no path rewriting needed.</p>
       </a>
+      <a class="feature-card" href="guide.html?page=webdav-gateway" style="text-decoration:none;color:inherit;">
+        <div class="feature-icon">
+          <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 4h5l2 2h9a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/></svg>
+        </div>
+        <h3>WebDAV Gateway <span style="font-size:0.7rem;background:#333333;color:#ffffff;padding:2px 8px;border-radius:4px;vertical-align:middle;font-weight:700;margin-left:6px;">EXPERIMENTAL</span></h3>
+        <p>RFC 4918 reverse proxy on its own listener. Route by hostname or by <code>/{service}/{group}</code>, with the full verb set, OPA policies, and a guard that refuses to publish a multi-instance service that has not asserted shared storage and locks.</p>
+      </a>
     </div>
   </div>
 </section>

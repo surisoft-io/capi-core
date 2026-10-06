@@ -436,7 +436,10 @@ treated as a configuration mistake, not as evidence of staleness.
 |-----|---------|-------------|
 | `root-context` | `/` | Backend path prefix. Requests are forwarded to this path on the upstream service. If not specified, CAPI forwards to `/`. |
 | `scheme` | `http` | Protocol to use when connecting to the upstream service (`http`, `https`, `ws`, `wss`). |
-| `type` | `rest` | Service type: `rest`, `websocket`, or `sse`. |
+| `type` | `rest` | Service type: `rest`, `websocket`, `sse`, `grpc`, or `webdav`. Each non-REST type is served on its own listener and must be enabled in configuration. |
+| `webdav-host` | — | **WebDAV only.** Hostname that selects this service in host-routing mode. Absent means path routing. See [WebDAV Gateway](webdav-gateway.md). |
+| `webdav-shared-state` | `false` | **WebDAV only.** Owner's assertion that every instance shares both storage and the lock database. **Required above one instance** — without it the service is not published and appears at `/info/invalid-services`. |
+| `webdav-read-only` | `false` | **WebDAV only.** Refuse the mutating verbs (`PUT`, `DELETE`, `MKCOL`, `COPY`, `MOVE`, `LOCK`, `UNLOCK`, `PROPPATCH`) with `403`. |
 | `route-group-first` | `false` | When `true`, route path becomes `/<group>/<service>` instead of `/<service>/<group>`. |
 | `keep-group` | `false` | When `true`, preserves the group segment in the path forwarded to the backend. |
 | `state` | `PUBLISHED` | Service state. Only `PUBLISHED` services are routed. Set to other values to disable without deregistering. |

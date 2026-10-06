@@ -233,6 +233,7 @@ capi:
 | `rest.rejectDotSegments` | `false` | Refuse a request whose path contains a `.` or `..` **segment** with `400`. While false the request is forwarded exactly as before and only counted, via `capi_dot_segment_requests_total{action="observed"}` — watch that stay at zero on real traffic, then turn it on. Segment-wise, so ordinary paths like `/range/1..10` or `/report..pdf` are unaffected. See [Security](security.md#path-handling). |
 | `rest.connectionRequestTimeout` | `5000` | Time (ms) to obtain a connection from the pool. |
 | `rest.requestTimeout` | `5000` | Total request timeout (ms). |
+| `rest.maxRequestSize` | `-1` | Largest request body, in bytes; `-1` means unlimited. **Pinned explicitly rather than inherited:** Undertow changed its own `DEFAULT_MAX_ENTITY_SIZE` from unlimited to 2 MiB in 2.3.21, so 2.23–2.23.3 silently rejected every body over 2 MiB with `400 Bad Request`, streamed proxy bodies included. The default restores pre-2.23 behaviour. If you set a bound, raise `rest.responseTimeout` to match what that size needs at your clients' real throughput — `maxRequestTime` is a wall-clock watchdog that covers the upload, so a large body on a slow link fails with `504` instead. |
 | `rest.responseTimeout` | `120000` | Time (ms) to wait for a response from the backend. |
 | `rest.proxyPoolSize` | `200` | Core size of the proxy connection pool. Controls how many concurrent backend connections can be maintained. |
 | `rest.proxyMaxPoolSize` | `500` | Maximum proxy connection pool size. |
@@ -253,8 +254,30 @@ capi:
 |-------|---------|-------------|
 | `grpc.enabled` | `false` | Enable the gRPC Gateway (HTTP/2 reverse proxy). |
 | `grpc.port` | `8384` | Listening port. |
+| `grpc.maxRequestSize` | `-1` | Largest request body, in bytes; `-1` unlimited. Same Undertow default change as `rest.maxRequestSize`. |
 
 See [gRPC Gateway](grpc-gateway.md) for details on header-based routing and service registration.
+
+### WebDAV
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `webdav.enabled` | `false` | Enable the WebDAV (RFC 4918) gateway. |
+| `webdav.port` | `8385` | Listening port. No context path — requests go to `/{service}/{group}/...`. |
+| `webdav.routing` | `both` | `host` resolves a service by its `webdav-host` metadata, `path` by `/{service}/{group}`, `both` tries host first. |
+| `webdav.maxRequestSize` | `-1` | Largest body in bytes; `-1` unlimited, because a large `PUT` is the normal case for WebDAV. |
+| `webdav.maxRequestTime` | `3600000` | Wall-clock budget (ms). Far larger than the REST default: a REST-scale timeout would kill a large upload mid-flight. |
+| `webdav.maxDepth` | `1` | Largest `Depth` accepted. `Depth: infinity` is an amplification lever, but some sync clients use it legitimately, so this is **observed only** unless enforced — watch `capi_webdav_depth_total{action="observed"}` first. |
+| `webdav.enforceMaxDepth` | `false` | Refuse a `Depth` above `maxDepth` with `403`. |
+| `webdav.basicAuth.enabled` | `false` | Accept `Authorization: Basic` with a raw JWT in the password field, since no GUI WebDAV client can send a bearer token. **Phase 2 — not yet implemented.** |
+| `webdav.basicAuth.realm` | `CAPI WebDAV` | Realm sent in `WWW-Authenticate`. |
+
+A missing or invalid credential on this listener returns **`401` with `WWW-Authenticate`**, unlike every
+other CAPI listener, because a `403` does not make Explorer or Finder prompt for credentials. An
+authenticated caller who is not permitted still gets `403`.
+
+See [WebDAV Gateway](webdav-gateway.md) for routing modes, registration examples and the
+multi-instance shared-state rule.
 
 ### SSL
 
@@ -388,6 +411,7 @@ See [MCP Gateway](mcp-gateway.md) for the full design, wire protocol and Consul 
 | 8382 | WebSocket/SSE gateway | `capi.websocket.port` |
 | 8383 | MCP Gateway | `capi.mcp.port` |
 | 8384 | gRPC Gateway | `capi.grpc.port` |
+| 8385 | WebDAV Gateway | `capi.webdav.port` |
 
 ## Reverse Proxy Headers
 
