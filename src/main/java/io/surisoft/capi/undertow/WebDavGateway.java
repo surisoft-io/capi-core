@@ -13,6 +13,8 @@ import io.undertow.Undertow;
 import io.undertow.UndertowOptions;
 import io.undertow.server.HttpServerExchange;
 import io.undertow.util.Headers;
+import io.undertow.util.Methods;
+import io.undertow.util.StatusCodes;
 import io.undertow.util.HttpString;
 import jakarta.annotation.Nullable;
 import jakarta.servlet.http.HttpServletResponse;
@@ -44,6 +46,9 @@ public class WebDavGateway {
             "PUT", "DELETE", "POST", "MKCOL", "COPY", "MOVE", "LOCK", "UNLOCK", "PROPPATCH", "PATCH");
 
     private static final HttpString DAV_DEPTH = new HttpString(Constants.WEBDAV_HEADER_DEPTH);
+    /** Carries a token resolved from the session path prefix to the authorization gate. */
+    private static final io.undertow.util.AttachmentKey<String> PATH_TOKEN =
+            io.undertow.util.AttachmentKey.create(String.class);
 
     private final int port;
     private final Map<String, WebDavClient> webDavClients;
@@ -52,6 +57,8 @@ public class WebDavGateway {
     private HttpUtils httpUtils;
     private OpaWasmService opaWasmService;
     private MeterRegistry meterRegistry;
+    private io.surisoft.capi.service.WebDavTicketStore ticketStore;
+    private io.surisoft.capi.service.WebDavSessionStore sessionStore;
     private Undertow server;
 
     public WebDavGateway(int port,
@@ -74,6 +81,14 @@ public class WebDavGateway {
 
     public void setMeterRegistry(@Nullable MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
+    }
+
+    public void setTicketStore(@Nullable io.surisoft.capi.service.WebDavTicketStore ticketStore) {
+        this.ticketStore = ticketStore;
+    }
+
+    public void setSessionStore(@Nullable io.surisoft.capi.service.WebDavSessionStore sessionStore) {
+        this.sessionStore = sessionStore;
     }
 
     public void runProxy() {
@@ -105,6 +120,19 @@ public class WebDavGateway {
             exchange.endExchange();
             return;
         }
+
+        if (ticketStore != null
+                && config.getTicket() != null
+                && config.getTicket().isEnabled()
+                && config.getTicket().getPath().equals(requestPath)) {
+            issueTicket(exchange);
+            return;
+        }
+
+        // A session id in the path, stripped before anything else looks at the path. Unlike a query
+        // string this survives the client deriving a parent-collection URL by truncating the filename,
+        // which is the only reason the first request authenticated and nothing after it did.
+        requestPath = consumeSessionPath(exchange, requestPath);
 
         // Host first, then path — a service that opted into a hostname is never also path-reachable.
         WebDavClient client = resolveByHost(exchange);
@@ -159,11 +187,50 @@ public class WebDavGateway {
             return; // authorize() has written the status and ended the exchange
         }
 
+        // A token in the query string must not reach the backend: it would land in the backend's
+        // access log, and for WebDAV the backend is frequently a plain file server with no notion
+        // that the parameter is a credential. RestGateway does the same.
+        if (httpUtils != null) {
+            httpUtils.stripQueryParameterToken(exchange);
+        }
+
         if (!hostMode) {
             stripServicePrefix(exchange, client);
         }
 
         client.getHttpHandler().handleRequest(exchange);
+    }
+
+    /**
+     * Resolves and removes a leading {@code /<prefix>/<session-id>} from the request path.
+     *
+     * <p>The backend must never see it, so the exchange's path, URI and relative path are all rewritten
+     * before routing. An unknown or expired id is left in place rather than stripped, so it falls
+     * through to normal routing and fails as an ordinary unauthenticated request.
+     *
+     * @return the path the rest of the handler should use
+     */
+    private String consumeSessionPath(HttpServerExchange exchange, String requestPath) {
+        String prefix = config.getSessionPathPrefix();
+        if (sessionStore == null || prefix == null || prefix.isBlank() || !requestPath.startsWith(prefix)) {
+            return requestPath;
+        }
+        int idEnd = requestPath.indexOf('/', prefix.length());
+        String id = idEnd < 0 ? requestPath.substring(prefix.length()) : requestPath.substring(prefix.length(), idEnd);
+        String token = sessionStore.resolve(id);
+        if (token == null) {
+            log.debug("WebDAV session id in path is unknown or expired");
+            return requestPath;
+        }
+        String remainder = (idEnd < 0 || idEnd + 1 > requestPath.length()) ? "/" : requestPath.substring(idEnd);
+        if (remainder.isEmpty()) {
+            remainder = "/";
+        }
+        exchange.putAttachment(PATH_TOKEN, token);
+        exchange.setRequestPath(remainder);
+        exchange.setRequestURI(remainder);
+        exchange.setRelativePath(remainder);
+        return remainder;
     }
 
     // ---- routing ----
@@ -282,6 +349,105 @@ public class WebDavGateway {
      *
      * @return true when the request may proceed; otherwise the response has already been written
      */
+    /**
+     * Mints a ticket for the caller's own bearer token.
+     *
+     * <p>Authenticated like any other request: the caller proves who it is with a normal
+     * {@code Authorization} header, and the ticket it gets back stands in for exactly that token. It
+     * grants nothing extra — the token is still run through the subscription and policy checks when
+     * the ticket is redeemed.
+     */
+    private void issueTicket(HttpServerExchange exchange) {
+        // POST only. Minting is a state-changing operation, and on GET it could be triggered by
+        // anything that merely follows a link, and cached by an intermediary that ignores no-store.
+        if (!Methods.POST.equals(exchange.getRequestMethod())) {
+            exchange.setStatusCode(StatusCodes.METHOD_NOT_ALLOWED);
+            exchange.getResponseHeaders().put(Headers.ALLOW, "POST");
+            exchange.endExchange();
+            return;
+        }
+        if (httpUtils == null) {
+            exchange.setStatusCode(Constants.FORBIDDEN_CODE);
+            exchange.endExchange();
+            return;
+        }
+        String accessToken;
+        try {
+            accessToken = httpUtils.processAuthorizationAccessToken(exchange);
+        } catch (AuthorizationException e) {
+            accessToken = null;
+        }
+        if (accessToken == null || accessToken.isBlank()) {
+            exchange.setStatusCode(Constants.UNAUTHORIZED_CODE);
+            exchange.getResponseHeaders().put(Headers.WWW_AUTHENTICATE, "Bearer");
+            exchange.endExchange();
+            return;
+        }
+
+        // Validate before minting. Without this the endpoint hands back a perfectly good-looking
+        // ticket for a dead token, and the failure surfaces much later at the authorization gate as
+        // an opaque 403 on a document request — a long way from the cause. A credential was presented
+        // and rejected, so this is 403 rather than 401.
+        try {
+            httpUtils.authorizeRequest(accessToken);
+        } catch (AuthorizationException e) {
+            log.debug("WebDAV ticket refused: the presented token is not valid ({})", e.getMessage());
+            exchange.setStatusCode(Constants.FORBIDDEN_CODE);
+            exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+            exchange.getResponseHeaders().put(Headers.CACHE_CONTROL, "no-store");
+            exchange.getResponseSender().send(
+                    "{\"error\":\"invalid_token\",\"message\":\"The access token is expired or not valid.\"}");
+            return;
+        }
+        String ticket = ticketStore.issue(accessToken);
+        if (ticket == null) {
+            exchange.setStatusCode(503);
+            exchange.endExchange();
+            return;
+        }
+
+        // Also a reusable session, because the single-use ticket only ever reaches the first request:
+        // a WebDAV client derives a parent-collection URL by truncating the filename and drops the
+        // query string with it. Put the session id in the PATH and it survives that truncation.
+        String session = sessionStore == null ? null : sessionStore.create(accessToken);
+        String sessionPath = (session == null || config.getSessionPathPrefix() == null
+                || config.getSessionPathPrefix().isBlank())
+                ? null
+                : config.getSessionPathPrefix() + session;
+
+        StringBuilder json = new StringBuilder("{\"ticket\":\"").append(ticket)
+                .append("\",\"expiresIn\":").append(config.getTicket().getTtlSeconds());
+        if (session != null) {
+            json.append(",\"session\":\"").append(session)
+                .append("\",\"sessionPath\":\"").append(sessionPath)
+                .append("\",\"sessionExpiresIn\":").append(config.getSessionTtlSeconds());
+        }
+        json.append('}');
+
+        exchange.setStatusCode(HttpServletResponse.SC_OK);
+        exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+        exchange.getResponseHeaders().put(Headers.CACHE_CONTROL, "no-store");
+        exchange.getResponseSender().send(json.toString());
+    }
+
+    /**
+     * A ticket in the query string, redeemed into the access token it stands for.
+     *
+     * <p>Redeeming consumes it, so the copy left behind in the client's recent-documents list cannot
+     * be replayed.
+     */
+
+    private @Nullable String redeemTicket(HttpServerExchange exchange) {
+        if (ticketStore == null || config.getTicket() == null || !config.getTicket().isEnabled()) {
+            return null;
+        }
+        java.util.Deque<String> values = exchange.getQueryParameters().get("ticket");
+        if (values == null || values.isEmpty()) {
+            return null;
+        }
+        return ticketStore.redeem(values.getFirst());
+    }
+
     private boolean authorize(HttpServerExchange exchange, WebDavClient client) {
         boolean policyGoverned = opaWasmService != null
                 && client.getOpaRego() != null
@@ -293,31 +459,56 @@ public class WebDavGateway {
         if (httpUtils == null) {
             log.error("WebDAV service {} is secured but no token validator is configured; refusing",
                     client.getServiceId());
-            challenge(exchange, "Authorization not available");
+            challenge(exchange, client, "Authorization not available");
             return false;
         }
 
-        String accessToken;
-        try {
-            accessToken = httpUtils.processAuthorizationAccessToken(exchange);
-        } catch (AuthorizationException e) {
-            challenge(exchange, "Invalid authorization");
-            return false;
+        // Three credential sources, most specific first.
+        //
+        // 1. a session id in the path, already resolved and stripped before routing. This is the only
+        //    one that survives the client deriving a URL by truncating the filename.
+        String accessToken = exchange.getAttachment(PATH_TOKEN);
+
+        if (accessToken == null) {
+            // 2. a single-use ticket in the query string. Reaches only the request whose URL the
+            //    caller authored, so it cannot carry the session on its own.
+            accessToken = redeemTicket(exchange);
+        }
+
+        if (accessToken == null) {
+            // 3. an ordinary Authorization header, query token or oauth2 cookie.
+            try {
+                accessToken = httpUtils.processAuthorizationAccessToken(exchange);
+            } catch (AuthorizationException e) {
+                challenge(exchange, client, "Invalid authorization");
+                return false;
+            }
         }
         if (accessToken == null) {
-            challenge(exchange, "Authorization required");
+            challenge(exchange, client, "Authorization required");
             return false;
         }
 
-        if (client.requiresSubscription()
-                && !httpUtils.isAuthorized(accessToken, client.getSubscriptionRole())) {
-            log.debug("WebDAV call to {} denied: token not in subscription group", client.getServiceId());
-            deny(exchange);
-            return false;
+        if (client.requiresSubscription()) {
+            if (client.getSubscriptionRole() == null || client.getSubscriptionRole().isBlank()) {
+                // Distinct from "the token lacks the group": the service is secured but declares no
+                // group to check against, so every request is refused however good the token is.
+                log.warn("WebDAV service {} is secured but declares no subscriptionGroup — every "
+                       + "request will be refused. Set subscriptionGroup in its Consul metadata.",
+                        client.getServiceId());
+                deny(exchange, "no-subscription-group-configured");
+                return false;
+            }
+            if (!httpUtils.isAuthorized(accessToken, client.getSubscriptionRole())) {
+                log.debug("WebDAV call to {} denied: token not in subscription group {}",
+                        client.getServiceId(), client.getSubscriptionRole());
+                deny(exchange, "token-not-in-subscription-group:" + client.getSubscriptionRole());
+                return false;
+            }
         }
 
         if (policyGoverned && !policyAllows(client, accessToken)) {
-            deny(exchange);
+            deny(exchange, "policy-denied:" + client.getOpaRego());
             return false;
         }
         return true;
@@ -342,20 +533,33 @@ public class WebDavGateway {
         }
     }
 
-    /** 401 + WWW-Authenticate, so a GUI client prompts for a credential instead of just failing. */
-    private void challenge(HttpServerExchange exchange, String message) {
+    /**
+     * 401 with a plain {@code Bearer} challenge.
+     *
+     * <p>Deliberately minimal. Richer challenges were tried against a real Office client and all made
+     * things worse: {@code Bearer realm=…, authorization_uri=…} is the shape of Microsoft's Azure AD
+     * challenge, so Office signed in to Microsoft and then probed the origin instead of the requested
+     * path; {@code X-MS-CookieUri} was ignored outright. The client is told it needs a credential and
+     * nothing more — a {@code 401} rather than {@code 403} because only the former is recoverable.
+     */
+    private void challenge(HttpServerExchange exchange, @Nullable WebDavClient client, String message) {
         exchange.setStatusCode(Constants.UNAUTHORIZED_CODE);
-        if (config.getBasicAuth() != null && config.getBasicAuth().isEnabled()) {
-            exchange.getResponseHeaders().put(Headers.WWW_AUTHENTICATE,
-                    "Basic realm=\"" + config.getBasicAuth().getRealm() + "\", charset=\"UTF-8\"");
-        } else {
-            exchange.getResponseHeaders().put(Headers.WWW_AUTHENTICATE, "Bearer");
-        }
+        exchange.getResponseHeaders().put(Headers.WWW_AUTHENTICATE, "Bearer");
         log.debug("WebDAV request unauthenticated: {}", message);
         exchange.endExchange();
     }
 
-    private void deny(HttpServerExchange exchange) {
+
+    /**
+     * 403 — the caller authenticated but is not permitted.
+     *
+     * <p>The reason is logged rather than returned: a bare 403 cannot distinguish "the service
+     * declares no subscriptionGroup" from "the token lacks it" from "a policy refused", and those
+     * have completely different fixes. It stays out of the response so the gateway does not tell a
+     * caller why it failed.
+     */
+    private void deny(HttpServerExchange exchange, String reason) {
+        log.debug("WebDAV request denied: {}", reason);
         exchange.setStatusCode(Constants.FORBIDDEN_CODE);
         exchange.endExchange();
     }

@@ -105,6 +105,7 @@ public class Constants {
     /** Refuse the mutating verbs for this service regardless of backend capability. */
     public static final String WEBDAV_META_READ_ONLY = "webdav-read-only";
 
+
     /** RFC 4918 request headers CAPI reads (it forwards all of them either way). */
     public static final String WEBDAV_HEADER_DEPTH = "Depth";
     public static final String WEBDAV_HEADER_DESTINATION = "Destination";

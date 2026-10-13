@@ -54,6 +54,7 @@ public class AdminGateway implements AutoCloseable {
     private final CapiTrustManager capiTrustManager;
     private Map<String, WebsocketClient> websocketClients;
     private Map<String, RestClient> restClients;
+    private Map<String, WebDavClient> webDavClients;
     private McpToolRegistry mcpToolRegistry;
     private McpSessionStore mcpSessionStore;
     private ConsulStore consulStore;
@@ -90,6 +91,7 @@ public class AdminGateway implements AutoCloseable {
                 .addExactPath("/info/truststore", this::handleTruststore)
                 .addPrefixPath("/info/truststore/", this::handleTruststoreAlias)
                 .addExactPath("/info/wsroutes", this::handleWsRoutes)
+                .addExactPath("/info/webdavroutes", this::handleWebDavRoutes)
                 .addExactPath("/info/mcp", this::handleMcpInfo)
                 .addExactPath("/info/mcp/tools", this::handleMcpTools)
                 .addExactPath("/info/mcp/sessions", this::handleMcpSessions)
@@ -190,6 +192,9 @@ public class AdminGateway implements AutoCloseable {
             links.put("health", Map.of("href", baseUrl + "/info/health"));
             links.put("capi", Map.of("href", baseUrl + "/info/capi"));
             links.put("routes", Map.of("href", baseUrl + "/info/routes"));
+            if (capiConfiguration.getWebdav() != null && capiConfiguration.getWebdav().isEnabled()) {
+                links.put("webdavroutes", Map.of("href", baseUrl + "/info/webdavroutes"));
+            }
             links.put("openapi", Map.of("href", baseUrl + "/info/openapi/{serviceId}"));
             links.put("truststore", Map.of("href", baseUrl + "/info/truststore"));
             links.put("wsroutes", Map.of("href", baseUrl + "/info/wsroutes"));
@@ -496,6 +501,78 @@ public class AdminGateway implements AutoCloseable {
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    /**
+     * The WebDAV routes CAPI has actually published, and why each one is reachable the way it is.
+     *
+     * <p>Exists because there was previously no way to tell "CAPI never created the route" from
+     * "the backend answered 404" — and on a deployment where the app log does not reach stdout, the
+     * registration log line is invisible. {@code refusedMultiInstance} is surfaced here as well as at
+     * {@code /info/invalid-services}, since a service refused for unshared state looks exactly like a
+     * service that was never registered.
+     */
+    private void handleWebDavRoutes(HttpServerExchange exchange) {
+        exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+        try {
+            if (capiConfiguration.getWebdav() == null || !capiConfiguration.getWebdav().isEnabled()) {
+                exchange.setStatusCode(StatusCodes.NOT_FOUND);
+                exchange.getResponseSender().send(objectMapper.writeValueAsString(
+                        buildError(StatusCodes.NOT_FOUND, "WebDAV Gateway not enabled")));
+                return;
+            }
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("enabled", true);
+            body.put("port", capiConfiguration.getWebdav().getPort());
+            body.put("routing", capiConfiguration.getWebdav().getRouting());
+
+            List<Map<String, Object>> routes = new ArrayList<>();
+            if (webDavClients != null) {
+                for (Map.Entry<String, WebDavClient> entry : webDavClients.entrySet()) {
+                    WebDavClient c = entry.getValue();
+                    Map<String, Object> r = new LinkedHashMap<>();
+                    r.put("id", entry.getKey());
+                    // How to actually reach it — the question this endpoint exists to answer.
+                    if (c.getWebdavHost() != null) {
+                        r.put("routing", "host");
+                        r.put("host", c.getWebdavHost());
+                        r.put("url", "http://" + c.getWebdavHost() + ":" + capiConfiguration.getWebdav().getPort() + "/");
+                    } else {
+                        r.put("routing", "path");
+                        r.put("url", ":" + capiConfiguration.getWebdav().getPort() + entry.getKey());
+                    }
+                    r.put("rootContext", c.getRootContext() != null ? c.getRootContext() : "/");
+                    r.put("secured", c.requiresSubscription());
+                    r.put("subscriptionGroup", c.getSubscriptionRole());
+                    r.put("opaRego", c.getOpaRego());
+                    r.put("readOnly", c.isReadOnly());
+                    r.put("endpoints", c.getMappingList() == null ? List.of()
+                            : c.getMappingList().stream()
+                                .map(m -> m.getHostname() + ":" + m.getPort())
+                                .collect(Collectors.toList()));
+                    routes.add(r);
+                }
+            }
+            body.put("count", routes.size());
+            body.put("routes", routes);
+
+            List<Map<String, Object>> refused = new ArrayList<>();
+            invalidServices.values().stream()
+                    .filter(i -> i.reason() == io.surisoft.capi.schema.InvalidService.Reason.WEBDAV_UNSHARED_MULTI_INSTANCE)
+                    .forEach(i -> refused.add(Map.of(
+                            "serviceId", i.serviceId(),
+                            "detail", i.detail())));
+            body.put("refusedMultiInstance", refused);
+
+            exchange.setStatusCode(StatusCodes.OK);
+            exchange.getResponseSender().send(objectMapper.writeValueAsString(body));
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public void setWebDavClients(Map<String, WebDavClient> webDavClients) {
+        this.webDavClients = webDavClients;
     }
 
     private void handleWsRoutes(HttpServerExchange exchange) {

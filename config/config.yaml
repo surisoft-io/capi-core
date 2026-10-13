@@ -1,5 +1,5 @@
 capi:
-  version: 2.22
+  version: 2.23.5
   instanceName: default
   strictToInstanceName: false
   publicEndpoint: http://localhost:8380/api/
@@ -12,17 +12,8 @@ capi:
   admin:
     protected: true
     group: capi-admin
-  # Governance: a fetched OpenAPI spec must identify the service that declared it —
-  # info.title == the Consul service name (exact), and info.version must be set.
-  # OFF by default. The verdict is computed every cycle regardless and published at
-  # /info/spec-compliance, so you can watch nonCompliant drain to zero (safeToEnable: true)
-  # before turning this on. Nothing is logged while it is off.
-  # `exempt` lists Consul service NAMES that keep routing even while enforcing — operator
-  # config on purpose, so an owner cannot exempt themselves.
-  # The `open-api` endpoint is owner-supplied and CAPI fetches it itself, with the Consul HTTP
-  # client and its trust store. Endpoints resolving to link-local (cloud metadata) are always
-  # refused; loopback (CAPI's own admin port, a co-located Consul agent) is refused unless you
-  # opt in here. Private/RFC1918 addresses are allowed — that is where a spec normally lives.
+  # The open-api endpoint is owner-supplied and CAPI fetches it itself. Link-local (cloud metadata)
+  # is always refused; loopback is refused unless opted in here. RFC1918 is allowed — specs live there.
   openApi:
     allowLocalSpecEndpoints: false
 
@@ -35,11 +26,8 @@ capi:
     port: 8380
     listeningAddress: 0.0.0.0
     contextPath: /api
-    # Refuse a path containing a `.` or `..` segment with 400. OFF by default: a request that this
-    # build would refuse is one an existing deployment forwards today, so the guard first only
-    # counts what it sees — watch capi_dot_segment_requests_total{action="observed"} stay at zero on
-    # real traffic, then turn this on. Only a WHOLE segment equal to "." or ".." counts; ordinary
-    # paths like /range/1..10 or /report..pdf are unaffected.
+    # Refuse a path with a "." or ".." SEGMENT (400). Observes only while false — watch
+    # capi_dot_segment_requests_total{action="observed"} first. /range/1..10 is unaffected.
     rejectDotSegments: false
     ioThreads: 4
     connectionRequestTimeout: 5000
@@ -49,16 +37,12 @@ capi:
     # on the path to the backend (corporate proxy / firewall / NAT / LB): those drop idle flows
     # without FIN or RST, and a socket reused after such a drop stalls until responseTimeout (504).
     connectionIdleTimeout: 30000
-    # Largest request body, in bytes. -1 = unlimited (the pre-2.23 behaviour).
-    # Pinned explicitly: Undertow changed its own default from unlimited to 2 MiB in 2.3.21, which
-    # silently broke every upload over 2 MiB in 2.23.
+    # Bytes; -1 = unlimited. Pinned because Undertow's own default became 2 MiB in 2.3.21, which
+    # silently broke every upload over 2 MiB in 2.23. Raise responseTimeout to match if you cap it.
     maxRequestSize: -1
   websocket:
-    # Refuse a WebSocket upgrade whose Origin is not allowlisted (cross-site hijacking). OFF by
-    # default: refusing an upgrade breaks a client outright, so watch
-    # capi_websocket_origin_total{action="observed"} first. A request with NO Origin is always
-    # allowed — browsers always send one, so its absence means a non-browser client. Uses the same
-    # allowlist as CORS: allowedOrigins + the per-service allowed-origins metadata.
+    # Refuse an upgrade from an unlisted Origin (cross-site hijacking). Observes only while false.
+    # No Origin is always allowed — its absence means a non-browser client. Uses the CORS allowlist.
     enforceOriginCheck: false
     enabled: false
     port: 8382
@@ -76,8 +60,7 @@ capi:
   webdav:
     enabled: false
     port: 8385
-    # host = resolve by the service's webdav-host metadata (no rewriting needed, the client's URL
-    #        space is the backend's; recommended for Windows/Finder)
+    # host = resolve by the service's webdav-host metadata (no rewriting needed; root-context ignored)
     # path = resolve by /{service}/{group} (needs the backend to know its public base URI)
     # both = host first, then path
     routing: both
@@ -89,12 +72,33 @@ capi:
     maxRequestTime: 3600000
     # -1 = unlimited. A large PUT is the normal case for WebDAV.
     maxRequestSize: -1
-    basicAuth:
-      # No GUI WebDAV client can send a bearer token, so the password field carries a raw JWT.
-      # Requires TLS in front: Windows refuses Basic over plaintext by default (BasicAuthLevel).
-      # NOTE: phase 2 — not yet implemented.
+
+    # --- authentication -------------------------------------------------------------------------
+    # A session id carried in the URL PATH: /s/<id>/service/group/file.docx
+    #
+    # This is the only supported mechanism, and deliberately so. A document is opened by handing the
+    # client a URL and nothing else, and a WebDAV client addresses a parent collection by truncating
+    # the filename — discarding any query string with it. A path segment survives that. Cookies,
+    # X-MS-CookieUri and bearer/forms challenges were all tried against a real Office client and none
+    # of them worked. Blank disables it.
+    sessionPathPrefix: /s/
+    # Session lifetime in seconds. Keep it at or below the access token's own lifetime, or a request
+    # an hour in resolves to an expired token and is refused for a reason nothing explains.
+    sessionTtlSeconds: 3600
+    maxSessions: 10000
+    # Share tickets and sessions across the cluster via Hazelcast instead of holding them in this
+    # process. REQUIRED with more than one CAPI behind a load balancer: a ticket is minted by the web
+    # application and redeemed by the document client — two callers with no shared affinity — so with
+    # a local store they land on different nodes and the ticket is unknown. Uses the Kubernetes
+    # discovery settings from capi.throttle, as the MCP session store does.
+    distributedSessions: false
+    # Mints a session. POST only, authenticated with an ordinary bearer token which is validated
+    # before anything is issued. Returns a single-use ticket and a reusable session + sessionPath.
+    ticket:
       enabled: false
-      realm: CAPI WebDAV
+      ttlSeconds: 60
+      maxOutstanding: 10000
+      path: /.capi/ticket
   ssl:
     enabled: false
     keyStoreType: PKCS12
@@ -116,10 +120,8 @@ capi:
   apiKeyStore:
     enabled: false
   oauth2:
-    # Accept ?access_token= as a token source. On by default: unlike a config change, the clients
-    # relying on it can only be found from traffic — watch capi_query_token_requests_total, then
-    # switch it off. Either way the parameter is stripped before forwarding, so it never reaches a
-    # backend's access log.
+    # Accept ?access_token=. On by default; the clients relying on it can only be found from traffic
+    # (watch capi_query_token_requests_total). Stripped before forwarding either way.
     allowQueryParameterToken: true
     enabled: false
     cookieName:
@@ -127,13 +129,10 @@ capi:
       - https://localhost:8080/keycloak/realms/capi/protocol/openid-connect/certs
   opa:
     enabled: false
-    # Full URL of the wasm bundle. CAPI now consumes a single combined bundle
-    # (one .tar.gz with multiple entrypoints) — OPA's recommended layout per
-    # https://www.openpolicyagent.org/docs/management-bundles
-    # Example: http://opa-bundle-server:8080/bundles/bundle.tar.gz
+    # One combined bundle (.tar.gz, multiple entrypoints), e.g.
+    # http://opa-bundle-server:8080/bundles/bundle.tar.gz
     wasmBundleUrl:
-    # Optional bearer token sent as Authorization: Bearer <token> on every
-    # bundle fetch. Leave blank for an unauthenticated bundle server.
+    # Sent as Authorization: Bearer on every bundle fetch. Blank = unauthenticated bundle server.
     wasmBundleToken:
     wasmBundlePollIntervalSeconds: 60
     wasmPoolSize: 10
@@ -148,15 +147,9 @@ capi:
   # MASTER SWITCH. false = CAPI sends no CORS header at all, and both allowedOrigins below and any
   # per-service `allowed-origins` metadata are ignored. Set true to activate them.
   corsEnabled: false
-  # Gateway-wide FALLBACK for browser origins (requires corsEnabled: true). Prefer the per-service `allowed-origins` key in
-  # Consul ServiceMeta, which lets each service owner set their own and keeps one team's origin
-  # from being trusted on another team's service. This list applies only to services that declare
-  # none. EMPTY OR ABSENT DENIES EVERY ORIGIN.
-  # An origin must match exactly (scheme + host + port) to be echoed back, and only an exact
-  # match is offered Access-Control-Allow-Credentials. A single "*" entry sends the literal
-  # wildcard and never credentials, which is the only spec-valid way to open this up.
-  # CAPI used to reflect whatever Origin the caller sent, together with credentials, which let
-  # any website read authenticated responses.
+  # Gateway-wide FALLBACK, used only by services that declare no `allowed-origins` metadata of their
+  # own (prefer that: it keeps one team's origin off another team's service). EMPTY DENIES EVERY
+  # ORIGIN. Exact match on scheme+host+port; a single "*" sends the literal wildcard, never credentials.
   allowedOrigins: []
   #  - https://app.example.com
   allowedHeaders:
@@ -184,11 +177,9 @@ capi:
     kubernetesNamespace:
     kubernetesServiceName:
   mcp:
-    # The JSON-RPC body is buffered whole before the request is authenticated, so it is bounded:
-    # without this one unauthenticated POST can exhaust the heap. 1 MiB is far above a real call.
+    # The body is buffered whole BEFORE authentication, so it must be bounded.
     maxRequestSize: 1048576
-    # Sessions live for sessionTtl, so cap how many can exist at once; past it, initialize is
-    # refused rather than the process failing.
+    # Past the cap, initialize is refused rather than the process failing.
     maxSessions: 10000
     enabled: false
     port: 8383

@@ -5,6 +5,8 @@ import io.surisoft.capi.schema.WebDavClient;
 import io.undertow.server.HttpServerExchange;
 import io.undertow.util.HeaderMap;
 import io.undertow.util.Headers;
+import io.surisoft.capi.service.OpaWasmService;
+import io.surisoft.capi.utils.HttpUtils;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
@@ -12,6 +14,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 /**
  * Routing and the bounds around it. The authorization gate is covered end to end by
@@ -109,7 +112,12 @@ class WebDavGatewayTest {
         assertFalse(c.isEnforceMaxDepth());
         // A large PUT is the normal case here, so the REST-scale timeout would kill an upload.
         assertEquals(3_600_000L, c.getMaxRequestTime());
-        assertFalse(c.getBasicAuth().isEnabled());
+        // Unlimited: a large PUT is the normal case, and Undertow's own default became 2 MiB in 2.3.21.
+        assertEquals(-1L, c.getMaxRequestSize());
+        // The one supported auth mechanism, and the minting endpoint that feeds it.
+        assertEquals("/s/", c.getSessionPathPrefix());
+        assertFalse(c.getTicket().isEnabled(), "minting must be opted into");
+        assertFalse(c.isDistributedSessions());
     }
 
     // ---- the dot-segment guard this gateway reuses ----
@@ -123,5 +131,87 @@ class WebDavGatewayTest {
         assertFalse(RestGateway.containsDotSegment("/files/v1/report..pdf"));
         assertFalse(RestGateway.containsDotSegment("/files/v1/my.file.name.txt"));
         assertFalse(RestGateway.containsDotSegment("/files/v1/v1.2.3/notes.md"));
+    }
+
+    // ---- what "unsecured" actually means ----
+
+    private static boolean authorize(WebDavGateway g, WebDavClient c) throws Exception {
+        java.lang.reflect.Method m = WebDavGateway.class
+                .getDeclaredMethod("authorize", HttpServerExchange.class, WebDavClient.class);
+        m.setAccessible(true);
+        // challenge()/deny() write to the exchange, so the refusal path needs real header maps.
+        HttpServerExchange exchange = mock(HttpServerExchange.class);
+        when(exchange.getResponseHeaders()).thenReturn(new HeaderMap());
+        return (boolean) m.invoke(g, exchange, c);
+    }
+
+    private static WebDavGateway gatewayWithOpa(boolean opaEnabled, String tokenReturned) throws Exception {
+        WebDavGateway g = gateway(config("both"));
+        HttpUtils httpUtils = mock(HttpUtils.class);
+        when(httpUtils.processAuthorizationAccessToken(any(HttpServerExchange.class))).thenReturn(tokenReturned);
+        g.setHttpUtils(httpUtils);
+        g.setOpaWasmService(opaEnabled ? mock(OpaWasmService.class) : null);
+        return g;
+    }
+
+    @Test
+    void unsecuredWithNoPolicy_needsNoCredential() throws Exception {
+        // secured: false and no opa-rego -> the gate returns before looking for a token at all.
+        WebDavClient c = client("/files/v1", null);
+        c.setRequiresSubscription(false);
+        assertTrue(authorize(gatewayWithOpa(true, null), c));
+    }
+
+    /**
+     * The nuance: {@code secured: false} does NOT mean "open" if the service also declares
+     * {@code opa-rego}. A policy decides on token claims, so no token means no decision, and no
+     * decision means refused — the same rule as the MCP gateway after SEC-01.
+     */
+    @Test
+    void unsecuredButPolicyGoverned_stillRequiresAToken() throws Exception {
+        WebDavClient c = client("/files/v1", null);
+        c.setRequiresSubscription(false);
+        c.setOpaRego("capi/files_policy");
+        assertFalse(authorize(gatewayWithOpa(true, null), c),
+                "opa-rego must gate even when secured is false");
+    }
+
+    @Test
+    void policyDeclaredButOpaDisabled_isOpen() throws Exception {
+        // No OPA engine configured, so there is no policy to consult and nothing to enforce.
+        WebDavClient c = client("/files/v1", null);
+        c.setRequiresSubscription(false);
+        c.setOpaRego("capi/files_policy");
+        assertTrue(authorize(gatewayWithOpa(false, null), c));
+    }
+
+    @Test
+    void readOnlyIsSeparateFromAuth() {
+        // Nothing about being unsecured implies writability, and nothing about read-only implies auth.
+        WebDavClient c = client("/files/v1", null);
+        c.setRequiresSubscription(false);
+        assertFalse(c.isReadOnly(), "writes are allowed by default");
+        c.setReadOnly(true);
+        assertTrue(c.isReadOnly());
+    }
+
+
+
+    // ---- session id carried in the path ----
+
+    @Test
+    void sessionPathPrefixDefaultsOn() {
+        // A query string reaches only the first request; the path prefix survives a client deriving
+        // a parent-collection URL by truncating the filename.
+        assertEquals("/s/", new CAPIConfiguration.WebDav().getSessionPathPrefix());
+    }
+
+    @Test
+    void sessionPathPrefixCanBeDisabledOrChanged() {
+        CAPIConfiguration.WebDav c = new CAPIConfiguration.WebDav();
+        c.setSessionPathPrefix("");
+        assertTrue(c.getSessionPathPrefix().isBlank(), "blank disables it");
+        c.setSessionPathPrefix("/sess/");
+        assertEquals("/sess/", c.getSessionPathPrefix());
     }
 }

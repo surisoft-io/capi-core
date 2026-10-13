@@ -123,11 +123,77 @@ public class WebDavTransportHandler implements TransportHandler {
             return;
         }
         WebDavClient client = webDavUtils.createWebDavClient(service);
-        if (client != null) {
-            webDavClientMap.put(client.getServiceId(), client);
-            log.info("WebDAV client registered: {} ({})", client.getServiceId(),
-                    client.getWebdavHost() != null ? "host " + client.getWebdavHost() : "path routed");
+        if (client == null) {
+            return;
         }
+        String collision = hostCollision(client);
+        if (collision != null) {
+            // Refuse rather than register: a hostname has exactly one owner, and picking between
+            // claimants by map iteration order would silently serve one service's collection from
+            // another's backend. Drain the handler we just built so its sockets are not orphaned.
+            CAPILoadBalancerProxyClient.drainHandler(client.getHttpHandler(), DEFAULT_MAX_REQUEST_TIME);
+            InvalidService invalid = new InvalidService(
+                    service.getId(),
+                    service.getServiceMeta() != null ? service.getServiceMeta().getGroup() : null,
+                    null,
+                    InvalidService.Reason.WEBDAV_HOST_COLLISION,
+                    collision,
+                    Instant.now());
+            refusedByContext.put(service.getContext(), invalid);
+            invalidServiceMap.put(service.getId(), invalid);
+            log.warn("WebDAV service {} NOT published: {}", service.getContext(), collision);
+            return;
+        }
+        webDavClientMap.put(client.getServiceId(), client);
+        log.info("WebDAV client registered: {} ({})", client.getServiceId(),
+                client.getWebdavHost() != null ? "host " + client.getWebdavHost() : "path routed");
+    }
+
+    /**
+     * Another published service already owns this {@code webdav-host}.
+     *
+     * <p>Deterministic on purpose: the lexicographically smaller service id keeps the hostname, so
+     * the same pair of services always resolves the same way regardless of the order Consul reported
+     * them or how the client map happens to be laid out. If the newcomer wins, the previous owner is
+     * evicted and reported instead.
+     *
+     * @return null when there is no collision, otherwise the reason this one cannot be published
+     */
+    private String hostCollision(WebDavClient candidate) {
+        String host = candidate.getWebdavHost();
+        if (host == null) {
+            return null;   // path-routed services cannot collide on a hostname
+        }
+        for (WebDavClient existing : webDavClientMap.values()) {
+            if (existing.getWebdavHost() == null
+                    || !host.equals(existing.getWebdavHost())
+                    || existing.getServiceId().equals(candidate.getServiceId())) {
+                continue;
+            }
+            if (candidate.getServiceId().compareTo(existing.getServiceId()) < 0) {
+                // The newcomer owns the hostname; evict and report the previous owner.
+                webDavClientMap.remove(existing.getServiceId());
+                CAPILoadBalancerProxyClient.drainHandler(existing.getHttpHandler(), DEFAULT_MAX_REQUEST_TIME);
+                InvalidService displaced = new InvalidService(
+                        existing.getServiceId(), null, null,
+                        InvalidService.Reason.WEBDAV_HOST_COLLISION,
+                        collisionDetail(existing.getServiceId(), candidate.getServiceId(), host),
+                        Instant.now());
+                refusedByContext.put(existing.getServiceId(), displaced);
+                invalidServiceMap.put(existing.getServiceId(), displaced);
+                log.warn("WebDAV service {} displaced from host {} by {}",
+                        existing.getServiceId(), host, candidate.getServiceId());
+                return null;
+            }
+            return collisionDetail(candidate.getServiceId(), existing.getServiceId(), host);
+        }
+        return null;
+    }
+
+    private static String collisionDetail(String loser, String winner, String host) {
+        return "webdav-host '" + host + "' is already claimed by " + winner + ", so " + loser
+             + " is not published. A hostname has exactly one owner: give each webdav service its own "
+             + "hostname, or drop webdav-host and route it by /{service}/{group} instead.";
     }
 
     /**

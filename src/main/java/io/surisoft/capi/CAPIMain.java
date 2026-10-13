@@ -158,6 +158,7 @@ public class CAPIMain {
             adminGateway.setMcpSessionStore(startup.getMcpSessionStore());
         }
         adminGateway.setRestClients(startup.getRestClientMap());
+        adminGateway.setWebDavClients(startup.getWebDavClientMap());
         adminGateway.setSpecComplianceSource(startup.getConsulCatalogService(),
                 capiConfiguration.getMatchOpenApiSpec() != null && capiConfiguration.getMatchOpenApiSpec().isEnabled());
         if(startup.getConsulStore() != null) {
@@ -376,10 +377,46 @@ public class CAPIMain {
             gateway.setHttpUtils(startup.getHttpUtils());
             gateway.setOpaWasmService(startup.getOpaWasmService());
             gateway.setMeterRegistry(startup.getPrometheusRegistry());
+            configureWebDavStores(gateway);
             gateway.runProxy();
             return gateway;
         }
         return null;
+    }
+
+    /**
+     * Ticket and session stores, local or cluster-wide.
+     *
+     * <p>Per-process is fine on a single node. Behind a load balancer it is not: a ticket is minted by
+     * the web application and redeemed by the document client, so the two halves routinely land on
+     * different nodes and the ticket is unknown.
+     */
+    private void configureWebDavStores(WebDavGateway gateway) {
+        CAPIConfiguration.WebDav webdav = capiConfiguration.getWebdav();
+        boolean distributed = webdav.isDistributedSessions();
+
+        if (distributed) {
+            gateway.setSessionStore(new io.surisoft.capi.service.HazelcastWebDavSessionStore(
+                    io.surisoft.capi.configuration.HazelcastCacheConfiguration
+                            .createWebDavSessionMap(capiConfiguration.getThrottle()),
+                    webdav.getSessionTtlSeconds(), webdav.getMaxSessions()));
+        } else {
+            gateway.setSessionStore(new io.surisoft.capi.service.LocalWebDavSessionStore(
+                    webdav.getSessionTtlSeconds(), webdav.getMaxSessions()));
+        }
+
+        if (webdav.getTicket() != null && webdav.getTicket().isEnabled()) {
+            if (distributed) {
+                gateway.setTicketStore(new io.surisoft.capi.service.HazelcastWebDavTicketStore(
+                        io.surisoft.capi.configuration.HazelcastCacheConfiguration
+                                .createWebDavTicketMap(capiConfiguration.getThrottle()),
+                        webdav.getTicket().getTtlSeconds(), webdav.getTicket().getMaxOutstanding()));
+            } else {
+                gateway.setTicketStore(new io.surisoft.capi.service.LocalWebDavTicketStore(
+                        webdav.getTicket().getTtlSeconds(), webdav.getTicket().getMaxOutstanding()));
+            }
+        }
+        log.info("WebDAV ticket/session stores are {}", distributed ? "CLUSTER-WIDE (Hazelcast)" : "local to this node");
     }
 
     private @Nullable McpGateway getMcpGateway(Startup startup) {

@@ -17,10 +17,10 @@ COPY --chown=1000:0 config/config.yaml /capi/config/config.yaml
 LABEL io.modelcontextprotocol.server.name="io.github.surisoft-io/capi-core"
 ENV CAPI_CONFIG_FILE=/capi/config/config.yaml
 USER 1000
-# NOTE (2026-07-23, RSS native-creep investigation): the EU prod-like nodes do NOT run these
-# args (they show a ~7GB heap; this image is demo-only at -Xmx512m). Wherever the real launch
-# args live (systemd unit / launch script on the EU hosts), add for the prod rollout:
-#   env  MALLOC_ARENA_MAX=2                 # cap glibc malloc arenas (flat-heap/creeping-RSS insurance)
-#   jvm  -XX:NativeMemoryTracking=summary   # so native growth is visible via `jcmd VM.native_memory` (needs restart)
-# See tools/capi-rss-watch.sh and the memory note project_rss_native_investigation.md.
+# NOTE: the heap settings below are demo-sized (-Xmx512m). A deployment that overrides the
+# launch args elsewhere (systemd unit, Helm values, launch script) will not pick these up.
+# For investigating creeping RSS with a flat heap, two settings are worth adding there:
+#   env  MALLOC_ARENA_MAX=2                 # cap glibc malloc arenas
+#   jvm  -XX:NativeMemoryTracking=summary   # native growth visible via `jcmd VM.native_memory`
+# See tools/capi-rss-watch.sh.
 ENTRYPOINT ["java", "-XX:+UseG1GC", "-XX:MaxGCPauseMillis=100", "-Xms512m", "-Xmx512m", "-XX:+HeapDumpOnOutOfMemoryError", "-XX:HeapDumpPath=/capi/logs/heap-dump.hprof", "-jar", "app.jar"]

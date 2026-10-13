@@ -99,4 +99,5 @@ public class WebDavClient {
     public void setOpaRego(String opaRego) {
         this.opaRego = opaRego;
     }
+
 }

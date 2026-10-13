@@ -141,15 +141,24 @@ public class HttpUtils {
                 return queryToken.getFirst();
             }
         }
-        // Try cookie-based authorization
+        // Try cookie-based authorization.
         if (authorizationCookieName != null && httpServerExchange.getRequestHeaders().contains(Constants.COOKIE_HEADER)) {
+            List<HttpCookie> cookies = getCookiesFromExchange(httpServerExchange);
+
+            // EXISTING behaviour first, unchanged: a request header named after the configured cookie
+            // whose VALUE names the cookie to read. Deployments that send that header keep resolving
+            // exactly the cookie they resolve today, including when it is not the configured name.
             String authorizationName = httpServerExchange.getRequestHeaders().contains(authorizationCookieName)
                     ? httpServerExchange.getRequestHeaders().get(authorizationCookieName).getFirst()
                     : null;
             if (authorizationName != null) {
-                List<HttpCookie> cookies = getCookiesFromExchange(httpServerExchange);
                 return getAuthorizationCookieValue(cookies, authorizationName);
             }
+
+            // Only when that header is absent: read the configured cookie straight off the Cookie
+            // header, which is what a browser, a BFF or an Office client sends. Without this a plain
+            // `Cookie: <name>=<jwt>` did not authenticate.
+            return getAuthorizationCookieValue(cookies, authorizationCookieName);
         }
         return null;
     }
@@ -350,10 +359,11 @@ public class HttpUtils {
             if(authorizationName != null) {
                 return getAuthorizationCookieValue(cookies, authorizationName);
             }
+            // Same fallback as the exchange-based path: only reached when that header is absent.
+            return getAuthorizationCookieValue(cookies, authorizationCookieName);
         } else {
             return getBearerTokenFromHeader(authorization);
         }
-        return null;
     }
 
     public String normalizeHttpEndpoint(String httpEndpoint) {

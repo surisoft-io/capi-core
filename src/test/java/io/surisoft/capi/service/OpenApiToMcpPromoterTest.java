@@ -288,7 +288,7 @@ class OpenApiToMcpPromoterTest {
         OpenAPI api = new io.swagger.v3.parser.OpenAPIV3Parser().readContents(spec).getOpenAPI();
         assertNotNull(api, "spec should parse");
 
-        Service svc = service("govis", api, "true");
+        Service svc = service("doc-search", api, "true");
         List<McpTool> tools = promoter.promote(svc);
         assertEquals(1, tools.size());
 

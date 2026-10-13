@@ -934,93 +934,100 @@ public class CAPIConfiguration {
      * WebDAV (RFC 4918) transport. Its own listener, sharing nothing with the REST gateway beyond the
      * proxy plumbing. See WEBDAV-DESIGN.md for the full design and the decisions behind it.
      */
+    /**
+     * WebDAV (RFC 4918) transport. Its own listener, sharing nothing with the REST gateway beyond the
+     * proxy plumbing. See WEBDAV-DESIGN.md.
+     *
+     * <p>Authentication is a session id carried in the URL <em>path</em>, minted at
+     * {@code ticket.path}. That is deliberately the only supported mechanism: a document is opened by
+     * handing the client a URL and nothing else, and a WebDAV client addresses a parent collection by
+     * truncating the filename — discarding any query string with it. A path segment survives that;
+     * nothing else did. Cookies, {@code X-MS-CookieUri}, and bearer/forms challenges were all tried
+     * against a real Office client and none of them worked.
+     */
     public static class WebDav {
         private boolean enabled;
         private int port = 8385;
         /**
          * {@code host} resolves a service by its {@code webdav-host} metadata, {@code path} by
-         * {@code /{service}/{group}}, {@code both} tries host first and falls back to path.
-         *
-         * <p>Host mode needs no rewriting at all: the client's URL space is the backend's, so hrefs
-         * in a 207 and the Destination header on COPY/MOVE are already correct. Path mode requires
-         * both rewrites and is phase 3.
+         * {@code /{service}/{group}}, {@code both} tries host first.
          */
         private String routing = "both";
         /**
          * Largest {@code Depth} accepted. Observed only while {@code enforceMaxDepth} is false.
          *
          * <p>{@code Depth: infinity} is an amplification lever — one small request, unbounded backend
-         * work and an unbounded response — but some sync clients use it legitimately, and the listener
-         * is internal-only, so this ships observing rather than enforcing.
+         * work and an unbounded response — but some sync clients use it legitimately, so this ships
+         * observing rather than enforcing.
          */
         private int maxDepth = 1;
         private boolean enforceMaxDepth = false;
         /**
          * Wall-clock budget for a WebDAV exchange. Far larger than the REST default because a large
-         * PUT or GET is the normal case here; the 180s that bounds an SSE stream would kill an upload
-         * mid-flight. Entity size is deliberately NOT capped for the same reason.
+         * PUT or GET is the normal case here; a REST-scale timeout would kill an upload mid-flight.
          */
         private long maxRequestTime = 3_600_000L;
         /**
-         * Largest request body, in bytes; {@code -1} (the default) means unlimited.
-         *
-         * <p>Unlimited on purpose: a large PUT is the normal case for WebDAV. Undertow's own default
-         * became 2 MiB in 2.3.21, which would reject essentially every real upload, so this is pinned
-         * rather than inherited.
+         * Largest request body, in bytes; {@code -1} means unlimited, which is the default because a
+         * large {@code PUT} is normal for WebDAV. Pinned rather than inherited: Undertow changed its
+         * own default to 2 MiB in 2.3.21.
          */
         private long maxRequestSize = -1L;
-        private BasicAuth basicAuth = new BasicAuth();
+        /**
+         * Path segment carrying a session id, e.g. {@code /s/} in
+         * {@code /s/<id>/service/group/file.docx}. Blank disables it.
+         *
+         * <p>This is the mechanism. A query string reaches only the request whose URL the caller
+         * authored; the path prefix survives the client deriving a parent-collection URL, so every
+         * following request stays authenticated with no cookie jar and no client-side auth flow.
+         */
+        private String sessionPathPrefix = "/s/";
+        /** Lifetime of a session, in seconds. Keep it at or below the access token's own lifetime. */
+        private long sessionTtlSeconds = 3600;
+        /** Concurrent sessions held. Cluster-wide when {@code distributedSessions} is on. */
+        private int maxSessions = 10_000;
+        /**
+         * Share tickets and sessions across the cluster via Hazelcast instead of holding them in this
+         * process.
+         *
+         * <p>Required with more than one CAPI behind a load balancer: a ticket is minted by the web
+         * application and redeemed by the document client — two callers with no shared affinity — so
+         * with a local store they land on different nodes and the ticket is unknown. Uses the
+         * Kubernetes discovery settings from {@code capi.throttle}, as the MCP session store does.
+         */
+        private boolean distributedSessions = false;
+        private Ticket ticket = new Ticket();
 
         /**
-         * Accepts {@code Authorization: Basic} and reads the password field as a raw JWT, which then
-         * goes down the normal Bearer validation path. The username is ignored.
-         *
-         * <p>This exists because no mainstream GUI WebDAV client can send a bearer token — Windows
-         * WebClient, Finder, davfs2 and Cyberduck do Basic/Digest/NTLM only. Digest is impossible
-         * (it needs the server to hold the shared secret) and NTLM/Negotiate are out of scope.
-         *
-         * <p>Note the token-lifetime problem: a mount is long-lived, an access token usually is not,
-         * and there is no refresh token in a Basic exchange, so CAPI cannot refresh for the client.
-         * WebDAV callers need a deliberately long-lived token. Phase 2.
+         * The endpoint that mints a session. {@code POST} only, authenticated with an ordinary bearer
+         * token, which is validated before anything is issued.
          */
-        public static class BasicAuth {
-            private boolean enabled;
-            private String realm = "CAPI WebDAV";
+        public static class Ticket {
+            private boolean enabled = false;
+            /** Seconds. Short on purpose: a ticket only has to survive the handoff to the client. */
+            private long ttlSeconds = 60;
+            private int maxOutstanding = 10_000;
+            /** Reserved path on the WebDAV listener. Shadows a backend path in host-routing mode. */
+            private String path = "/.capi/ticket";
 
-            public boolean isEnabled() {
-                return enabled;
-            }
-            public void setEnabled(boolean enabled) {
-                this.enabled = enabled;
-            }
-            public String getRealm() {
-                return realm;
-            }
-            public void setRealm(String realm) {
-                this.realm = realm;
-            }
-        }
-
-        public boolean isEnabled() {
-            return enabled;
-        }
-        public void setEnabled(boolean enabled) {
-            this.enabled = enabled;
+            public boolean isEnabled() { return enabled; }
+            public void setEnabled(boolean enabled) { this.enabled = enabled; }
+            public long getTtlSeconds() { return ttlSeconds; }
+            public void setTtlSeconds(long ttlSeconds) { this.ttlSeconds = ttlSeconds; }
+            public int getMaxOutstanding() { return maxOutstanding; }
+            public void setMaxOutstanding(int maxOutstanding) { this.maxOutstanding = maxOutstanding; }
+            public String getPath() { return path; }
+            public void setPath(String path) { this.path = path; }
         }
 
-        public int getPort() {
-            return port;
-        }
-        public void setPort(int port) {
-            this.port = port;
-        }
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
 
-        public String getRouting() {
-            return routing;
-        }
-        public void setRouting(String routing) {
-            this.routing = routing;
-        }
+        public int getPort() { return port; }
+        public void setPort(int port) { this.port = port; }
+
+        public String getRouting() { return routing; }
+        public void setRouting(String routing) { this.routing = routing; }
 
         /** True when a service may be selected by its {@code webdav-host} metadata. */
         public boolean isHostRoutingEnabled() {
@@ -1032,40 +1039,32 @@ public class CAPIConfiguration {
             return "path".equalsIgnoreCase(routing) || "both".equalsIgnoreCase(routing);
         }
 
-        public int getMaxDepth() {
-            return maxDepth;
-        }
-        public void setMaxDepth(int maxDepth) {
-            this.maxDepth = maxDepth;
-        }
+        public int getMaxDepth() { return maxDepth; }
+        public void setMaxDepth(int maxDepth) { this.maxDepth = maxDepth; }
 
-        public boolean isEnforceMaxDepth() {
-            return enforceMaxDepth;
-        }
-        public void setEnforceMaxDepth(boolean enforceMaxDepth) {
-            this.enforceMaxDepth = enforceMaxDepth;
-        }
+        public boolean isEnforceMaxDepth() { return enforceMaxDepth; }
+        public void setEnforceMaxDepth(boolean enforceMaxDepth) { this.enforceMaxDepth = enforceMaxDepth; }
 
-        public long getMaxRequestTime() {
-            return maxRequestTime;
-        }
-        public void setMaxRequestTime(long maxRequestTime) {
-            this.maxRequestTime = maxRequestTime;
-        }
+        public long getMaxRequestTime() { return maxRequestTime; }
+        public void setMaxRequestTime(long maxRequestTime) { this.maxRequestTime = maxRequestTime; }
 
-        public long getMaxRequestSize() {
-            return maxRequestSize;
-        }
-        public void setMaxRequestSize(long maxRequestSize) {
-            this.maxRequestSize = maxRequestSize;
-        }
+        public long getMaxRequestSize() { return maxRequestSize; }
+        public void setMaxRequestSize(long maxRequestSize) { this.maxRequestSize = maxRequestSize; }
 
-        public BasicAuth getBasicAuth() {
-            return basicAuth;
-        }
-        public void setBasicAuth(BasicAuth basicAuth) {
-            this.basicAuth = basicAuth;
-        }
+        public String getSessionPathPrefix() { return sessionPathPrefix; }
+        public void setSessionPathPrefix(String sessionPathPrefix) { this.sessionPathPrefix = sessionPathPrefix; }
+
+        public long getSessionTtlSeconds() { return sessionTtlSeconds; }
+        public void setSessionTtlSeconds(long sessionTtlSeconds) { this.sessionTtlSeconds = sessionTtlSeconds; }
+
+        public int getMaxSessions() { return maxSessions; }
+        public void setMaxSessions(int maxSessions) { this.maxSessions = maxSessions; }
+
+        public boolean isDistributedSessions() { return distributedSessions; }
+        public void setDistributedSessions(boolean distributedSessions) { this.distributedSessions = distributedSessions; }
+
+        public Ticket getTicket() { return ticket; }
+        public void setTicket(Ticket ticket) { this.ticket = ticket; }
     }
 
     public static class Mcp {
