@@ -44,7 +44,7 @@ SERVICE_DATA = {
     "marketplace":  {"listings": 1847, "active_sellers": 312, "transactions_today": 567},
     "integration":  {"connected": 8, "integrations": ["slack", "jira", "github", "datadog", "pagerduty", "confluence", "salesforce", "zendesk"]},
     # --- API-key + throttle ---
-    "inventory":    {"warehouse": "WH-EU-01", "sku_count": 4521, "items_in_stock": 287430, "last_sync": "2026-03-13T09:00:00Z"},
+    "inventory":    {"warehouse": "WH-NORTH-01", "sku_count": 4521, "items_in_stock": 287430, "last_sync": "2026-03-13T09:00:00Z"},
     "shipping":     {"shipment_id": "SHP-30001", "carrier": "FedEx", "status": "in_transit", "eta": "2026-03-15"},
     "returns":      {"return_id": "RET-2001", "reason": "defective", "status": "approved", "refund_amount": 49.99},
     "export":       {"job_id": "EXP-401", "format": "csv", "rows": 50000, "status": "completed", "download_url": "/exports/EXP-401.csv"},

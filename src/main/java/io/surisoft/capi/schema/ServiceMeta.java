@@ -177,6 +177,7 @@ public class ServiceMeta {
         this.webdavReadOnly = webdavReadOnly;
     }
 
+
     public String getType() {
         return type;
     }

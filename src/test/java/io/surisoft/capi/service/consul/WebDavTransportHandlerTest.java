@@ -177,4 +177,88 @@ class WebDavTransportHandlerTest {
                 false, new ConcurrentHashMap<>(), mock(WebDavUtils.class), new ConcurrentHashMap<>());
         assertFalse(off.supports(service(true, mapping("d", 80))), "disabled must claim nothing");
     }
+
+    // ---- one hostname has exactly one owner ----
+
+    private static Service hostService(String name, String host) {
+        Service s = service(false, mapping("dav-" + name, 80));
+        s.setId(name + ":v1");
+        s.setName(name);
+        s.setContext("/" + name + "/v1");
+        s.getServiceMeta().setWebdavHost(host);
+        return s;
+    }
+
+    private static WebDavTransportHandler handlerWithRealClients(Map<String, WebDavClient> clients,
+                                                                 Map<String, InvalidService> invalid) {
+        WebDavUtils utils = mock(WebDavUtils.class);
+        when(utils.createWebDavClient(any())).thenAnswer(inv -> {
+            Service s = inv.getArgument(0);
+            WebDavClient c = new WebDavClient();
+            c.setServiceId(s.getContext());
+            c.setWebdavHost(s.getServiceMeta().getWebdavHost());
+            return c;
+        });
+        return new WebDavTransportHandler(true, clients, utils, invalid);
+    }
+
+    @Test
+    void twoServicesClaimingOneHost_onlyOneIsPublished() {
+        Map<String, WebDavClient> clients = new ConcurrentHashMap<>();
+        Map<String, InvalidService> invalid = new ConcurrentHashMap<>();
+        WebDavTransportHandler h = handlerWithRealClients(clients, invalid);
+
+        h.onAppear(hostService("archive", "10.226.42.106"));
+        h.onAppear(hostService("documents", "10.226.42.106"));
+
+        assertEquals(1, clients.size(), "a hostname must resolve to exactly one service");
+        assertEquals(1, invalid.size(), "the loser must be reported, not silently dropped");
+        assertEquals(InvalidService.Reason.WEBDAV_HOST_COLLISION,
+                invalid.values().iterator().next().reason());
+    }
+
+    @Test
+    void collisionWinnerIsDeterministicRegardlessOfOrder() {
+        // The same pair must resolve the same way however Consul happened to report them, otherwise a
+        // restart could silently swap which backend serves a hostname.
+        Map<String, WebDavClient> a = new ConcurrentHashMap<>();
+        WebDavTransportHandler h1 = handlerWithRealClients(a, new ConcurrentHashMap<>());
+        h1.onAppear(hostService("archive", "10.226.42.106"));
+        h1.onAppear(hostService("documents", "10.226.42.106"));
+
+        Map<String, WebDavClient> b = new ConcurrentHashMap<>();
+        WebDavTransportHandler h2 = handlerWithRealClients(b, new ConcurrentHashMap<>());
+        h2.onAppear(hostService("documents", "10.226.42.106"));
+        h2.onAppear(hostService("archive", "10.226.42.106"));
+
+        assertEquals(a.keySet(), b.keySet(), "winner must not depend on discovery order");
+        assertEquals("/archive/v1", a.keySet().iterator().next(), "lexicographically smaller id wins");
+    }
+
+    @Test
+    void differentHosts_bothPublish() {
+        Map<String, WebDavClient> clients = new ConcurrentHashMap<>();
+        Map<String, InvalidService> invalid = new ConcurrentHashMap<>();
+        WebDavTransportHandler h = handlerWithRealClients(clients, invalid);
+
+        h.onAppear(hostService("archive", "dav-archive.corp"));
+        h.onAppear(hostService("documents", "dav-documents.corp"));
+
+        assertEquals(2, clients.size());
+        assertTrue(invalid.isEmpty());
+    }
+
+    @Test
+    void pathRoutedServicesNeverCollide() {
+        // No hostname claimed, so any number of them coexist.
+        Map<String, WebDavClient> clients = new ConcurrentHashMap<>();
+        Map<String, InvalidService> invalid = new ConcurrentHashMap<>();
+        WebDavTransportHandler h = handlerWithRealClients(clients, invalid);
+
+        h.onAppear(hostService("archive", null));
+        h.onAppear(hostService("documents", null));
+
+        assertEquals(2, clients.size());
+        assertTrue(invalid.isEmpty());
+    }
 }

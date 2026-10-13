@@ -22,6 +22,55 @@ public class HazelcastCacheConfiguration {
         return instance.getMap(MAP_NAME);
     }
 
+    private static final String WEBDAV_CLUSTER_NAME = "capi-webdav";
+    private static final String WEBDAV_SESSION_MAP = "webdav-session-cache";
+    private static final String WEBDAV_TICKET_MAP = "webdav-ticket-cache";
+    private static volatile HazelcastInstance webDavInstance;
+
+    /**
+     * One Hazelcast instance serving both WebDAV maps.
+     *
+     * <p>Sessions and tickets are separate maps but share an instance: a second cluster member per
+     * map would double the discovery and heartbeat traffic for no benefit.
+     */
+    private static synchronized HazelcastInstance webDavInstance(CAPIConfiguration.Throttle throttle) {
+        if (webDavInstance == null) {
+            Config config = new Config();
+            config.setClusterName(WEBDAV_CLUSTER_NAME);
+            applyKubernetesDiscovery(config, throttle);
+            webDavInstance = Hazelcast.newHazelcastInstance(config);
+        }
+        return webDavInstance;
+    }
+
+    /** Kubernetes discovery settings, shared with the MCP session map. */
+    private static void applyKubernetesDiscovery(Config config, CAPIConfiguration.Throttle throttle) {
+        if (throttle == null) {
+            return;
+        }
+        String serviceName = throttle.getKubernetesServiceName();
+        if (serviceName == null || serviceName.isEmpty()) {
+            return;
+        }
+        JoinConfig joinConfig = config.getNetworkConfig().getJoin();
+        joinConfig.getMulticastConfig().setEnabled(false);
+        KubernetesConfig kubernetesConfig = joinConfig.getKubernetesConfig();
+        kubernetesConfig.setEnabled(true);
+        kubernetesConfig.setProperty("service-name", serviceName);
+        String namespace = throttle.getKubernetesNamespace();
+        if (namespace != null && !namespace.isEmpty()) {
+            kubernetesConfig.setProperty("namespace", namespace);
+        }
+    }
+
+    public static IMap<String, String> createWebDavSessionMap(CAPIConfiguration.Throttle throttle) {
+        return webDavInstance(throttle).getMap(WEBDAV_SESSION_MAP);
+    }
+
+    public static IMap<String, String> createWebDavTicketMap(CAPIConfiguration.Throttle throttle) {
+        return webDavInstance(throttle).getMap(WEBDAV_TICKET_MAP);
+    }
+
     private static final String MCP_CLUSTER_NAME = "capi-mcp";
     private static final String MCP_MAP_NAME = "mcp-session-cache";
 

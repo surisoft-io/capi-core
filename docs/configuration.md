@@ -269,12 +269,16 @@ See [gRPC Gateway](grpc-gateway.md) for details on header-based routing and serv
 | `webdav.maxRequestTime` | `3600000` | Wall-clock budget (ms). Far larger than the REST default: a REST-scale timeout would kill a large upload mid-flight. |
 | `webdav.maxDepth` | `1` | Largest `Depth` accepted. `Depth: infinity` is an amplification lever, but some sync clients use it legitimately, so this is **observed only** unless enforced — watch `capi_webdav_depth_total{action="observed"}` first. |
 | `webdav.enforceMaxDepth` | `false` | Refuse a `Depth` above `maxDepth` with `403`. |
-| `webdav.basicAuth.enabled` | `false` | Accept `Authorization: Basic` with a raw JWT in the password field, since no GUI WebDAV client can send a bearer token. **Phase 2 — not yet implemented.** |
-| `webdav.basicAuth.realm` | `CAPI WebDAV` | Realm sent in `WWW-Authenticate`. |
+| `webdav.sessionPathPrefix` | `/s/` | Path segment carrying a session id — the only supported authentication. A query string reaches only the first request; a WebDAV client drops it when deriving a parent-collection URL, but keeps the path. |
+| `webdav.sessionTtlSeconds` | `3600` | Session lifetime. Keep at or below the access token's own lifetime. |
+| `webdav.maxSessions` | `10000` | Concurrent sessions; cluster-wide when distributed. |
+| `webdav.distributedSessions` | `false` | Share tickets and sessions over Hazelcast. **Required with more than one node**: a ticket is minted by the web application and redeemed by the document client, so with local stores the halves land on different nodes. |
+| `webdav.ticket.enabled` | `false` | Enable the minting endpoint (`POST` only, bearer-authenticated, token validated before issuing). |
+| `webdav.ticket.path` | `/.capi/ticket` | Where sessions are minted. |
 
-A missing or invalid credential on this listener returns **`401` with `WWW-Authenticate`**, unlike every
-other CAPI listener, because a `403` does not make Explorer or Finder prompt for credentials. An
-authenticated caller who is not permitted still gets `403`.
+A missing credential returns `401` with a plain `WWW-Authenticate: Bearer`; an authenticated caller who
+is not permitted gets `403`. Richer challenges were tried against a real Office client and made things
+worse — see [WebDAV Gateway](webdav-gateway.md).
 
 See [WebDAV Gateway](webdav-gateway.md) for routing modes, registration examples and the
 multi-instance shared-state rule.

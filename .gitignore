@@ -68,9 +68,17 @@ build/
 # These document unfixed vulnerabilities with working reproductions, on a public repo.
 SECURITY-REVIEW-*.md
 security-review-*.md
+# Root TODO.md is titled "CAPI Gateway — Security TODO": 11 unfixed findings with exact
+# file:line references and impact statements. Same risk class as the review documents.
+/TODO.md
 
 ### Signed manifests / scratch output ###
 sig.json
 
 ### Internal assets — not for publication ###
 capi-lockups.html
+
+### Captured diagnostics from real deployments — not for publication ###
+# Consul/CAPI state dumps taken during investigations contain real internal hostnames and
+# service addresses. Keep captures out of the repo, or move them to a scratch dir.
+node_*.json

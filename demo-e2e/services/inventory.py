@@ -4,13 +4,13 @@ import json
 import random
 
 CATALOG = {
-    "laptop":     {"category": "Electronics",  "price": 999.99,  "warehouse": "EU-West"},
-    "headphones": {"category": "Electronics",  "price": 149.99,  "warehouse": "EU-West"},
+    "laptop":     {"category": "Electronics",  "price": 999.99,  "warehouse": "North-1"},
+    "headphones": {"category": "Electronics",  "price": 149.99,  "warehouse": "North-1"},
     "keyboard":   {"category": "Peripherals",  "price": 79.99,   "warehouse": "US-East"},
     "monitor":    {"category": "Electronics",  "price": 449.99,  "warehouse": "US-East"},
-    "mouse":      {"category": "Peripherals",  "price": 39.99,   "warehouse": "EU-West"},
+    "mouse":      {"category": "Peripherals",  "price": 39.99,   "warehouse": "North-1"},
     "webcam":     {"category": "Peripherals",  "price": 89.99,   "warehouse": "AP-South"},
-    "chair":      {"category": "Furniture",    "price": 299.99,  "warehouse": "EU-West"},
+    "chair":      {"category": "Furniture",    "price": 299.99,  "warehouse": "North-1"},
     "desk":       {"category": "Furniture",    "price": 399.99,  "warehouse": "US-East"},
 }
 

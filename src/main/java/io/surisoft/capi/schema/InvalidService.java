@@ -19,5 +19,11 @@ public record InvalidService(
          * so with independent storage a PUT to one is absent from the next and a LOCK on one is
          * unknown to the others — which corrupts files rather than failing cleanly.
          */
-        WEBDAV_UNSHARED_MULTI_INSTANCE }
+        WEBDAV_UNSHARED_MULTI_INSTANCE,
+        /**
+         * Two or more webdav services declared the same {@code webdav-host}. Only one can own a
+         * hostname, and resolving it by map iteration order would silently serve one service's
+         * collection from another's backend, so all but one are refused.
+         */
+        WEBDAV_HOST_COLLISION }
 }
