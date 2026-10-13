@@ -18,7 +18,7 @@
         <opentelemetry.version>1.62.0</opentelemetry.version>
         <opentelemetry.instrumentation.version>2.25.0-alpha</opentelemetry.instrumentation.version>
         <opentelemetry.semconv.version>1.39.0</opentelemetry.semconv.version>
-        <hazelcast.version>5.5.0</hazelcast.version>
+        <hazelcast.version>5.7.0</hazelcast.version>
         <hazelcast.kubernetes.version>2.2.3</hazelcast.kubernetes.version>
         <logback.version>1.5.34</logback.version>
         <logstash.logback.version>9.0</logstash.logback.version>
