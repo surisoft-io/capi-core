@@ -20,12 +20,10 @@ import io.undertow.util.HeaderValues;
 import io.undertow.util.Headers;
 import io.undertow.util.HttpString;
 import jakarta.annotation.Nullable;
-import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.net.HttpCookie;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -33,6 +31,7 @@ import java.security.NoSuchAlgorithmException;
 import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.StringJoiner;
@@ -143,7 +142,7 @@ public class HttpUtils {
         }
         // Try cookie-based authorization.
         if (authorizationCookieName != null && httpServerExchange.getRequestHeaders().contains(Constants.COOKIE_HEADER)) {
-            List<HttpCookie> cookies = getCookiesFromExchange(httpServerExchange);
+            Map<String, String> cookies = getCookiesFromExchange(httpServerExchange);
 
             // EXISTING behaviour first, unchanged: a request header named after the configured cookie
             // whose VALUE names the cookie to read. Deployments that send that header keep resolving
@@ -152,13 +151,13 @@ public class HttpUtils {
                     ? httpServerExchange.getRequestHeaders().get(authorizationCookieName).getFirst()
                     : null;
             if (authorizationName != null) {
-                return getAuthorizationCookieValue(cookies, authorizationName);
+                return cookies.get(authorizationName);
             }
 
             // Only when that header is absent: read the configured cookie straight off the Cookie
             // header, which is what a browser, a BFF or an Office client sends. Without this a plain
             // `Cookie: <name>=<jwt>` did not authenticate.
-            return getAuthorizationCookieValue(cookies, authorizationCookieName);
+            return cookies.get(authorizationCookieName);
         }
         return null;
     }
@@ -330,8 +329,14 @@ public class HttpUtils {
                 || (authCookieName != null && authCookieName.equals(cookieName));
     }
 
-    private List<HttpCookie> getCookiesFromExchange(HttpServerExchange exchange) {
-        List<HttpCookie> httpCookieList = new ArrayList<>();
+    /**
+     * Parses the request {@code Cookie} header into name → value. When a name repeats, the first
+     * value wins. A plain map rather than {@link java.net.HttpCookie}: that type models a cookie the
+     * server sets, and its constructor rejects names such as {@code $Version}, which made the whole
+     * header unreadable instead of just skipping the entry.
+     */
+    private Map<String, String> getCookiesFromExchange(HttpServerExchange exchange) {
+        Map<String, String> cookies = new LinkedHashMap<>();
         String cookieHeader = exchange.getRequestHeaders().contains(Constants.COOKIE_HEADER)
                 ? exchange.getRequestHeaders().get(Constants.COOKIE_HEADER).getFirst()
                 : null;
@@ -340,30 +345,14 @@ public class HttpUtils {
             for (String cookieString : cookieArray) {
                 String[] cookieKeyValue = cookieString.trim().split("=", 2);
                 if (cookieKeyValue.length == 2) {
-                    HttpCookie httpCookie = new HttpCookie(stripOffSurroundingQuote(cookieKeyValue[0].trim()), stripOffSurroundingQuote(cookieKeyValue[1].trim()));
-                    httpCookieList.add(httpCookie);
+                    String name = stripOffSurroundingQuote(cookieKeyValue[0].trim());
+                    if (!name.isEmpty()) {
+                        cookies.putIfAbsent(name, stripOffSurroundingQuote(cookieKeyValue[1].trim()));
+                    }
                 }
             }
         }
-        return httpCookieList;
-    }
-
-    public String processAuthorizationAccessToken(HttpServletRequest httpServletRequest) throws AuthorizationException {
-        String authorization = httpServletRequest.getHeader(Constants.AUTHORIZATION_HEADER);
-        if(authorization == null) {
-            if(httpServletRequest.getHeader(Constants.AUTHORIZATION_REQUEST_PARAMETER) != null) {
-                return httpServletRequest.getHeader(Constants.AUTHORIZATION_REQUEST_PARAMETER);
-            }
-            List<HttpCookie> cookies = getCookiesFromRequest(httpServletRequest);
-            String authorizationName = httpServletRequest.getHeader(authorizationCookieName);
-            if(authorizationName != null) {
-                return getAuthorizationCookieValue(cookies, authorizationName);
-            }
-            // Same fallback as the exchange-based path: only reached when that header is absent.
-            return getAuthorizationCookieValue(cookies, authorizationCookieName);
-        } else {
-            return getBearerTokenFromHeader(authorization);
-        }
+        return cookies;
     }
 
     public String normalizeHttpEndpoint(String httpEndpoint) {
@@ -378,28 +367,6 @@ public class HttpUtils {
 
     public boolean isEndpointSecure(String httpEndpoint) {
         return httpEndpoint.contains("https://");
-    }
-
-    public List<HttpCookie> getCookiesFromRequest(HttpServletRequest httpServletRequest) {
-        List<HttpCookie> httpCookieList = new ArrayList<>();
-        if(httpServletRequest.getHeader(Constants.COOKIE_HEADER) != null) {
-            String[] cookieArray = httpServletRequest.getHeader(Constants.COOKIE_HEADER).split(";");
-            for (String cookieString : cookieArray) {
-                String[] cookieKeyValue = cookieString.split("=");
-                HttpCookie httpCookie = new HttpCookie(stripOffSurroundingQuote(cookieKeyValue[0]), stripOffSurroundingQuote(cookieKeyValue[1]));
-                httpCookieList.add(httpCookie);
-            }
-        }
-        return httpCookieList;
-    }
-
-    public String getAuthorizationCookieValue(List<HttpCookie> httpCookieList, String authorizationCookie) {
-        for(HttpCookie httpCookie : httpCookieList) {
-            if(httpCookie.getName().equals(authorizationCookie)) {
-                return httpCookie.getValue();
-            }
-        }
-        return null;
     }
 
     private static String stripOffSurroundingQuote(String value) {

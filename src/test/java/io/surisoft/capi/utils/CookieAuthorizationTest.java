@@ -88,4 +88,70 @@ class CookieAuthorizationTest {
         HttpUtils noCookie = new HttpUtils(null, new ArrayList<>());
         assertNull(noCookie.processAuthorizationAccessToken(exchangeWith("session-auth=THE_JWT")));
     }
+
+    // --- Cookie header parsing. These pin the behaviour the java.net.HttpCookie-based parser had. ---
+
+    /** First value wins on a repeated name, as before. */
+    @Test
+    void duplicateCookie_firstValueWins() throws Exception {
+        assertEquals("FIRST", utils().processAuthorizationAccessToken(
+                exchangeWith("session-auth=FIRST; session-auth=SECOND")));
+    }
+
+    /** A JWT or base64 value may contain '=': only the first '=' separates name from value. */
+    @Test
+    void valueContainingEquals_isKeptWhole() throws Exception {
+        assertEquals("abc==", utils().processAuthorizationAccessToken(exchangeWith("session-auth=abc==")));
+    }
+
+    @Test
+    void quotedValue_isUnquoted() throws Exception {
+        assertEquals("THE_JWT", utils().processAuthorizationAccessToken(exchangeWith("session-auth=\"THE_JWT\"")));
+        assertEquals("THE_JWT", utils().processAuthorizationAccessToken(exchangeWith("session-auth='THE_JWT'")));
+    }
+
+    @Test
+    void whitespaceAroundNameAndValue_isTrimmed() throws Exception {
+        assertEquals("THE_JWT", utils().processAuthorizationAccessToken(exchangeWith(" session-auth = THE_JWT ")));
+    }
+
+    @Test
+    void entryWithoutEquals_isSkipped() throws Exception {
+        assertEquals("THE_JWT", utils().processAuthorizationAccessToken(exchangeWith("flag; session-auth=THE_JWT")));
+    }
+
+    @Test
+    void emptyValue_isReturnedAsEmpty() throws Exception {
+        assertEquals("", utils().processAuthorizationAccessToken(exchangeWith("session-auth=")));
+    }
+
+    /** Names are case sensitive (RFC 6265). */
+    @Test
+    void cookieNameMatch_isCaseSensitive() throws Exception {
+        assertNull(utils().processAuthorizationAccessToken(exchangeWith("Session-Auth=THE_JWT")));
+    }
+
+    /** Names that are attribute names in Set-Cookie are ordinary cookie names in a request. */
+    @Test
+    void attributeLikeNames_doNotBreakParsing() throws Exception {
+        assertEquals("THE_JWT", utils().processAuthorizationAccessToken(
+                exchangeWith("Path=/; expires=x; Secure=1; session-auth=THE_JWT")));
+    }
+
+    /**
+     * Changed: HttpCookie rejected a '$'-prefixed name (RFC 2965 {@code $Version}) by throwing, which
+     * escaped the auth gates as an unchecked exception. The entry is now just another cookie.
+     */
+    @Test
+    void dollarPrefixedName_noLongerBreaksParsing() throws Exception {
+        assertEquals("THE_JWT", utils().processAuthorizationAccessToken(
+                exchangeWith("$Version=1; session-auth=THE_JWT")));
+    }
+
+    /** Changed: an empty name used to throw; it is now skipped. */
+    @Test
+    void emptyName_isSkipped() throws Exception {
+        assertEquals("THE_JWT", utils().processAuthorizationAccessToken(exchangeWith("=x; session-auth=THE_JWT")));
+        assertNull(utils().processAuthorizationAccessToken(exchangeWith("=THE_JWT")));
+    }
 }
