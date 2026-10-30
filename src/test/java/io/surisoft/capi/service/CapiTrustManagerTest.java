@@ -55,19 +55,17 @@ class CapiTrustManagerTest {
     }
 
     @Test
-    void checkClientTrusted_withUntrustedCert_throwsException() {
-        assertThrows(Exception.class, () -> {
-            X509Certificate[] chain = createDummyCertChain();
-            capiTrustManager.checkClientTrusted(chain, "RSA");
-        });
+    void checkClientTrusted_withUntrustedCert_throwsException() throws Exception {
+        X509Certificate[] chain = createDummyCertChain();
+        // The trust store is empty, so the JDK rejects the chain with a RuntimeException
+        // ("trustAnchors parameter must be non-empty") rather than a CertificateException.
+        assertThrows(Exception.class, () -> capiTrustManager.checkClientTrusted(chain, "RSA"));
     }
 
     @Test
-    void checkServerTrusted_withUntrustedCert_throwsException() {
-        assertThrows(Exception.class, () -> {
-            X509Certificate[] chain = createDummyCertChain();
-            capiTrustManager.checkServerTrusted(chain, "RSA");
-        });
+    void checkServerTrusted_withUntrustedCert_throwsException() throws Exception {
+        X509Certificate[] chain = createDummyCertChain();
+        assertThrows(Exception.class, () -> capiTrustManager.checkServerTrusted(chain, "RSA"));
     }
 
     @Test

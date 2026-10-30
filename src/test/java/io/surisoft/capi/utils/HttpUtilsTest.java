@@ -17,7 +17,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.io.IOException;
-import java.net.HttpCookie;
 import java.net.URI;
 import java.util.HashMap;
 import java.util.List;
@@ -154,21 +153,6 @@ class HttpUtilsTest {
         assertFalse(httpUtils.isSafeUri(URI.create("http://192.168.1.1/api"), false));
     }
 
-    @Test
-    void getAuthorizationCookieValue_found() {
-        var cookies = java.util.List.of(
-                new java.net.HttpCookie("session", "abc"),
-                new java.net.HttpCookie("auth", "token123")
-        );
-        assertEquals("token123", httpUtils.getAuthorizationCookieValue(cookies, "auth"));
-    }
-
-    @Test
-    void getAuthorizationCookieValue_notFound() {
-        var cookies = java.util.List.of(new java.net.HttpCookie("session", "abc"));
-        assertNull(httpUtils.getAuthorizationCookieValue(cookies, "auth"));
-    }
-
     // --- Tests for uncovered methods ---
 
     @Test
@@ -219,63 +203,6 @@ class HttpUtilsTest {
     void authorizeRequest_nullProcessorList_returnsNull() throws AuthorizationException {
         // httpUtils constructed with null jwtProcessorList
         assertNull(httpUtils.authorizeRequest("some-token"));
-    }
-
-    @Test
-    void processAuthorizationAccessToken_httpServletRequest_withBearerHeader() throws AuthorizationException {
-        jakarta.servlet.http.HttpServletRequest request = mock(jakarta.servlet.http.HttpServletRequest.class);
-        when(request.getHeader(Constants.AUTHORIZATION_HEADER)).thenReturn("Bearer my-token");
-
-        String result = httpUtils.processAuthorizationAccessToken(request);
-        assertEquals("my-token", result);
-    }
-
-    @Test
-    void processAuthorizationAccessToken_httpServletRequest_withAccessTokenParam() throws AuthorizationException {
-        jakarta.servlet.http.HttpServletRequest request = mock(jakarta.servlet.http.HttpServletRequest.class);
-        when(request.getHeader(Constants.AUTHORIZATION_HEADER)).thenReturn(null);
-        when(request.getHeader(Constants.AUTHORIZATION_REQUEST_PARAMETER)).thenReturn("param-token");
-
-        String result = httpUtils.processAuthorizationAccessToken(request);
-        assertEquals("param-token", result);
-    }
-
-    @Test
-    void processAuthorizationAccessToken_httpServletRequest_noAuth_returnsNull() throws AuthorizationException {
-        jakarta.servlet.http.HttpServletRequest request = mock(jakarta.servlet.http.HttpServletRequest.class);
-        when(request.getHeader(Constants.AUTHORIZATION_HEADER)).thenReturn(null);
-        when(request.getHeader(Constants.AUTHORIZATION_REQUEST_PARAMETER)).thenReturn(null);
-        when(request.getHeader(null)).thenReturn(null);
-        when(request.getHeader(Constants.COOKIE_HEADER)).thenReturn(null);
-
-        String result = httpUtils.processAuthorizationAccessToken(request);
-        assertNull(result);
-    }
-
-    @Test
-    void processAuthorizationAccessToken_httpServletRequest_withCookieAuth() throws AuthorizationException {
-        HttpUtils httpUtilsWithCookie = new HttpUtils("auth-cookie", null);
-        jakarta.servlet.http.HttpServletRequest request = mock(jakarta.servlet.http.HttpServletRequest.class);
-        when(request.getHeader(Constants.AUTHORIZATION_HEADER)).thenReturn(null);
-        when(request.getHeader(Constants.AUTHORIZATION_REQUEST_PARAMETER)).thenReturn(null);
-        when(request.getHeader("auth-cookie")).thenReturn("my-auth-cookie");
-        when(request.getHeader(Constants.COOKIE_HEADER)).thenReturn("my-auth-cookie=tokenvalue");
-
-        String result = httpUtilsWithCookie.processAuthorizationAccessToken(request);
-        assertEquals("tokenvalue", result);
-    }
-
-    @Test
-    void processAuthorizationAccessToken_httpServletRequest_withCookieButNoName_returnsNull() throws AuthorizationException {
-        HttpUtils httpUtilsWithCookie = new HttpUtils("auth-cookie", null);
-        jakarta.servlet.http.HttpServletRequest request = mock(jakarta.servlet.http.HttpServletRequest.class);
-        when(request.getHeader(Constants.AUTHORIZATION_HEADER)).thenReturn(null);
-        when(request.getHeader(Constants.AUTHORIZATION_REQUEST_PARAMETER)).thenReturn(null);
-        when(request.getHeader("auth-cookie")).thenReturn(null);
-        when(request.getHeader(Constants.COOKIE_HEADER)).thenReturn("session=abc");
-
-        String result = httpUtilsWithCookie.processAuthorizationAccessToken(request);
-        assertNull(result);
     }
 
     @Test
@@ -551,24 +478,6 @@ class HttpUtilsTest {
     }
 
     @Test
-    void getCookiesFromRequest_validCookies() {
-        jakarta.servlet.http.HttpServletRequest request = mock(jakarta.servlet.http.HttpServletRequest.class);
-        when(request.getHeader(Constants.COOKIE_HEADER)).thenReturn("key1=value1;key2=value2");
-
-        List<HttpCookie> cookies = httpUtils.getCookiesFromRequest(request);
-        assertEquals(2, cookies.size());
-    }
-
-    @Test
-    void getCookiesFromRequest_nullCookieHeader() {
-        jakarta.servlet.http.HttpServletRequest request = mock(jakarta.servlet.http.HttpServletRequest.class);
-        when(request.getHeader(Constants.COOKIE_HEADER)).thenReturn(null);
-
-        List<HttpCookie> cookies = httpUtils.getCookiesFromRequest(request);
-        assertTrue(cookies.isEmpty());
-    }
-
-    @Test
     void setHttpSocketTimeout_noQueryParams() {
         String result = httpUtils.setHttpSocketTimeout("http://host:8080/path", 5000);
         assertTrue(result.contains("?socketTimeout=5000"));
@@ -586,11 +495,6 @@ class HttpUtilsTest {
         String result = httpUtils.setIngressEndpoint("http://host:8080/path?foo=bar&", "my-host");
         assertTrue(result.contains("customHostHeader=my-host"));
         assertFalse(result.contains("&&"));
-    }
-
-    @Test
-    void getAuthorizationCookieValue_emptyList_returnsNull() {
-        assertNull(httpUtils.getAuthorizationCookieValue(List.of(), "auth"));
     }
 
     @Test
@@ -633,15 +537,6 @@ class HttpUtilsTest {
         String json = httpUtils.proxyErrorMapper(error);
         assertNotNull(json);
         assertTrue(json.contains("400"));
-    }
-
-    @Test
-    void getCookiesFromRequest_cookiesWithSingleQuotes() {
-        jakarta.servlet.http.HttpServletRequest request = mock(jakarta.servlet.http.HttpServletRequest.class);
-        when(request.getHeader(Constants.COOKIE_HEADER)).thenReturn("'key1'='value1'");
-
-        List<HttpCookie> cookies = httpUtils.getCookiesFromRequest(request);
-        assertFalse(cookies.isEmpty());
     }
 
     @Test

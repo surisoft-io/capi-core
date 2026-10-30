@@ -53,8 +53,9 @@ public class JvmObservability {
         if (stream != null) {
             return;
         }
+        RecordingStream s = null;
         try {
-            RecordingStream s = new RecordingStream();
+            s = new RecordingStream();
             s.enable("jdk.ExecutionSample").withPeriod(sampleInterval);
             s.onEvent("jdk.ExecutionSample", profileSampler::onSample);
             s.startAsync();
@@ -63,6 +64,10 @@ public class JvmObservability {
                     sampleInterval.toMillis(), profileSampler.size());
         } catch (Exception e) {
             log.warn("Failed to start JVM observability: {}", e.getMessage(), e);
+            // Not published to this.stream, so stop() would never close it.
+            if (s != null) {
+                s.close();
+            }
         }
     }
 
