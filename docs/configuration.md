@@ -13,6 +13,7 @@ capi:
   runningMode: full
   adminPort: 8381
   reverseProxyHost:
+  blockedPaths: []        # emergency blocklist, e.g. [ /actuator ]
 
   admin:
     protected: true
@@ -131,6 +132,7 @@ capi:
 | `runningMode` | `full` | Service types to proxy: `full` (REST + WebSocket + SSE), `websocket`, or `sse`. |
 | `adminPort` | `8381` | Port for the Admin API (health, metrics, routes). Bound on `0.0.0.0`. See [Admin listener](#admin-listener) for authentication. |
 | `reverseProxyHost` | — | Override the `X-Forwarded-Host` header sent to upstream services. |
+| `blockedPaths` | `[]` | **Emergency blocklist.** Requests whose path contains one of these segment sequences get `404` on the REST, WebSocket and WebDAV listeners, before any other check. Case-insensitive, whole segments, anywhere in the path. Read at startup only, so a change needs a restart. See [Security — Emergency path blocklist](security.md#emergency-path-blocklist). |
 
 ### Admin listener
 

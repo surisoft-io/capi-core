@@ -20,6 +20,7 @@ Returns links to all available admin endpoints:
     "invalid-services": { "href": "http://localhost:8381/info/invalid-services" },
     "openapi": { "href": "http://localhost:8381/info/openapi/{serviceId}" },
     "truststore": { "href": "http://localhost:8381/info/truststore" },
+    "truststore-expired": { "href": "http://localhost:8381/info/truststore?expired=true" },
     "spec-compliance": { "href": "http://localhost:8381/info/spec-compliance" },
     "wsroutes": { "href": "http://localhost:8381/info/wsroutes" },
     "mcp": { "href": "http://localhost:8381/info/mcp" },
@@ -207,6 +208,25 @@ curl http://localhost:8381/info/truststore
 ```
 
 Lists all certificates in the custom truststore — alias, subject DN, issuer DN and validity window. Returns `404` if the truststore is not enabled.
+
+Filter by expiry with `expired`:
+
+```bash
+curl "http://localhost:8381/info/truststore?expired=true"    # notAfter already in the past
+curl "http://localhost:8381/info/truststore?expired=false"   # not expired yet
+```
+
+| Query | Returns |
+| --- | --- |
+| *(none)* | every certificate |
+| `?expired=true` | expired certificates only |
+| `?expired=false` | certificates that have not expired (including any whose `notBefore` is still in the future) |
+| any other value | `400` |
+
+Same response shape, `[]` when nothing matches. An expired certificate can no longer validate a
+backend, so each `expired=true` entry is a candidate for removal with `DELETE /info/truststore/{alias}`
+below. The filter is a query parameter rather than a path because `/info/truststore/{alias}` is the
+delete route.
 
 Add a certificate (PEM in the request body):
 

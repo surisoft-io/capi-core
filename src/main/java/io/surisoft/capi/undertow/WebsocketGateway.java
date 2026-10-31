@@ -7,6 +7,7 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.CorsPolicy;
+import io.surisoft.capi.utils.PathBlocklist;
 import io.undertow.server.HttpServerExchange;
 import io.undertow.util.HeaderValues;
 import jakarta.annotation.Nullable;
@@ -42,6 +43,7 @@ public class WebsocketGateway {
     private boolean enforceOriginCheck;
     private CorsPolicy corsPolicy = CorsPolicy.denyAll();
     private MeterRegistry meterRegistry;
+    private PathBlocklist pathBlocklist = PathBlocklist.EMPTY;
 
     public WebsocketGateway(int port,
                             int ioThreads,
@@ -92,8 +94,15 @@ public class WebsocketGateway {
                             httpServerExchange.getRequestHeaders().remove(Constants.BLUECOAT_HEADER);
                         }
 
+                        String blockedBy = requestPath.equals(Constants.CAPI_HEALTH_PATH) ? null : pathBlocklist.match(httpServerExchange);
                         if(requestPath.equals(Constants.CAPI_HEALTH_PATH)) {
                             httpServerExchange.setStatusCode(HttpServletResponse.SC_OK);
+                            httpServerExchange.endExchange();
+                        } else if(blockedBy != null) {
+                            // Same answer as an unknown route (capi.blockedPaths).
+                            PathBlocklist.count(meterRegistry, "websocket", blockedBy, webClientId != null && webSocketClients.containsKey(webClientId) ? webClientId : null);
+                            log.debug("Blocked by capi.blockedPaths rule {}: {}", blockedBy, requestPath);
+                            httpServerExchange.setStatusCode(Constants.NOT_FOUND_CODE);
                             httpServerExchange.endExchange();
                         } else {
                             if(webClientId != null && webSocketClients.containsKey(webClientId)) { //webSocketClients.containsKey(webClientId)
@@ -209,6 +218,11 @@ public class WebsocketGateway {
     /** {@code capi.websocket.enforceOriginCheck} — off means count only. */
     public void setEnforceOriginCheck(boolean enforceOriginCheck) {
         this.enforceOriginCheck = enforceOriginCheck;
+    }
+
+    /** The emergency blocklist ({@code capi.blockedPaths}). */
+    public void setPathBlocklist(@Nullable PathBlocklist pathBlocklist) {
+        this.pathBlocklist = pathBlocklist != null ? pathBlocklist : PathBlocklist.EMPTY;
     }
 
     public void setMeterRegistry(@Nullable MeterRegistry meterRegistry) {

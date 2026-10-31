@@ -565,6 +565,93 @@ class RestGatewayTest {
         assertEquals(5, seen.size(), "all five legitimate paths should have reached the backend");
     }
 
+    // === Emergency blocklist (capi.blockedPaths) ===
+
+    @Test
+    void blockedPaths_returns404AndNeverReachesBackend() throws Exception {
+        int port = pickPort();
+        java.util.List<String> seen = new java.util.ArrayList<>();
+        restClientMap.put("/my-service/v1", createPathEchoRestClient("/my-service/v1", seen));
+        io.micrometer.core.instrument.simple.SimpleMeterRegistry registry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        RestGateway gw = createGateway(port);
+        gw.setPathBlocklist(io.surisoft.capi.utils.PathBlocklist.of(java.util.List.of("/actuator")));
+        gw.setMeterRegistry(registry);
+        runningGateway = gw;
+        runningGateway.runProxy();
+
+        java.util.List<String> blocked = java.util.List.of(
+                "/api/my-service/v1/actuator",
+                "/api/my-service/v1/ACTUATOR/env",
+                "/api/my-service/v1/%61ctuator/env",
+                "/api/my-service/v1/%2561ctuator",
+                "/api/my-service/v1/actuator;jsessionid=x/env",
+                "/api/my-service/v1//actuator",
+                "/api/my-service/v1/x/..;/actuator",
+                "/api/unknown/v1/actuator");
+        for (String path : blocked) {
+            for (String method : java.util.List.of("GET", "OPTIONS")) {
+                HttpResponse<String> resp = HttpClient.newHttpClient().send(
+                        HttpRequest.newBuilder().uri(URI.create("http://localhost:" + port + path))
+                                .method(method, HttpRequest.BodyPublishers.noBody()).build(),
+                        HttpResponse.BodyHandlers.ofString());
+                assertEquals(404, resp.statusCode(), method + " must be blocked: " + path);
+            }
+        }
+        assertTrue(seen.isEmpty(), "a blocked request must never reach the backend: " + seen);
+        assertEquals(blocked.size() * 2.0, registry.get("capi_blocked_requests_total")
+                .tag("listener", "rest").counters().stream().mapToDouble(c -> c.count()).sum());
+        assertEquals(2.0, registry.get("capi_blocked_requests_total").tag("service", "unrouted").counter().count());
+    }
+
+    @Test
+    void blockedPaths_sameAnswerAsUnknownRoute() throws Exception {
+        int port = pickPort();
+        restClientMap.put("/my-service/v1", createPathEchoRestClient("/my-service/v1", new java.util.ArrayList<>()));
+        RestGateway gw = createGateway(port);
+        gw.setPathBlocklist(io.surisoft.capi.utils.PathBlocklist.of(java.util.List.of("/actuator")));
+        runningGateway = gw;
+        runningGateway.runProxy();
+
+        HttpResponse<String> blocked = HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder().uri(URI.create("http://localhost:" + port + "/api/my-service/v1/actuator")).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> unknown = HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder().uri(URI.create("http://localhost:" + port + "/api/nope/v1")).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(unknown.statusCode(), blocked.statusCode());
+        assertEquals(unknown.body().replaceAll("\"(traceId|timestamp)\"\\s*:\\s*\"[^\"]*\"", ""),
+                blocked.body().replaceAll("\"(traceId|timestamp)\"\\s*:\\s*\"[^\"]*\"", ""),
+                "a probe must not be able to tell a blocked path from a missing route");
+    }
+
+    @Test
+    void blockedPaths_otherPathsAndHealthStillWork() throws Exception {
+        int port = pickPort();
+        java.util.List<String> seen = new java.util.ArrayList<>();
+        restClientMap.put("/my-service/v1", createPathEchoRestClient("/my-service/v1", seen));
+        RestGateway gw = createGateway(port);
+        gw.setPathBlocklist(io.surisoft.capi.utils.PathBlocklist.of(java.util.List.of("/actuator")));
+        runningGateway = gw;
+        runningGateway.runProxy();
+
+        for (String path : java.util.List.of(
+                "/api/my-service/v1/orders",
+                "/api/my-service/v1/actuators",
+                "/api/my-service/v1/orders?next=/actuator")) {
+            HttpResponse<String> resp = HttpClient.newHttpClient().send(
+                    HttpRequest.newBuilder().uri(URI.create("http://localhost:" + port + path)).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, resp.statusCode(), "must not be blocked: " + path);
+        }
+        assertEquals(3, seen.size());
+
+        HttpResponse<String> health = HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder().uri(URI.create("http://localhost:" + port + "/health")).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, health.statusCode());
+    }
+
     @Test
     void metricMethod_collapsesUnknownMethodsToOther() throws Exception {
         java.lang.reflect.Method metricMethod =

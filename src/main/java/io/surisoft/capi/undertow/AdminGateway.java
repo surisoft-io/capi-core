@@ -197,6 +197,7 @@ public class AdminGateway implements AutoCloseable {
             }
             links.put("openapi", Map.of("href", baseUrl + "/info/openapi/{serviceId}"));
             links.put("truststore", Map.of("href", baseUrl + "/info/truststore"));
+            links.put("truststore-expired", Map.of("href", baseUrl + "/info/truststore?expired=true"));
             links.put("wsroutes", Map.of("href", baseUrl + "/info/wsroutes"));
             links.put("mcp", Map.of("href", baseUrl + "/info/mcp"));
             links.put("mcp-tools", Map.of("href", baseUrl + "/info/mcp/tools"));
@@ -348,9 +349,26 @@ public class AdminGateway implements AutoCloseable {
         exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
         try {
             if(capiConfiguration.getTrustStore().isEnabled() && capiTrustManager != null) {
+                // A query parameter, not /info/truststore/expired: that path is DELETE /{alias}.
+                java.util.Deque<String> expiredParam = exchange.getQueryParameters().get("expired");
+                String expired = expiredParam == null || expiredParam.isEmpty() ? null : expiredParam.getFirst();
+                if (expired != null && !"true".equalsIgnoreCase(expired) && !"false".equalsIgnoreCase(expired)) {
+                    // Strict, so a typo is not mistaken for a filtered list that happens to contain everything.
+                    exchange.setStatusCode(StatusCodes.BAD_REQUEST);
+                    exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.BAD_REQUEST, "expired must be true or false")));
+                    return;
+                }
                 Truststore truststore = new Truststore(true, capiTrustManager);
+                List<AliasInfo> certificates;
+                if (expired == null) {
+                    certificates = truststore.getTruststore();
+                } else if ("true".equalsIgnoreCase(expired)) {
+                    certificates = truststore.getExpired(new Date());
+                } else {
+                    certificates = truststore.getNotExpired(new Date());
+                }
                 exchange.setStatusCode(StatusCodes.OK);
-                exchange.getResponseSender().send(objectMapper.writeValueAsString(truststore.getTruststore()));
+                exchange.getResponseSender().send(objectMapper.writeValueAsString(certificates));
             } else {
                 exchange.setStatusCode(StatusCodes.NOT_FOUND);
                 exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.NOT_FOUND, "Trust Store not enabled")));

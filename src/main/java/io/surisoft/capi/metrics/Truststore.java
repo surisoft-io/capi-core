@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import java.security.KeyStore;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.Enumeration;
 import java.util.List;
 
@@ -50,5 +51,32 @@ public class Truststore {
             return null;
         }
         return aliasList;
+    }
+
+    /**
+     * The certificates whose {@code notAfter} is before {@code now}: candidates for removal, since an
+     * expired certificate can no longer validate a backend. Null when the trust store cannot be read,
+     * as with {@link #getTruststore()}.
+     */
+    public List<AliasInfo> getExpired(Date now) {
+        return filterByExpiry(now, true);
+    }
+
+    /**
+     * The complement of {@link #getExpired(Date)}: certificates not yet past {@code notAfter}. A
+     * certificate whose {@code notBefore} is still in the future is included, as it has not expired.
+     */
+    public List<AliasInfo> getNotExpired(Date now) {
+        return filterByExpiry(now, false);
+    }
+
+    private List<AliasInfo> filterByExpiry(Date now, boolean expired) {
+        List<AliasInfo> aliasList = getTruststore();
+        if(aliasList == null) {
+            return null;
+        }
+        return aliasList.stream()
+                .filter(aliasInfo -> aliasInfo.getNotAfter() != null && aliasInfo.getNotAfter().before(now) == expired)
+                .toList();
     }
 }

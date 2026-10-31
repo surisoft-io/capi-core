@@ -9,6 +9,7 @@ import io.surisoft.capi.schema.WebDavClient;
 import io.surisoft.capi.service.OpaWasmService;
 import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.HttpUtils;
+import io.surisoft.capi.utils.PathBlocklist;
 import io.undertow.Undertow;
 import io.undertow.UndertowOptions;
 import io.undertow.server.HttpServerExchange;
@@ -60,6 +61,7 @@ public class WebDavGateway {
     private io.surisoft.capi.service.WebDavTicketStore ticketStore;
     private io.surisoft.capi.service.WebDavSessionStore sessionStore;
     private Undertow server;
+    private PathBlocklist pathBlocklist = PathBlocklist.EMPTY;
 
     public WebDavGateway(int port,
                          Map<String, WebDavClient> webDavClients,
@@ -81,6 +83,11 @@ public class WebDavGateway {
 
     public void setMeterRegistry(@Nullable MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
+    }
+
+    /** The emergency blocklist ({@code capi.blockedPaths}). */
+    public void setPathBlocklist(@Nullable PathBlocklist pathBlocklist) {
+        this.pathBlocklist = pathBlocklist != null ? pathBlocklist : PathBlocklist.EMPTY;
     }
 
     public void setTicketStore(@Nullable io.surisoft.capi.service.WebDavTicketStore ticketStore) {
@@ -149,6 +156,20 @@ public class WebDavGateway {
             exchange.setStatusCode(HttpServletResponse.SC_OK);
             exchange.getResponseHeaders().put(Headers.ALLOW,
                     "OPTIONS, GET, HEAD, PUT, DELETE, POST, PROPFIND, PROPPATCH, MKCOL, COPY, MOVE, LOCK, UNLOCK");
+            exchange.endExchange();
+            return;
+        }
+
+        // Emergency blocklist, answered like an unknown service. Checked on the raw URI too, which still
+        // carries the session prefix — harmless, the prefix is never a rule segment.
+        String blockedBy = pathBlocklist.match(exchange);
+        if (blockedBy == null) {
+            blockedBy = pathBlocklist.match(requestPath);
+        }
+        if (blockedBy != null) {
+            PathBlocklist.count(meterRegistry, "webdav", blockedBy, client != null ? client.getServiceId() : null);
+            log.debug("Blocked by capi.blockedPaths rule {}: {}", blockedBy, requestPath);
+            exchange.setStatusCode(Constants.NOT_FOUND_CODE);
             exchange.endExchange();
             return;
         }

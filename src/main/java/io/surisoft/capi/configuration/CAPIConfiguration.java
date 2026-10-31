@@ -36,6 +36,12 @@ public class CAPIConfiguration {
     private Admin admin = new Admin();
     private MatchOpenApiSpec matchOpenApiSpec = new MatchOpenApiSpec();
     private OpenApi openApi = new OpenApi();
+    /**
+     * Emergency path blocklist: requests whose path contains one of these segment sequences get 404 on
+     * the REST, WebSocket and WebDAV listeners. Optional, empty by default, read once at startup.
+     * See {@link io.surisoft.capi.utils.PathBlocklist}.
+     */
+    private List<String> blockedPaths;
 
     public String getVersion() {
         return version;
@@ -762,6 +768,13 @@ public class CAPIConfiguration {
     }
     public void setObservability(Observability observability) {
         this.observability = observability;
+    }
+
+    public List<String> getBlockedPaths() {
+        return blockedPaths;
+    }
+    public void setBlockedPaths(List<String> blockedPaths) {
+        this.blockedPaths = blockedPaths;
     }
 
     public OpenApi getOpenApi() {
