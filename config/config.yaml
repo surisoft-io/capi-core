@@ -6,6 +6,10 @@ capi:
   runningMode: full
   adminPort: 8381
   reverseProxyHost:
+  # Emergency blocklist: 404 on REST/WebSocket/WebDAV for any path containing these segments
+  # (case-insensitive, anywhere in the path). Read at startup only — restart to apply.
+  blockedPaths: []
+    #  - /actuator
   observability:
     jvm:
       enabled: true

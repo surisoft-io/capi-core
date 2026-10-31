@@ -921,6 +921,56 @@ class AdminGatewayTest {
     }
 
     @Test
+    void start_withoutSsl_truststoreEndpoint_expiredFilter() throws Exception {
+        CAPIConfiguration.TrustStore trustStoreConfig = new CAPIConfiguration.TrustStore();
+        trustStoreConfig.setEnabled(true);
+        when(capiConfiguration.getTrustStore()).thenReturn(trustStoreConfig);
+
+        java.security.KeyStore keyStore = java.security.KeyStore.getInstance("JKS");
+        keyStore.load(null, null);
+        long now = System.currentTimeMillis();
+        keyStore.setCertificateEntry("old-backend", mockCertificate(new java.util.Date(now - 86_400_000L)));
+        keyStore.setCertificateEntry("current-backend", mockCertificate(new java.util.Date(now + 86_400_000L)));
+        when(capiTrustManager.getKeyStore()).thenReturn(keyStore);
+
+        try (AdminGateway gw = new AdminGateway(19115, prometheusRegistry, capiConfiguration, serviceCache, null, capiTrustManager, new java.util.HashMap<>(), false, null, null)) {
+            gw.start();
+
+            HttpClient client = HttpClient.newHttpClient();
+            HttpResponse<String> expired = client.send(HttpRequest.newBuilder()
+                    .uri(URI.create("http://localhost:19115/info/truststore?expired=true")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> notExpired = client.send(HttpRequest.newBuilder()
+                    .uri(URI.create("http://localhost:19115/info/truststore?expired=false")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> all = client.send(HttpRequest.newBuilder()
+                    .uri(URI.create("http://localhost:19115/info/truststore")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> invalid = client.send(HttpRequest.newBuilder()
+                    .uri(URI.create("http://localhost:19115/info/truststore?expired=yes")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(200, expired.statusCode());
+            assertTrue(expired.body().contains("old-backend"));
+            assertFalse(expired.body().contains("current-backend"));
+            assertEquals(200, notExpired.statusCode());
+            assertFalse(notExpired.body().contains("old-backend"));
+            assertTrue(notExpired.body().contains("current-backend"));
+            assertTrue(all.body().contains("old-backend"));
+            assertTrue(all.body().contains("current-backend"));
+            assertEquals(400, invalid.statusCode());
+        }
+    }
+
+    private static java.security.cert.X509Certificate mockCertificate(java.util.Date notAfter) {
+        java.security.cert.X509Certificate certificate = mock(java.security.cert.X509Certificate.class);
+        when(certificate.getIssuerX500Principal()).thenReturn(new javax.security.auth.x500.X500Principal("CN=issuer"));
+        when(certificate.getSubjectX500Principal()).thenReturn(new javax.security.auth.x500.X500Principal("CN=subject"));
+        when(certificate.getNotAfter()).thenReturn(notAfter);
+        return certificate;
+    }
+
+    @Test
     void start_withoutSsl_truststoreEndpoint_disabledReturnsNotFound() throws Exception {
         CAPIConfiguration.TrustStore trustStoreConfig = new CAPIConfiguration.TrustStore();
         trustStoreConfig.setEnabled(false);
@@ -1312,6 +1362,7 @@ class AdminGatewayTest {
             assertTrue(body.contains("/info/routes"));
             assertTrue(body.contains("/info/openapi/{serviceId}"));
             assertTrue(body.contains("/info/truststore"));
+            assertTrue(body.contains("/info/truststore?expired=true"));
             assertTrue(body.contains("/info/wsroutes"));
             assertTrue(body.contains("/info/invalid-services"));
             assertTrue(body.contains("/info/spec-compliance"));

@@ -9,6 +9,7 @@ import io.surisoft.capi.tracer.CapiTracer;
 import io.surisoft.capi.undertow.*;
 import io.surisoft.capi.utils.CorsPolicy;
 import io.surisoft.capi.utils.Constants;
+import io.surisoft.capi.utils.PathBlocklist;
 import io.surisoft.capi.utils.Startup;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -29,6 +30,7 @@ public class CAPIMain {
 
     private static Logger log;
     private final CAPIConfiguration capiConfiguration;
+    private final PathBlocklist pathBlocklist;
     private io.surisoft.capi.service.McpTrustStore mcpTrustStore;
 
     public static void main(String[] args) {
@@ -37,8 +39,14 @@ public class CAPIMain {
 
     public CAPIMain() {
         capiConfiguration = loadConfiguration();
+        // Built before anything starts: an invalid rule must stop startup, not be skipped.
+        pathBlocklist = PathBlocklist.of(capiConfiguration.getBlockedPaths());
 
         log.info("Starting CAPI Gateway");
+        if (!pathBlocklist.isEmpty()) {
+            log.warn("capi.blockedPaths is active — requests matching {} get 404 on the REST, WebSocket and WebDAV listeners",
+                    pathBlocklist.describe());
+        }
 
         Startup startup = new Startup(capiConfiguration);
         startup.start();
@@ -287,6 +295,7 @@ public class CAPIMain {
             );
             gateway.setCorsEnabled(capiConfiguration.isCorsEnabled());
             gateway.setRejectDotSegments(capiConfiguration.getRest().isRejectDotSegments());
+            gateway.setPathBlocklist(pathBlocklist);
             gateway.setMaxRequestSize(capiConfiguration.getRest().getMaxRequestSize());
             gateway.setCorsPolicy(new CorsPolicy(capiConfiguration.getAllowedOrigins()));
             if (startup.getOpaWasmService() != null) gateway.setOpaWasmService(startup.getOpaWasmService());
@@ -337,6 +346,7 @@ public class CAPIMain {
             websocketGateway.setCorsPolicy(new CorsPolicy(capiConfiguration.getAllowedOrigins()));
             websocketGateway.setEnforceOriginCheck(capiConfiguration.getWebsocket().isEnforceOriginCheck());
             websocketGateway.setMeterRegistry(startup.getPrometheusRegistry());
+            websocketGateway.setPathBlocklist(pathBlocklist);
             websocketGateway.runProxy();
         }
         return websocketGateway;
@@ -377,6 +387,7 @@ public class CAPIMain {
             gateway.setHttpUtils(startup.getHttpUtils());
             gateway.setOpaWasmService(startup.getOpaWasmService());
             gateway.setMeterRegistry(startup.getPrometheusRegistry());
+            gateway.setPathBlocklist(pathBlocklist);
             configureWebDavStores(gateway);
             gateway.runProxy();
             return gateway;

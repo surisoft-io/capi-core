@@ -21,6 +21,7 @@ stringData:
       runningMode: {{ .Values.capi.runningMode }}
       adminPort: {{ .Values.service.adminPort }}
       reverseProxyHost: {{ .Values.capi.reverseProxyHost | quote }}
+      blockedPaths: {{ .Values.capi.blockedPaths | default list | toJson }}
       rest:
         enabled: {{ .Values.capi.rest.enabled }}
         port: {{ .Values.capi.rest.port }}

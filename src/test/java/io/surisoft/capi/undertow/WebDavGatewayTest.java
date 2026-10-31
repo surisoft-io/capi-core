@@ -133,6 +133,42 @@ class WebDavGatewayTest {
         assertFalse(RestGateway.containsDotSegment("/files/v1/v1.2.3/notes.md"));
     }
 
+    // ---- emergency blocklist (capi.blockedPaths) ----
+
+    /**
+     * A read-only service answers PUT with 403 before any auth, so a 404 on the blocked path can only
+     * come from the blocklist — the route itself resolves.
+     */
+    @Test
+    void blockedPath_returns404BeforeAnyOtherGate() throws Exception {
+        int port = io.surisoft.capi.TestPorts.next();
+        WebDavClient files = client("/files/v1", null);
+        files.setReadOnly(true);
+        WebDavGateway g = new WebDavGateway(port, new ConcurrentHashMap<>(Map.of("/files/v1", files)), null, config("path"));
+        io.micrometer.core.instrument.simple.SimpleMeterRegistry registry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        g.setMeterRegistry(registry);
+        g.setPathBlocklist(io.surisoft.capi.utils.PathBlocklist.of(java.util.List.of("/actuator")));
+        g.runProxy();
+        try {
+            java.net.http.HttpClient http = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpResponse<String> blocked = http.send(java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("http://localhost:" + port + "/files/v1/ACTUATOR/env"))
+                    .PUT(java.net.http.HttpRequest.BodyPublishers.ofString("x")).build(),
+                    java.net.http.HttpResponse.BodyHandlers.ofString());
+            java.net.http.HttpResponse<String> other = http.send(java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("http://localhost:" + port + "/files/v1/report.txt"))
+                    .PUT(java.net.http.HttpRequest.BodyPublishers.ofString("x")).build(),
+                    java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(404, blocked.statusCode());
+            assertEquals(403, other.statusCode(), "the route resolves; only the blocked path is hidden");
+            assertEquals(1.0, registry.get("capi_blocked_requests_total")
+                    .tags("listener", "webdav", "service", "/files/v1").counter().count());
+        } finally {
+            g.stop();
+        }
+    }
+
     // ---- what "unsecured" actually means ----
 
     private static boolean authorize(WebDavGateway g, WebDavClient c) throws Exception {

@@ -487,6 +487,50 @@ class WebsocketGatewayTest {
     }
 
     @Test
+    void runProxy_blockedPath_returns404AndNeverForwards() throws Exception {
+        int port = pickPort();
+        when(websocketUtils.createWebsocketAuthorization()).thenThrow(new CapiUndertowException("no oidc"));
+
+        String clientKey = "/test/ws";
+        when(websocketUtils.getWebclientId(anyString())).thenReturn(clientKey);
+        when(websocketUtils.normalizePathForForwarding(any(WebsocketClient.class), anyString())).thenReturn("/extra");
+
+        java.util.concurrent.atomic.AtomicInteger forwarded = new java.util.concurrent.atomic.AtomicInteger();
+        WebsocketClient wsClient = new WebsocketClient();
+        wsClient.setServiceId("test");
+        wsClient.setPath("/capi/test/ws");
+        wsClient.setRequiresSubscription(false);
+        wsClient.setHttpHandler(exchange -> {
+            forwarded.incrementAndGet();
+            exchange.setStatusCode(200);
+            exchange.endExchange();
+        });
+        webSocketClients.put(clientKey, wsClient);
+
+        runningGateway = new WebsocketGateway(
+                port, 2, webSocketClients, websocketUtils, null,
+                accessControlAllowHeaders, null
+        );
+        runningGateway.setPathBlocklist(io.surisoft.capi.utils.PathBlocklist.of(List.of("/actuator")));
+        runningGateway.runProxy();
+
+        HttpClient client = HttpClient.newHttpClient();
+        for (String path : List.of("/capi/test/ws/actuator", "/capi/test/ws/%61ctuator/env")) {
+            HttpResponse<String> blocked = client.send(HttpRequest.newBuilder()
+                    .uri(URI.create("http://localhost:" + port + path)).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(404, blocked.statusCode(), "must be blocked: " + path);
+        }
+        assertEquals(0, forwarded.get(), "a blocked request must never be forwarded");
+
+        HttpResponse<String> allowed = client.send(HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + port + "/capi/test/ws/extra")).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, allowed.statusCode());
+        assertEquals(1, forwarded.get());
+    }
+
+    @Test
     void runProxy_knownPath_noAuth_requiresSubscription_returns403() throws Exception {
         int port = pickPort();
         when(websocketUtils.createWebsocketAuthorization()).thenThrow(new CapiUndertowException("no oidc"));

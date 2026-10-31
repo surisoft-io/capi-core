@@ -256,6 +256,62 @@ capi:
 > validated. Tomcat and Spring reject encoded slashes by default; if yours does not, treat this as an
 > open item.
 
+## Emergency path blocklist
+
+For incidents: a backend exposes something it should not, such as Spring Boot's `/actuator`, and
+traffic must stop reaching it now, before its owner can ship a fix.
+
+```yaml
+capi:
+  blockedPaths:
+    - /actuator
+```
+
+Any request whose path contains a listed rule gets `404` on the REST, WebSocket and WebDAV
+listeners. MCP and gRPC are not covered: MCP only calls the operations a spec declares, and gRPC
+routes by header, not by path.
+
+**How a rule matches**
+
+- **Whole segments, anywhere in the path, case-insensitive.** Through CAPI a backend path arrives as
+  `/api/<service>/<group>/actuator/...`, so a prefix match would never fire. `/actuator` blocks
+  `/api/orders/v1/actuator` and `/api/orders/v1/ACTUATOR/env`, but not `/api/orders/v1/actuators`.
+- **A multi-segment rule matches consecutive segments.** `/actuator/env` blocks
+  `/api/orders/v1/actuator/env/...` and leaves `/api/orders/v1/actuator/health` alone.
+- **The path is canonicalised first**, so another spelling of the same path cannot walk past the
+  rule: percent-decoding (repeated, so `%2561ctuator` is caught), `\` treated as `/`, `;parameters`
+  stripped from each segment (`/actuator;jsessionid=x`), empty and `.` segments dropped, `..`
+  resolved (`/x/..;/actuator`), and `%2F` treated as a separator. Both the raw request URI, which is
+  what CAPI forwards, and the decoded path are checked.
+- The query string is not matched: `/orders?next=/actuator` is not blocked.
+
+**What the caller sees.** The same `404` as an unknown route, returned before CORS preflight
+handling and before every authorization gate. A probe learns neither that the path exists nor
+whether its credentials would have been accepted.
+
+**Observability.** Each blocked request increments
+
+```
+capi_blocked_requests_total{listener="rest|websocket|webdav", rule="/actuator", service="..."}
+```
+
+with `service="unrouted"` when the path did not resolve to a service. It also appears in the access
+log as a `404`. Active rules are logged at `WARN` on startup.
+
+**Rules are validated at startup.** A blank rule, a rule that resolves to `/` (it would block every
+request), a dot segment, or wildcard/query/parameter/percent syntax (`*`, `?`, `#`, `;`, `%`, `\`)
+stops CAPI from starting, rather than silently blocking nothing or everything.
+
+**Changing the list needs a restart.** It is read once at startup. With the Helm chart, a
+`helm upgrade` that changes the config rolls the pods automatically through the `checksum/config`
+annotation. A ConfigMap edited by hand does not: follow it with
+`kubectl rollout restart deployment/<capi-deployment>`. Until the rollout finishes, pods that have
+not restarted yet still serve the path, so for the first minutes of an incident a WAF or load
+balancer rule in front of CAPI is faster.
+
+This is a stop-gap, not a policy layer. The fix belongs in the backend: disable the endpoint or move
+it to a management port the gateway never routes to, then remove the rule.
+
 ## OpenAPI spec endpoints
 
 The `open-api` service metadata key is the one URL a service owner supplies that CAPI then requests

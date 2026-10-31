@@ -17,6 +17,10 @@ capi:
   publicEndpoint: http://localhost:8380/api/
   runningMode: full
   reverseProxyHost: ""
+  # Emergency blocklist: 404 on REST/WebSocket/WebDAV for any path containing these segments
+  # (case-insensitive, anywhere in the path). A `helm upgrade` changing it rolls the pods.
+  blockedPaths: []
+  #  - /actuator
 
   rest:
     enabled: true

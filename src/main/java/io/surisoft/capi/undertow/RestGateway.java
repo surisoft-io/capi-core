@@ -21,6 +21,7 @@ import io.surisoft.capi.tracer.CapiTracer;
 import io.surisoft.capi.utils.CorsPolicy;
 import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.HttpUtils;
+import io.surisoft.capi.utils.PathBlocklist;
 import io.surisoft.capi.utils.WebsocketUtils;
 import io.undertow.Undertow;
 import io.undertow.UndertowOptions;
@@ -74,6 +75,7 @@ public class RestGateway {
     private CorsPolicy corsPolicy = CorsPolicy.denyAll();
     private boolean corsEnabled;
     private boolean rejectDotSegments;
+    private PathBlocklist pathBlocklist = PathBlocklist.EMPTY;
     /** Methods that may appear verbatim as a metric tag value. See {@link #metricMethod}. */
     private static final Set<String> METRIC_METHODS =
             Set.of("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE");
@@ -179,6 +181,11 @@ public class RestGateway {
      */
     public void setRejectDotSegments(boolean rejectDotSegments) {
         this.rejectDotSegments = rejectDotSegments;
+    }
+
+    /** The emergency blocklist ({@code capi.blockedPaths}). */
+    public void setPathBlocklist(@Nullable PathBlocklist pathBlocklist) {
+        this.pathBlocklist = pathBlocklist != null ? pathBlocklist : PathBlocklist.EMPTY;
     }
 
     public void setReverseProxyHost(@Nullable String reverseProxyHost) {
@@ -309,6 +316,18 @@ public class RestGateway {
             // Health check
             if (requestPath.equals(Constants.CAPI_HEALTH_PATH)) {
                 handleHealth(exchange);
+                return;
+            }
+
+            // Emergency blocklist. Before OPTIONS, the definitions endpoint and every auth gate, and
+            // answered exactly like an unknown route, so a probe learns neither that the path exists
+            // nor whether its credentials would have been accepted.
+            String blockedBy = pathBlocklist.match(exchange);
+            if (blockedBy != null) {
+                String svc = routedClient != null ? httpUtils.contextToRole(routedClient.getServiceId()) : null;
+                PathBlocklist.count(meterRegistry, "rest", blockedBy, svc);
+                log.debug("Blocked by capi.blockedPaths rule {}: {}", blockedBy, requestPath);
+                httpErrorHandler.sendError(exchange, 404, "The requested route was not found, please try again later on.", contextPath);
                 return;
             }
 
