@@ -148,6 +148,9 @@ capi:
     # Deployment environment (e.g. dev / acc / prod). Emitted as the "appEnvironment"
     # resource attribute on every span. Omitted from spans when left blank.
     appEnvironment:
+    # Record the token's subject (capi.token.requester.subject) — only when CAPI verified the token.
+    # Off by default: it identifies a person, and traces are kept for their retention period.
+    traceSubject: false
   # MASTER SWITCH. false = CAPI sends no CORS header at all, and both allowedOrigins below and any
   # per-service `allowed-origins` metadata are ignored. Set true to activate them.
   corsEnabled: false

@@ -93,6 +93,7 @@ stringData:
         serviceName: {{ .Values.capi.traces.serviceName }}
         endpoint: {{ .Values.capi.traces.endpoint }}
         extraMetadataPrefix: {{ .Values.capi.traces.extraMetadataPrefix | quote }}
+        traceSubject: {{ .Values.capi.traces.traceSubject | default false }}
       corsEnabled: {{ .Values.capi.corsEnabled }}
       allowedHeaders:
         {{- range .Values.capi.allowedHeaders }}

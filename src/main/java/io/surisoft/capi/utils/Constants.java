@@ -73,6 +73,7 @@ public class Constants {
     public static final String SERVER_ENDPOINT_URL = "capi.server.endpoint.url";
     public static final String CAPI_REQUESTER_TOKEN_ISSUER = "capi.requester.token.issuer";
     public static final String CAPI_EXCHANGE_REQUESTER_ID = "capi.token.requester.id";
+    public static final String CAPI_EXCHANGE_REQUESTER_SUBJECT = "capi.token.requester.subject";
     public static final String CAPI_TOKEN_EXPIRED = "capi.token.expired";
     public static final String CAPI_REQUEST_METHOD = "capi.request.method";
     public static final String CAPI_REQUEST_CONTENT_TYPE = "capi.request.content.type";

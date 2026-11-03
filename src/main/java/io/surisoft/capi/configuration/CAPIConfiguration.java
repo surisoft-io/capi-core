@@ -93,6 +93,18 @@ public class CAPIConfiguration {
         private String extraMetadataPrefix;
         /** Deployment environment (dev/acc/prod). Emitted as the deployment.environment resource attribute. */
         private String appEnvironment;
+        /**
+         * Record the token's {@code sub} on the span ({@code capi.token.requester.subject}), only for a
+         * request whose token an authorization gate verified. Off by default: it identifies a person.
+         */
+        private boolean traceSubject;
+
+        public boolean isTraceSubject() {
+            return traceSubject;
+        }
+        public void setTraceSubject(boolean traceSubject) {
+            this.traceSubject = traceSubject;
+        }
 
         public boolean isEnabled() {
             return enabled;

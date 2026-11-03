@@ -49,6 +49,12 @@ import java.util.regex.Pattern;
 
 public class RestGateway {
     private static final Logger log = LoggerFactory.getLogger(RestGateway.class);
+
+    /**
+     * Set by a gate that verified the request's token (signature and expiry), not merely found one.
+     * Only then may anything derived from the token's claims, such as the traced subject, be trusted.
+     */
+    static final AttachmentKey<Boolean> TOKEN_VERIFIED = AttachmentKey.create(Boolean.class);
     private static final Logger ACCESS_LOG = LoggerFactory.getLogger("capi.access");
 
     private final int port;
@@ -483,10 +489,9 @@ public class RestGateway {
                                 "Unknown policy: " + restClient.getOpaRego());
                         return;
                     }
-                    // Verify JWT signature before trusting decoded claims
-                    try {
-                        httpUtils.authorizeRequest(accessToken);
-                    } catch (AuthorizationException e) {
+                    // Verify JWT signature before trusting decoded claims. isTokenValid is also false
+                    // when no verifier is configured: OPA must never decide on claims nothing checked.
+                    if (!httpUtils.isTokenValid(accessToken)) {
                         httpErrorHandler.sendError(exchange, 403, "Invalid token signature");
                         return;
                     }
@@ -495,6 +500,7 @@ public class RestGateway {
                         httpErrorHandler.sendError(exchange, 403, "Access denied by policy");
                         return;
                     }
+                    exchange.putAttachment(TOKEN_VERIFIED, Boolean.TRUE);
                 } catch (AuthorizationException e) {
                     httpErrorHandler.sendError(exchange, 403, e.getMessage());
                     return;
@@ -517,6 +523,11 @@ public class RestGateway {
                     httpErrorHandler.sendError(exchange, 429, "Too Many requests");
                     return;
                 }
+            }
+
+            // Every gate has passed. Read before propagation rewrites the credential headers.
+            if (capiTracer != null && Boolean.TRUE.equals(exchange.getAttachment(TOKEN_VERIFIED))) {
+                capiTracer.recordVerifiedSubject(exchange, httpUtils.processAuthorizationAccessToken(exchange));
             }
 
             // Propagate authorization to backend
@@ -574,15 +585,27 @@ public class RestGateway {
      * so no encoding table is needed here. Double-encoded {@code %252e%252e} arrives as the literal
      * segment {@code %2e%2e} and is not treated as a dot-segment — reaching {@code ..} from there
      * needs a backend that percent-decodes twice, which is a bug in that backend.
+     *
+     * <p>A segment is compared only up to its first {@code ;}. Undertow leaves path parameters in the
+     * decoded path, but Tomcat (and so Spring Boot) strips them from each segment before normalising,
+     * so {@code ..;/} and {@code ..;x=1/} walk the path there exactly as {@code ../} does.
      */
     static boolean containsDotSegment(String path) {
         if (path == null || path.indexOf('.') < 0) {
             return false;   // fast path: the overwhelming majority of requests
         }
         int start = 0;
+        // Found once and only re-searched after it is passed, so a long path stays a single scan.
+        int params = path.indexOf(';');
         while (start <= path.length()) {
             int slash = path.indexOf('/', start);
             int end = (slash < 0) ? path.length() : slash;
+            if (params >= 0 && params < start) {
+                params = path.indexOf(';', start);
+            }
+            if (params >= 0 && params < end) {
+                end = params;
+            }
             int len = end - start;
             if (len == 1 && path.charAt(start) == '.') {
                 return true;
@@ -740,12 +763,17 @@ public class RestGateway {
             if (accessToken == null) {
                 return "No authorization header provided";
             }
-            // Check subscription group
+            // Check subscription group (isAuthorized verifies the token first)
             if (restClient.getSubscriptionGroup() != null) {
                 if (!httpUtils.isAuthorized(accessToken, restClient.getSubscriptionGroup())) {
                     return "Not subscribed";
                 }
+            } else if (!httpUtils.isTokenValid(accessToken)) {
+                // Without a group there is nothing to check the token against, but it must still be
+                // genuine: presence alone is not authentication.
+                return "Invalid authentication";
             }
+            exchange.putAttachment(TOKEN_VERIFIED, Boolean.TRUE);
             return null; // Authorized
         } catch (AuthorizationException e) {
             return e.getMessage();
@@ -796,7 +824,7 @@ public class RestGateway {
                                 case DENIED -> {
                                     return new GateRejection(401, "Invalid authentication");
                                 }
-                                default -> { /* ALLOWED — fall through */ }
+                                default -> exchange.putAttachment(TOKEN_VERIFIED, Boolean.TRUE);
                             }
                         } catch (Exception e) {
                             return new GateRejection(401, "Invalid authorization provided");

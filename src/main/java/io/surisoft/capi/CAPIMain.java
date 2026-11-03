@@ -302,12 +302,15 @@ public class CAPIMain {
             if (startup.getThrottleProcessor() != null) gateway.setThrottleProcessor(startup.getThrottleProcessor());
             if (startup.getApiKeyCache() != null) gateway.setApiKeyCache(startup.getApiKeyCache());
             if (startup.getOpenTelemetryTracer() != null) {
-                gateway.setRestTracer(new CapiTracer(
+                CapiTracer restTracer = new CapiTracer(
                         startup.getOpenTelemetryTracer(),
                         startup.getHttpUtils(),
                         startup.getServiceCache(),
                         capiConfiguration.getInstanceName()
-                ));
+                );
+                restTracer.setTraceSubject(capiConfiguration.getTraces() != null
+                        && capiConfiguration.getTraces().isTraceSubject());
+                gateway.setRestTracer(restTracer);
             }
             if (startup.getWebsocketUtils() != null) {
                 gateway.setWebsocketUtils(startup.getWebsocketUtils());

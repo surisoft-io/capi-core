@@ -240,6 +240,9 @@ capi:
   `.%2e` into `..` before any handler runs. Double-encoded `%252e%252e` arrives as the literal
   segment `%2e%2e` and is not treated as a dot-segment — reaching `..` from there requires a backend
   that percent-decodes twice, which is a defect in that backend.
+- Path parameters do not hide a dot-segment: a segment is compared up to its first `;`, so `..;` and
+  `..;x=1` count as `..`. Tomcat, and so Spring Boot, strips `;` parameters from each segment before
+  normalising the path, and resolves them as `..`.
 - **Off by default**, because refusing a request an existing deployment forwards today is a behaviour
   change. While off, such requests are forwarded unchanged and only counted:
 

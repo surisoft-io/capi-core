@@ -426,8 +426,11 @@ public class HttpUtils {
             if (!opaWasmService.hasPolicy(opaRego)) {
                 return AuthorizationOutcome.POLICY_UNKNOWN;
             }
-            // Verify the signature before OPA sees the claims.
-            authorizeRequest(accessToken);
+            // Verify the signature before OPA sees the claims. A null result means no verifier is
+            // configured, which is a refusal, not a pass.
+            if (authorizeRequest(accessToken) == null) {
+                return AuthorizationOutcome.DENIED;
+            }
 
             OpaResult opaResult = opaWasmService.evaluate(service.getId(), opaRego, accessToken, true);
             return (opaResult != null && opaResult.isAllowed())
@@ -455,6 +458,19 @@ public class HttpUtils {
         }
         return isTokenInGroup(jwtClaimsSet, service.getServiceMeta() != null
                 ? service.getServiceMeta().getSubscriptionGroup() : null);
+    }
+
+    /**
+     * Whether the token verifies — signature, expiry and the other checks of the configured JWT
+     * processors. False when it does not, and false when no processor is configured: a token nothing
+     * can verify is never treated as valid.
+     */
+    public boolean isTokenValid(String accessToken) {
+        try {
+            return authorizeRequest(accessToken) != null;
+        } catch (AuthorizationException e) {
+            return false;
+        }
     }
 
     public boolean isAuthorized(String accessToken, String subscriptionGroup) {
