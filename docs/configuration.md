@@ -87,6 +87,7 @@ capi:
     serviceName: capi
     endpoint: http://localhost:4318
     extraMetadataPrefix:
+    traceSubject: false
 
   corsEnabled: false
   allowedOrigins: []
@@ -232,7 +233,7 @@ capi:
 | `rest.port` | `8380` | Listening port. |
 | `rest.listeningAddress` | `0.0.0.0` | Bind address. |
 | `rest.contextPath` | `/api` | Base path for all REST routes. |
-| `rest.rejectDotSegments` | `false` | Refuse a request whose path contains a `.` or `..` **segment** with `400`. While false the request is forwarded exactly as before and only counted, via `capi_dot_segment_requests_total{action="observed"}` — watch that stay at zero on real traffic, then turn it on. Segment-wise, so ordinary paths like `/range/1..10` or `/report..pdf` are unaffected. See [Security](security.md#path-handling). |
+| `rest.rejectDotSegments` | `false` | Refuse a request whose path contains a `.` or `..` **segment** (path parameters ignored, so `..;` counts) with `400`. While false the request is forwarded exactly as before and only counted, via `capi_dot_segment_requests_total{action="observed"}` — watch that stay at zero on real traffic, then turn it on. Segment-wise, so ordinary paths like `/range/1..10` or `/report..pdf` are unaffected. See [Security](security.md#path-handling). |
 | `rest.connectionRequestTimeout` | `5000` | Time (ms) to obtain a connection from the pool. |
 | `rest.requestTimeout` | `5000` | Total request timeout (ms). |
 | `rest.maxRequestSize` | `-1` | Largest request body, in bytes; `-1` means unlimited. **Pinned explicitly rather than inherited:** Undertow changed its own `DEFAULT_MAX_ENTITY_SIZE` from unlimited to 2 MiB in 2.3.21, so 2.23–2.23.3 silently rejected every body over 2 MiB with `400 Bad Request`, streamed proxy bodies included. The default restores pre-2.23 behaviour. If you set a bound, raise `rest.responseTimeout` to match what that size needs at your clients' real throughput — `maxRequestTime` is a wall-clock watchdog that covers the upload, so a large body on a slow link fails with `504` instead. |
@@ -348,6 +349,7 @@ See [Security](security.md) for details.
 | `traces.serviceName` | `capi` | Service name reported in traces. |
 | `traces.endpoint` | — | OTLP HTTP endpoint (e.g. `http://otel-collector:4318`). |
 | `traces.extraMetadataPrefix` | — | Prefix for extracting extra service metadata from Consul into trace attributes. |
+| `traces.traceSubject` | `false` | Record the token's `sub` on the REST span as `capi.token.requester.subject`. Only when an authorization gate **verified** the token for that request — never for an unsecured or API-key-only service or a refused request, so a forged token cannot put a name in a trace. Off by default because `sub` identifies a person: check that your trace retention allows it. |
 
 ### CORS
 

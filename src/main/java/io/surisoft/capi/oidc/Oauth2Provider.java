@@ -57,6 +57,10 @@ public class Oauth2Provider {
                     JWSKeySelector<SecurityContext> keySelector = new JWSVerificationKeySelector<>(expectedJWSAlg, keySource);
                     jwtProcessor.setJWSKeySelector(keySelector);
                     jwtProcessorList.add(jwtProcessor);
+                } else {
+                    // Skipped, so tokens from this issuer cannot be verified and every secured or
+                    // OPA-protected request carrying one is refused until CAPI restarts.
+                    log.warn("JWKS endpoint {} returned HTTP {}; its keys are NOT loaded", jwkEndpoint, response.statusCode());
                 }
             } catch (URISyntaxException | InterruptedException | IOException | ParseException e) {
                 throw new RuntimeException(e);

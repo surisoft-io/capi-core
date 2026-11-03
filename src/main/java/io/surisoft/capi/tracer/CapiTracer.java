@@ -13,6 +13,7 @@ import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.HttpUtils;
 import io.undertow.server.ExchangeCompletionListener;
 import io.undertow.server.HttpServerExchange;
+import io.undertow.util.AttachmentKey;
 import io.undertow.util.HeaderValues;
 import org.cache2k.Cache;
 import org.slf4j.Logger;
@@ -33,6 +34,12 @@ public class CapiTracer {
     private final HttpUtils httpUtils;
     private final Cache<String, Service> serviceCache;
     private final String capiInstanceName;
+
+    /** The REST span of the exchange, so attributes known only after the auth gates can be added. */
+    public static final AttachmentKey<Span> SPAN = AttachmentKey.create(Span.class);
+
+    /** Off by default: {@code sub} identifies a person. See {@link #recordVerifiedSubject}. */
+    private boolean traceSubject;
 
     public CapiTracer(Tracer tracer, HttpUtils httpUtils, Cache<String, Service> serviceCache, String capiInstanceName) {
         this.tracer = tracer;
@@ -64,10 +71,41 @@ public class CapiTracer {
         exchange.putAttachment(io.surisoft.capi.exception.HttpErrorHandler.TRACE_ID_KEY,
                 span.getSpanContext().getTraceId());
 
+        exchange.putAttachment(SPAN, span);
+
         decorateWithCapi(exchange, span, restClient);
 
         final long proxyStartTime = System.currentTimeMillis();
         exchange.addExchangeCompleteListener((ex, nextListener) -> endSpan(ex, span, serviceId, proxyStartTime, nextListener));
+    }
+
+    public void setTraceSubject(boolean traceSubject) {
+        this.traceSubject = traceSubject;
+    }
+
+    /**
+     * Adds the token's {@code sub} to the exchange's span — when {@code capi.traces.traceSubject} is on.
+     *
+     * <p>Call it only after an authorization gate has verified {@code verifiedToken} for this request.
+     * The span is created before the gates run, when the token is still just a string the caller
+     * sent; recording its subject then would let a forged token put any name in the trace.
+     */
+    public void recordVerifiedSubject(HttpServerExchange exchange, String verifiedToken) {
+        if (!traceSubject || verifiedToken == null) {
+            return;
+        }
+        Span span = exchange.getAttachment(SPAN);
+        if (span == null) {
+            return;
+        }
+        try {
+            String subject = SignedJWT.parse(verifiedToken).getJWTClaimsSet().getSubject();
+            if (subject != null) {
+                span.setAttribute(Constants.CAPI_EXCHANGE_REQUESTER_SUBJECT, subject);
+            }
+        } catch (Exception e) {
+            log.trace("Could not read the subject for the span: {}", e.getMessage());
+        }
     }
 
     /**

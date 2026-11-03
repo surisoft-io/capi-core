@@ -79,10 +79,14 @@ class AuthorizeOutcomeTest {
         when(opa.hasPolicy("capi/policy")).thenReturn(true);
         OpaResult allowed = new OpaResult();
         allowed.setResult(true);
-        when(opa.evaluate(eq("svc:v1"), eq("capi/policy"), eq("token"), eq(true))).thenReturn(allowed);
+        // A token that really verifies: the policy only decides once the signature has been checked.
+        com.nimbusds.jose.jwk.RSAKey key = TestJwts.newKey();
+        HttpUtils verifying = new HttpUtils(null, java.util.List.of(TestJwts.processorFor(key)));
+        String token = TestJwts.token(key, "user-1", 300);
+        when(opa.evaluate(eq("svc:v1"), eq("capi/policy"), eq(token), eq(true))).thenReturn(allowed);
 
         assertEquals(AuthorizationOutcome.ALLOWED,
-                httpUtils.authorize("token", "svc:v1", serviceWithPolicy("capi/policy", null), opa));
+                verifying.authorize(token, "svc:v1", serviceWithPolicy("capi/policy", null), opa));
     }
 
     @Test

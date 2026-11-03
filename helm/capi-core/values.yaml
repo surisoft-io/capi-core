@@ -102,6 +102,8 @@ capi:
     serviceName: capi
     endpoint: http://otel-collector:4318
     extraMetadataPrefix: ""
+    # Record the token subject on spans, only for tokens CAPI verified. Identifies a person.
+    traceSubject: false
 
   corsEnabled: false
   allowedHeaders:

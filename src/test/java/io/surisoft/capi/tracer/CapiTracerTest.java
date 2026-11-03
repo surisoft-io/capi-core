@@ -419,4 +419,66 @@ class CapiTracerTest {
 
         verify(nextListener).proceed();
     }
+    // ---- subject: only when configured, only for a verified token ----
+
+    private static String unsignedJwt(String payloadJson) {
+        java.util.Base64.Encoder enc = java.util.Base64.getUrlEncoder().withoutPadding();
+        return enc.encodeToString("{\"alg\":\"HS256\",\"typ\":\"JWT\"}".getBytes()) + "."
+                + enc.encodeToString(payloadJson.getBytes()) + "."
+                + enc.encodeToString("fakesignature1234567890123456".getBytes());
+    }
+
+    /** Runs the REST traceRequest so the span is attached to the exchange, as in the gateway. */
+    private HttpServerExchange tracedExchange(String token) throws Exception {
+        when(httpUtils.contextToRole("/my-service/v1")).thenReturn("my-service:v1");
+        when(httpUtils.processAuthorizationAccessToken(any(HttpServerExchange.class))).thenReturn(token);
+        HttpServerExchange exchange = createExchange("GET", "/my-service/v1/items");
+        RestClient restClient = new RestClient();
+        restClient.setServiceId("/my-service/v1");
+        capiTracer.traceRequest(exchange, restClient);
+        return exchange;
+    }
+
+    @Test
+    void traceRequest_neverRecordsSubject_beforeAuthorization() throws Exception {
+        // The span is decorated before any gate runs; the token is unverified at that point.
+        capiTracer.setTraceSubject(true);
+        tracedExchange(unsignedJwt("{\"sub\":\"forged-user\",\"azp\":\"c\"}"));
+        verify(span, never()).setAttribute(eq(Constants.CAPI_EXCHANGE_REQUESTER_SUBJECT), anyString());
+    }
+
+    @Test
+    void recordVerifiedSubject_whenEnabled_setsSubject() throws Exception {
+        capiTracer.setTraceSubject(true);
+        String token = unsignedJwt("{\"sub\":\"user-123\"}");
+        HttpServerExchange exchange = tracedExchange(token);
+        capiTracer.recordVerifiedSubject(exchange, token);
+        verify(span).setAttribute(Constants.CAPI_EXCHANGE_REQUESTER_SUBJECT, "user-123");
+    }
+
+    @Test
+    void recordVerifiedSubject_disabledByDefault() throws Exception {
+        String token = unsignedJwt("{\"sub\":\"user-123\"}");
+        HttpServerExchange exchange = tracedExchange(token);
+        capiTracer.recordVerifiedSubject(exchange, token);
+        verify(span, never()).setAttribute(eq(Constants.CAPI_EXCHANGE_REQUESTER_SUBJECT), anyString());
+    }
+
+    @Test
+    void recordVerifiedSubject_tokenWithoutSubject_setsNothing() throws Exception {
+        capiTracer.setTraceSubject(true);
+        String token = unsignedJwt("{\"azp\":\"client-only\"}");
+        HttpServerExchange exchange = tracedExchange(token);
+        capiTracer.recordVerifiedSubject(exchange, token);
+        verify(span, never()).setAttribute(eq(Constants.CAPI_EXCHANGE_REQUESTER_SUBJECT), anyString());
+    }
+
+    @Test
+    void recordVerifiedSubject_noSpanOnExchange_isANoOp() {
+        capiTracer.setTraceSubject(true);
+        HttpServerExchange exchange = createExchange("GET", "/x");
+        assertDoesNotThrow(() -> capiTracer.recordVerifiedSubject(exchange, unsignedJwt("{\"sub\":\"u\"}")));
+        assertDoesNotThrow(() -> capiTracer.recordVerifiedSubject(exchange, null));
+        verify(span, never()).setAttribute(eq(Constants.CAPI_EXCHANGE_REQUESTER_SUBJECT), anyString());
+    }
 }

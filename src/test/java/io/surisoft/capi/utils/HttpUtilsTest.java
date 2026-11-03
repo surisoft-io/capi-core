@@ -600,12 +600,15 @@ class HttpUtilsTest {
 
     @Test
     void isAuthorized_withOpaAllowed_returnsTrue() throws IOException {
+        com.nimbusds.jose.jwk.RSAKey key = TestJwts.newKey();
+        HttpUtils verifying = new HttpUtils(null, List.of(TestJwts.processorFor(key)));
+        String token = TestJwts.token(key, "user-1", 300);
         OpaWasmService opaWasmService = mock(OpaWasmService.class);
         OpaResult opaResult = new OpaResult();
         opaResult.setResult(true);
         when(opaWasmService.isReady()).thenReturn(true);
         when(opaWasmService.hasPolicy("my-rego")).thenReturn(true);
-        when(opaWasmService.evaluate("svc-1", "my-rego", "token", true)).thenReturn(opaResult);
+        when(opaWasmService.evaluate("svc-1", "my-rego", token, true)).thenReturn(opaResult);
 
         Service service = new Service();
         service.setId("svc-1");
@@ -614,7 +617,31 @@ class HttpUtilsTest {
         service.setServiceMeta(meta);
 
         assertEquals(HttpUtils.AuthorizationOutcome.ALLOWED,
-                httpUtils.authorize("token", "/ctx", service, opaWasmService));
+                verifying.authorize(token, "/ctx", service, opaWasmService));
+    }
+
+    @Test
+    void authorize_withOpa_noVerifierConfigured_deniesWithoutAskingOpa() throws IOException {
+        // A policy that would allow anything: the refusal must come from the missing verification.
+        OpaWasmService opaWasmService = mock(OpaWasmService.class);
+        OpaResult opaResult = new OpaResult();
+        opaResult.setResult(true);
+        when(opaWasmService.isReady()).thenReturn(true);
+        when(opaWasmService.hasPolicy("my-rego")).thenReturn(true);
+        when(opaWasmService.evaluate(anyString(), anyString(), anyString(), anyBoolean())).thenReturn(opaResult);
+
+        Service service = new Service();
+        service.setId("svc-1");
+        ServiceMeta meta = new ServiceMeta();
+        meta.setOpaRego("my-rego");
+        service.setServiceMeta(meta);
+
+        String forged = TestJwts.token(TestJwts.newKey(), "admin", 300);
+        assertEquals(HttpUtils.AuthorizationOutcome.DENIED,
+                new HttpUtils(null, null).authorize(forged, "/ctx", service, opaWasmService));
+        assertEquals(HttpUtils.AuthorizationOutcome.DENIED,
+                new HttpUtils(null, List.of()).authorize(forged, "/ctx", service, opaWasmService));
+        verify(opaWasmService, never()).evaluate(anyString(), anyString(), anyString(), anyBoolean());
     }
 
     @Test
@@ -969,5 +996,42 @@ class HttpUtilsTest {
 
         String result = httpUtilsWithCookie.processAuthorizationAccessToken(exchange);
         assertNull(result);
+    }
+    // ---- isTokenValid: presence is not validity ----
+
+    @Test
+    void isTokenValid_signedByTrustedKey_true() {
+        com.nimbusds.jose.jwk.RSAKey key = TestJwts.newKey();
+        HttpUtils verifying = new HttpUtils(null, List.of(TestJwts.processorFor(key)));
+        assertTrue(verifying.isTokenValid(TestJwts.token(key, "user-1", 300)));
+    }
+
+    @Test
+    void isTokenValid_signedByAnotherKey_false() {
+        HttpUtils verifying = new HttpUtils(null, List.of(TestJwts.processorFor(TestJwts.newKey())));
+        assertFalse(verifying.isTokenValid(TestJwts.token(TestJwts.newKey(), "user-1", 300)));
+    }
+
+    @Test
+    void isTokenValid_expired_false() {
+        com.nimbusds.jose.jwk.RSAKey key = TestJwts.newKey();
+        HttpUtils verifying = new HttpUtils(null, List.of(TestJwts.processorFor(key)));
+        assertFalse(verifying.isTokenValid(TestJwts.token(key, "user-1", -600)));
+    }
+
+    @Test
+    void isTokenValid_garbageOrUnsigned_false() {
+        com.nimbusds.jose.jwk.RSAKey key = TestJwts.newKey();
+        HttpUtils verifying = new HttpUtils(null, List.of(TestJwts.processorFor(key)));
+        assertFalse(verifying.isTokenValid("garbage"));
+        assertFalse(verifying.isTokenValid("eyJhbGciOiJub25lIn0.eyJzdWIiOiJ4In0."));   // alg=none
+    }
+
+    @Test
+    void isTokenValid_noProcessorConfigured_false() {
+        // oauth2 disabled or no key set resolved: nothing can verify, so nothing is valid.
+        com.nimbusds.jose.jwk.RSAKey key = TestJwts.newKey();
+        assertFalse(new HttpUtils(null, null).isTokenValid(TestJwts.token(key, "user-1", 300)));
+        assertFalse(new HttpUtils(null, List.of()).isTokenValid(TestJwts.token(key, "user-1", 300)));
     }
 }

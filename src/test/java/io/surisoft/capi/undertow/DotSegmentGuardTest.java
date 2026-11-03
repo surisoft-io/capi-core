@@ -39,6 +39,13 @@ class DotSegmentGuardTest {
             // trailing dot-segment with no following slash
             "/api/svcA/dev/x/..",
             "/api/svcA/dev/x/.",
+            // path parameters: Tomcat strips ";..." per segment before normalising, so these walk too
+            "/api/svcA/dev/..;/..;/svcB/dev/secret",
+            "/api/svcA/dev/..;",
+            "/api/svcA/dev/..;x=1/svcB",
+            "/api/svcA/dev/..;;/svcB",
+            "/api/svcA/dev/.;/x",
+            "/api/svcA/dev/.;jsessionid=abc",
     })
     void dotSegments_areDetected(String path) {
         assertTrue(RestGateway.containsDotSegment(path), path);
@@ -64,6 +71,12 @@ class DotSegmentGuardTest {
             // double-encoded arrives as this literal segment; reaching ".." from here needs a
             // backend that decodes twice, which is that backend's bug, not a dot-segment here
             "/api/svcA/dev/%2e%2e/x",
+            // path parameters on ordinary segments, and a parameter whose value has dots
+            "/api/svcA/dev/orders;jsessionid=abc/items",
+            "/api/svcA/dev/file;v=..",
+            "/api/svcA/dev/;../x",
+            "/api/svcA/dev/...;x",
+            "/api/svcA/dev/a..b;c=d",
     })
     void ordinaryPaths_areNotFlagged(String path) {
         assertFalse(RestGateway.containsDotSegment(path), path);
@@ -77,6 +90,18 @@ class DotSegmentGuardTest {
     @Test
     void pathWithoutAnyDot_takesTheFastPath() {
         assertFalse(RestGateway.containsDotSegment("/api/svcA/dev/orders/12345/items"));
+    }
+
+    @Test
+    void longPath_isCheckedInLinearTime() {
+        // ~1 MB, many segments, a dot but no dot-segment and no ';' — rescanning the remainder of the
+        // path per segment would make this quadratic on an I/O thread.
+        String path = "/a".repeat(500_000) + "/x.y";
+        long t0 = System.nanoTime();
+        assertFalse(RestGateway.containsDotSegment(path));
+        assertTrue(RestGateway.containsDotSegment(path + "/..;"));
+        long ms = (System.nanoTime() - t0) / 1_000_000;
+        assertTrue(ms < 2_000, "took " + ms + " ms");
     }
 
     @Test
