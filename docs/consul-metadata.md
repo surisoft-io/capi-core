@@ -8,6 +8,10 @@ CAPI polls the Consul catalog at a configurable interval (`consulCatalogDiscover
 
 Services do **not** need any CAPI-specific code. CAPI reads metadata from Consul and builds routes accordingly.
 
+Two service names are reserved and never routed: `consul` and `capi-admin` (the registrations of
+CAPI's own nodes for the [Admin MCP server](admin-mcp.md)). A backend registered under either name
+is ignored.
+
 ## User Journey
 
 ### 1. Register a Simple REST Service

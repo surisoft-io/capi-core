@@ -859,6 +859,202 @@ public class CAPIConfiguration {
         public void setGroup(String group) {
             this.group = group;
         }
+
+        private AdminMcp mcp = new AdminMcp();
+
+        public AdminMcp getMcp() {
+            return mcp;
+        }
+        public void setMcp(AdminMcp mcp) {
+            this.mcp = mcp;
+        }
+    }
+
+    /**
+     * The Consul the admin MCP registers in, plus extra metadata for the {@code capi-admin}
+     * registration — e.g. the {@code group} and owner fields a validating proxy in front of Consul
+     * requires. Both YAML shapes are accepted:
+     * <pre>
+     * meta:                 meta:
+     *   group: ops            - group: ops
+     *   owner: platform       - owner: platform
+     * </pre>
+     * Keys CAPI sets itself ({@code capi-cluster}, {@code capi-version}, {@code admin-scheme},
+     * {@code mcp-port}) cannot be overridden; a clash fails startup.
+     */
+    public static class AdminConsul extends HostConfig {
+        /** Raw YAML (a map, or a list of single-entry maps); read through {@link #metaAsMap()}. */
+        private Object meta;
+
+        public Object getMeta() {
+            return meta;
+        }
+        public void setMeta(Object meta) {
+            this.meta = meta;
+        }
+
+        /** The extra metadata, in declaration order; empty when none is configured. */
+        public java.util.Map<String, String> metaAsMap() {
+            java.util.Map<String, String> result = new java.util.LinkedHashMap<>();
+            if (meta instanceof java.util.Map<?, ?> map) {
+                map.forEach((k, v) -> put(result, k, v));
+            } else if (meta instanceof List<?> list) {
+                for (Object item : list) {
+                    if (!(item instanceof java.util.Map<?, ?> entry)) {
+                        throw new IllegalStateException("admin.mcp.consul.meta list items must be 'key: value', got: " + item);
+                    }
+                    entry.forEach((k, v) -> put(result, k, v));
+                }
+            } else if (meta != null) {
+                throw new IllegalStateException("admin.mcp.consul.meta must be a map or a list of 'key: value' entries");
+            }
+            return result;
+        }
+
+        private static void put(java.util.Map<String, String> result, Object key, Object value) {
+            if (key == null || String.valueOf(key).isBlank()) {
+                throw new IllegalStateException("admin.mcp.consul.meta has an empty key");
+            }
+            String k = String.valueOf(key).trim();
+            if (result.containsKey(k)) {
+                throw new IllegalStateException("admin.mcp.consul.meta declares '" + k + "' twice");
+            }
+            // Consul meta values are strings; a YAML number or boolean is kept as its text.
+            result.put(k, value == null ? "" : String.valueOf(value));
+        }
+    }
+
+    /**
+     * Read-only MCP server over CAPI's own admin API, cluster-wide: the node an agent connects to
+     * fans out to every peer registered in Consul under {@code capi-admin}. Uses the admin auth
+     * ({@code admin.protected} + {@code admin.group}) and refuses to start without it.
+     * See ADMIN-MCP-DESIGN.md.
+     */
+    public static class AdminMcp {
+        private boolean enabled;
+        private int port = 8390;
+        /**
+         * Address peers use to reach this node's admin port. Empty means this host's resolved
+         * address, which is right for a pod IP and wrong behind NAT or a docker port map.
+         */
+        private String advertiseAddress;
+        private long nodeTimeoutMs = 5000;
+        /** Concurrent {@code tools/call} per node; past it the call is refused, not queued. */
+        private int maxConcurrentCalls = 4;
+        /**
+         * The ONE issuer that authorizes agents on the admin MCP, e.g.
+         * {@code https://idp.example.com/realms/ops}. CAPI may trust many issuers ({@code oauth2.keys});
+         * this narrows the admin MCP to one. When set it is the only entry advertised in the RFC 9728
+         * metadata, AND a token's {@code iss} must equal it — so another trusted issuer cannot mint a
+         * token carrying the admin group. It must be the issuer as it appears IN the token (the URL
+         * agents fetch tokens from), not CAPI's internal route to the IdP.
+         * Unset: issuers derived from {@code oauth2.keys}, any trusted issuer accepted (startup warns).
+         */
+        private String authorizationServer;
+        /**
+         * The DNS name in the admin certificate's SANs that every node's admin listener serves, e.g.
+         * {@code capi-admin.example.internal}. Peers are dialled by IP, which standard HTTPS identity
+         * checking can only match against an IP SAN for that exact IP — impossible with pod IPs. When
+         * set, the fan-out validates the chain against CAPI's trust store as usual and then requires
+         * this name in the certificate, during the handshake, before any token is sent. Only used
+         * when the admin listener is HTTPS.
+         */
+        private String peerTlsName;
+        /** Per-node metrics history that the metrics tools read (see MetricsHistory). */
+        private History history = new History();
+
+        public History getHistory() {
+            return history;
+        }
+        public void setHistory(History history) {
+            this.history = history;
+        }
+
+        /**
+         * How each node samples its own meters for the admin MCP: every {@code intervalSeconds},
+         * keeping {@code retentionMinutes}. In memory only — a restart starts a fresh history.
+         */
+        public static class History {
+            private int intervalSeconds = 15;
+            private int retentionMinutes = 60;
+
+            public int getIntervalSeconds() {
+                return intervalSeconds;
+            }
+            public void setIntervalSeconds(int intervalSeconds) {
+                this.intervalSeconds = intervalSeconds;
+            }
+            public int getRetentionMinutes() {
+                return retentionMinutes;
+            }
+            public void setRetentionMinutes(int retentionMinutes) {
+                this.retentionMinutes = retentionMinutes;
+            }
+        }
+
+        public String getPeerTlsName() {
+            return peerTlsName;
+        }
+        public void setPeerTlsName(String peerTlsName) {
+            this.peerTlsName = peerTlsName;
+        }
+
+        public String getAuthorizationServer() {
+            return authorizationServer;
+        }
+        public void setAuthorizationServer(String authorizationServer) {
+            this.authorizationServer = authorizationServer;
+        }
+
+        /**
+         * The ONE Consul this node registers in as {@code capi-admin} and finds its peers in.
+         * Deliberately separate from {@code consulHosts}: CAPI may read several catalogs it does not
+         * own and must not write into them, so it cannot pick one. The token needs only
+         * {@code service:write} on {@code capi-admin} (and read on it). Required when enabled.
+         */
+        private AdminConsul consul;
+
+        public AdminConsul getConsul() {
+            return consul;
+        }
+        public void setConsul(AdminConsul consul) {
+            this.consul = consul;
+        }
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public int getPort() {
+            return port;
+        }
+        public void setPort(int port) {
+            this.port = port;
+        }
+
+        public String getAdvertiseAddress() {
+            return advertiseAddress;
+        }
+        public void setAdvertiseAddress(String advertiseAddress) {
+            this.advertiseAddress = advertiseAddress;
+        }
+
+        public long getNodeTimeoutMs() {
+            return nodeTimeoutMs;
+        }
+        public void setNodeTimeoutMs(long nodeTimeoutMs) {
+            this.nodeTimeoutMs = nodeTimeoutMs;
+        }
+
+        public int getMaxConcurrentCalls() {
+            return maxConcurrentCalls;
+        }
+        public void setMaxConcurrentCalls(int maxConcurrentCalls) {
+            this.maxConcurrentCalls = maxConcurrentCalls;
+        }
     }
 
     /**

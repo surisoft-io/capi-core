@@ -28,6 +28,13 @@ public class Oauth2Provider {
     private static final Logger log = LoggerFactory.getLogger(Oauth2Provider.class);
     private final List<String> providerKeys;
     private List<DefaultJWTProcessor<SecurityContext>> jwtProcessorList;
+    /**
+     * Per configured JWKS endpoint, the key ids actually loaded (empty = nothing loaded). Keys are
+     * fetched once at startup and never refreshed, so two nodes with identical config can trust
+     * different keys — a node restarted after a key rotation, or one that started while the IdP was
+     * down. Published on /info/capi so that difference is visible.
+     */
+    private final java.util.Map<String, List<String>> loadedKeyIds = new java.util.LinkedHashMap<>();
 
 
 
@@ -52,6 +59,7 @@ public class Oauth2Provider {
                     InputStream responseInputStream = response.body();
                     DefaultJWTProcessor<SecurityContext> jwtProcessor = new DefaultJWTProcessor<>();
                     JWKSet jwkSet = JWKSet.load(responseInputStream);
+                    loadedKeyIds.put(jwkEndpoint, keyIdsOf(jwkSet));
                     ImmutableJWKSet<SecurityContext> keySource = new ImmutableJWKSet<>(jwkSet);
                     JWSAlgorithm expectedJWSAlg = JWSAlgorithm.RS256;
                     JWSKeySelector<SecurityContext> keySelector = new JWSVerificationKeySelector<>(expectedJWSAlg, keySource);
@@ -61,12 +69,36 @@ public class Oauth2Provider {
                     // Skipped, so tokens from this issuer cannot be verified and every secured or
                     // OPA-protected request carrying one is refused until CAPI restarts.
                     log.warn("JWKS endpoint {} returned HTTP {}; its keys are NOT loaded", jwkEndpoint, response.statusCode());
+                    loadedKeyIds.put(jwkEndpoint, List.of());
                 }
             } catch (URISyntaxException | InterruptedException | IOException | ParseException e) {
                 throw new RuntimeException(e);
             }
         }
         return jwtProcessorList;
+    }
+
+    /** Configured JWKS endpoint -> key ids loaded from it (empty when the fetch failed). */
+    public java.util.Map<String, List<String>> getLoadedKeyIds() {
+        return java.util.Collections.unmodifiableMap(loadedKeyIds);
+    }
+
+    /** Sorted key ids; a key without a kid is identified by its RFC 7638 thumbprint. */
+    static List<String> keyIdsOf(JWKSet jwkSet) {
+        List<String> ids = new ArrayList<>();
+        for (com.nimbusds.jose.jwk.JWK jwk : jwkSet.getKeys()) {
+            if (jwk.getKeyID() != null) {
+                ids.add(jwk.getKeyID());
+            } else {
+                try {
+                    ids.add("thumbprint:" + jwk.computeThumbprint());
+                } catch (com.nimbusds.jose.JOSEException e) {
+                    ids.add("unidentified-key");
+                }
+            }
+        }
+        java.util.Collections.sort(ids);
+        return ids;
     }
 
     public List<DefaultJWTProcessor<SecurityContext>> getJwtProcessorList() {

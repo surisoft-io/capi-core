@@ -14,6 +14,7 @@ Returns links to all available admin endpoints:
 {
   "_links": {
     "metrics": { "href": "http://localhost:8381/info/metrics" },
+    "metrics-history": { "href": "http://localhost:8381/info/metrics/history?minutes=15{&service}" },
     "health": { "href": "http://localhost:8381/info/health" },
     "capi": { "href": "http://localhost:8381/info/capi" },
     "routes": { "href": "http://localhost:8381/info/routes" },
@@ -56,7 +57,13 @@ curl http://localhost:8381/info/metrics
 
 Returns Prometheus-formatted metrics (`text/plain`). Configure your Prometheus scrape target to point at this endpoint.
 
-CAPI tracks per-route request counters and standard JVM metrics.
+CAPI tracks per-route request counters and standard JVM metrics, including GC pauses
+(`jvm_gc_pause`), open and maximum file descriptors (`process_files_open_files`,
+`process_files_max_files`) and process uptime.
+
+> **Fixed in 2.25 — `jvm_gc_pause` was always empty.** The GC binder was closed right after being
+> bound, which unregisters its listeners, so no pause was ever recorded. A GC dashboard that showed
+> nothing before the upgrade was not showing a healthy GC.
 
 | Metric | Labels | Meaning |
 |---|---|---|
@@ -69,6 +76,57 @@ CAPI tracks per-route request counters and standard JVM metrics.
 > so tagging with the raw method let an unauthenticated caller grow the registry without limit. Any
 > method outside `GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, TRACE` is now recorded as `OTHER`.
 > A dashboard or alert that filters on an unusual method label needs updating.
+
+> Requests to a path that matches no route are answered `404` before they reach the metrics, so
+> they do not appear in `capi_requests_total`. A service CAPI refused to route shows no traffic,
+> not 404s — check [Invalid Services](#invalid-services).
+
+### Metrics history
+
+```bash
+curl "http://localhost:8381/info/metrics/history?minutes=15"
+curl "http://localhost:8381/info/metrics/history?minutes=60&service=order-service:v1"
+```
+
+This node's metrics over the last `minutes`, computed from a short **in-memory** history — what the
+[Admin MCP server](admin-mcp.md#metrics-history)'s metrics tools read from every node. Available
+only with `admin.mcp.enabled`; otherwise `404`.
+
+| Query | Default | Meaning |
+|---|---|---|
+| `minutes` | `15` | Look-back window, `1` to `admin.mcp.history.retentionMinutes` |
+| `service` | — | Narrow `services` and `series` to one service id |
+
+```json
+{
+  "intervalSeconds": 15,
+  "retentionMinutes": 60,
+  "requestedMinutes": 15,
+  "coveredSeconds": 900,
+  "samples": 60,
+  "totals":   { "requests": 5310, "requestsPerSecond": 5.9, "2xx": 5290, "3xx": 0, "4xx": 12, "5xx": 8,
+                "errorRatio5xx": 0.0015, "avgLatencyMs": 21.4, "maxLatencyMsSampled": 310.0 },
+  "services": [ { "service": "order-service:v1", "requests": 4100, "...": "..." } ],
+  "series":   [ { "t": "2026-11-06T10:00:15Z", "requests": 92, "4xx": 0, "5xx": 1, "avgLatencyMs": 19.8 } ],
+  "security": { "capi_dot_segment_requests_total{action=rejected}": 3 },
+  "jvm": {
+    "latest": { "heapUsedMb": 412, "heapMaxMb": 1024, "heapUsedPct": 40.2, "threads": 61, "peakThreads": 64,
+                "processCpu": 0.07, "openFds": 188, "maxFds": 1048576 },
+    "window": { "heapUsedPctMax": 55.1, "threadsMin": 60, "threadsMax": 64, "processCpuMax": 0.31,
+                "openFdsFirst": 185, "openFdsLast": 188, "openFdsMax": 190, "threadsFirst": 60, "threadsLast": 61 }
+  }
+}
+```
+
+- The node samples its own registry every `admin.mcp.history.intervalSeconds` and keeps
+  per-interval **deltas** for `retentionMinutes`; only services with traffic in an interval are
+  stored. `coveredSeconds` says how much of the requested window the history actually covers.
+- The history is empty after a restart, and the first sample is only a baseline: traffic from
+  before it is never counted as one interval.
+- Latency is the average over the window; `maxLatencyMsSampled` is the highest of the per-interval
+  maxima, so a spike shorter than one interval may be under-reported.
+- `security` holds the security counters (blocked paths, dot-segment requests, tokens in query
+  strings, WebSocket origin checks, WebDAV depth), one entry per counter and `action`.
 
 ### CAPI Instance Info
 
@@ -86,6 +144,11 @@ Returns instance configuration and runtime information:
 - Consul hosts
 - Tracing configuration
 - REST context path
+- `jwksKeyIds` — per configured JWKS endpoint, the key ids **actually loaded** (empty when the fetch
+  failed). Keys are loaded once at startup, so two nodes with the same configuration can differ
+  after an identity-provider key rotation. Absent when OAuth2 is disabled.
+- `serviceCount` — every service in the service cache, all transports
+- `websocketRoutes`, `webdavRoutes` — route counts for those transports
 
 ### Routes
 
@@ -207,7 +270,13 @@ Returns `404` when Consul discovery is not enabled. Once enforcing, blocked serv
 curl http://localhost:8381/info/truststore
 ```
 
-Lists all certificates in the custom truststore — alias, subject DN, issuer DN and validity window. Returns `404` if the truststore is not enabled.
+Lists all certificates in the custom truststore — alias, subject DN, issuer DN, validity window,
+DNS subject alternative names (`dnsNames`) and `addedAt`. Returns `404` if the truststore is not enabled.
+
+`addedAt` is when the alias entered the trust store, not when the certificate was issued — use it
+to tell whether a replacement for an expiring certificate has already been added. Only **JKS**
+stores record it. A PKCS12 store has no such date (Java reports the load time instead), so for
+PKCS12 `addedAt` is `null` rather than a misleading "today".
 
 Filter by expiry with `expired`:
 

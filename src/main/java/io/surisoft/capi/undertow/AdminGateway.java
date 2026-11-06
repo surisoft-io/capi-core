@@ -83,6 +83,7 @@ public class AdminGateway implements AutoCloseable {
         PathHandler pathHandler = new PathHandler()
                 .addExactPath("/info", this::handleInfo)
                 .addExactPath("/info/metrics", this::handleMetrics)
+                .addExactPath("/info/metrics/history", this::handleMetricsHistory)
                 .addExactPath("/info/health", this::handleHealth)
                 .addExactPath("/info/capi", this::handleCapiInfo)
                 .addExactPath("/info/routes", this::handleRoutesInfo)
@@ -189,6 +190,9 @@ public class AdminGateway implements AutoCloseable {
 
             Map<String, Object> links = new LinkedHashMap<>();
             links.put("metrics", Map.of("href", baseUrl + "/info/metrics"));
+            if (metricsHistory != null) {
+                links.put("metrics-history", Map.of("href", baseUrl + "/info/metrics/history?minutes=15{&service}"));
+            }
             links.put("health", Map.of("href", baseUrl + "/info/health"));
             links.put("capi", Map.of("href", baseUrl + "/info/capi"));
             links.put("routes", Map.of("href", baseUrl + "/info/routes"));
@@ -223,6 +227,38 @@ public class AdminGateway implements AutoCloseable {
         exchange.getResponseSender().send(prometheusRegistry.scrape());
     }
 
+    private io.surisoft.capi.observability.MetricsHistory metricsHistory;
+
+    public void setMetricsHistory(io.surisoft.capi.observability.MetricsHistory metricsHistory) {
+        this.metricsHistory = metricsHistory;
+    }
+
+    /**
+     * This node's metrics over the last {@code minutes} (default 15), summed from the in-memory history
+     * — rates, status groups, latency, security counters and JVM figures. Optional {@code service}
+     * narrows the per-service figures and the series to one service. Read by the admin MCP.
+     */
+    private void handleMetricsHistory(HttpServerExchange exchange) {
+        exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
+        try {
+            if (metricsHistory == null) {
+                exchange.setStatusCode(StatusCodes.NOT_FOUND);
+                exchange.getResponseSender().send(objectMapper.writeValueAsString(buildError(StatusCodes.NOT_FOUND,
+                        "Metrics history not enabled (it runs with admin.mcp.enabled)")));
+                return;
+            }
+            int maxMinutes = (int) Math.max(1, metricsHistory.getRetention().toMinutes());
+            int minutes = parseIntParam(exchange, "minutes", Math.min(15, maxMinutes), 1, maxMinutes);
+            java.util.Deque<String> serviceParam = exchange.getQueryParameters().get("service");
+            String service = serviceParam == null || serviceParam.isEmpty() || serviceParam.getFirst().isBlank()
+                    ? null : serviceParam.getFirst().trim();
+            exchange.setStatusCode(StatusCodes.OK);
+            exchange.getResponseSender().send(objectMapper.writeValueAsString(metricsHistory.window(minutes, service)));
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     private void handleHealth(HttpServerExchange exchange) {
         exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
         if(ConsulCatalogService.isConnectedToConsul()) {
@@ -237,9 +273,20 @@ public class AdminGateway implements AutoCloseable {
     private void handleCapiInfo(HttpServerExchange exchange) {
         try {
             Info info = new Info(capiConfiguration, restClients != null ? restClients.size() : 0, invalidServices.size());
+            CapiInfo capiInfo = info.getInfo();
+            // Alignment data for the admin MCP (capi_check_alignment): what this node actually trusts
+            // and serves, not just what its config says.
+            if (oauth2Provider != null) {
+                capiInfo.setJwksKeyIds(oauth2Provider.getLoadedKeyIds());
+            }
+            // Best effort: an extra count must never turn /info/capi into a 500.
+            java.util.Map<String, Service> cached = serviceCache != null ? serviceCache.asMap() : null;
+            capiInfo.setServiceCount(cached != null ? cached.size() : null);
+            capiInfo.setWebsocketRoutes(websocketClients != null ? websocketClients.size() : 0);
+            capiInfo.setWebdavRoutes(webDavClients != null ? webDavClients.size() : 0);
             exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
             exchange.setStatusCode(StatusCodes.OK);
-            exchange.getResponseSender().send(objectMapper.writeValueAsString(info.getInfo()));
+            exchange.getResponseSender().send(objectMapper.writeValueAsString(capiInfo));
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
         }
@@ -779,6 +826,12 @@ public class AdminGateway implements AutoCloseable {
             sb.append(Character.toUpperCase(parts[i].charAt(0))).append(parts[i].substring(1));
         }
         return sb.toString();
+    }
+
+    private io.surisoft.capi.oidc.Oauth2Provider oauth2Provider;
+
+    public void setOauth2Provider(io.surisoft.capi.oidc.Oauth2Provider oauth2Provider) {
+        this.oauth2Provider = oauth2Provider;
     }
 
     public void setJvmObservability(io.surisoft.capi.observability.JvmObservability jvmObservability) {

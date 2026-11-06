@@ -34,6 +34,7 @@ CAPI is a lightweight API Gateway and load balancer built on Undertow's async pr
 * TLS termination and dynamic truststore management (via Consul KV hot-reload)
 * CORS management
 * Admin API with health, metrics, and route inspection
+* **Admin MCP server** — read-only, cluster-wide MCP server over the Admin API: AI agents can ask why a service does not route, whether all nodes are aligned, which certificates expire, and where the 5xx come from
 * Multi-instance support (route targeting per CAPI instance)
 * Reverse proxy headers (`X-Forwarded-*`)
 * **[Experimental]** MCP Gateway — expose services as MCP tools for LLM agents (JSON-RPC 2.0 over Streamable HTTP)
@@ -108,6 +109,7 @@ See [`helm/capi-core/values.yaml`](helm/capi-core/values.yaml) for all available
 | 8382 | WebSocket gateway | `capi.websocket.port` |
 | 8383 | MCP Gateway (experimental) | `capi.mcp.port` |
 | 8384 | gRPC Gateway (experimental) | `capi.grpc.port` |
+| 8390 | Admin MCP server | `capi.admin.mcp.port` |
 
 ## Running Modes
 
@@ -128,4 +130,5 @@ The `runningMode` field controls which types of services CAPI will proxy:
 | [Admin API](docs/admin-api.md) | Admin endpoints reference (health, metrics, routes, OpenAPI) |
 | [Configuration Reference](docs/configuration.md) | Complete YAML configuration reference with all fields |
 | [MCP Gateway (Experimental)](docs/mcp-gateway.md) | MCP Gateway for LLM tool integration via JSON-RPC 2.0 |
+| [Admin MCP Server](docs/admin-mcp.md) | Read-only, cluster-wide MCP server for operating CAPI with an AI agent |
 | [gRPC Gateway (Experimental)](docs/grpc-gateway.md) | Transparent gRPC reverse proxy with header-based routing |

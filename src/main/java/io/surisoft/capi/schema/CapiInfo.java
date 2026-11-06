@@ -40,6 +40,37 @@ public class CapiInfo {
     private boolean apiKeyStoreEnabled;
     private String reverseProxyHost;
     private boolean corsEnabled;
+    /** Configured JWKS endpoint -> key ids actually loaded at startup (empty = none). Null when OAuth2 is off. */
+    private java.util.Map<String, List<String>> jwksKeyIds;
+    /** Every service in the service cache, all transports. */
+    private Integer serviceCount;
+    private Integer websocketRoutes;
+    private Integer webdavRoutes;
+
+    public java.util.Map<String, List<String>> getJwksKeyIds() {
+        return jwksKeyIds;
+    }
+    public void setJwksKeyIds(java.util.Map<String, List<String>> jwksKeyIds) {
+        this.jwksKeyIds = jwksKeyIds;
+    }
+    public Integer getServiceCount() {
+        return serviceCount;
+    }
+    public void setServiceCount(Integer serviceCount) {
+        this.serviceCount = serviceCount;
+    }
+    public Integer getWebsocketRoutes() {
+        return websocketRoutes;
+    }
+    public void setWebsocketRoutes(Integer websocketRoutes) {
+        this.websocketRoutes = websocketRoutes;
+    }
+    public Integer getWebdavRoutes() {
+        return webdavRoutes;
+    }
+    public void setWebdavRoutes(Integer webdavRoutes) {
+        this.webdavRoutes = webdavRoutes;
+    }
 
     public String getCapiVersion() {
         return capiVersion;

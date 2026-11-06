@@ -1,5 +1,8 @@
 # MCP Gateway Capabilities into CAPI
 
+> Looking for an MCP server that answers questions about **CAPI itself** (nodes, routes, alignment,
+> trust store, metrics)? That is the [Admin MCP Server](admin-mcp.md) — a separate listener.
+
 ## Status
 
 Experimental

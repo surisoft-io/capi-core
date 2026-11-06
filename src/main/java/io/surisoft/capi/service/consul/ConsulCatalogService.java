@@ -254,6 +254,9 @@ public class ConsulCatalogService {
             @SuppressWarnings("unchecked")
             Map<String, Object> responseObject = objectMapper.readValue(catalogResponse.body(), Map.class);
             responseObject.remove("consul");
+            // CAPI's own admin registration (admin MCP peer discovery). Dropped here, before any
+            // per-service lookup, so it is never fetched, routed or reported as invalid.
+            responseObject.remove(Constants.CAPI_ADMIN_SERVICE_NAME);
             catalogNames = new HashSet<>(responseObject.keySet());
         } catch (Exception e) {
             log.error("Consul catalog fetch failed for host {}: {}", host.getEndpoint(), e.getMessage());
