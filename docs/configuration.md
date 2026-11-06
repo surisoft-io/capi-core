@@ -18,6 +18,21 @@ capi:
   admin:
     protected: true
     group: capi-admin
+    mcp:                      # read-only, cluster-wide admin MCP server — see admin-mcp.md
+      enabled: false
+      port: 8390
+      authorizationServer:
+      consul:
+        endpoint:
+        token:
+        meta: []
+      advertiseAddress:
+      peerTlsName:
+      nodeTimeoutMs: 5000
+      maxConcurrentCalls: 4
+      history:
+        intervalSeconds: 15
+        retentionMinutes: 60
 
   matchOpenApiSpec:
     enabled: false
@@ -174,6 +189,28 @@ capi:
   [Admin API — Truststore](admin-api.md#truststore).
 - Enforced by one wrapper around the path handler, not per endpoint, so a new admin endpoint is
   protected by default.
+
+### Admin MCP server
+
+A read-only MCP server over the Admin API, cluster-wide: the node an agent connects to fans out to
+every CAPI node with the same `instanceName`. Full guide: [Admin MCP Server](admin-mcp.md).
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `admin.mcp.enabled` | `false` | Start the listener, register this node in Consul as `capi-admin` and keep the in-memory metrics history. Requires `admin.protected: true` + `admin.group` — **CAPI refuses to start otherwise.** |
+| `admin.mcp.port` | `8390` | Listening port (`POST /mcp`, `GET /.well-known/oauth-protected-resource`). |
+| `admin.mcp.authorizationServer` | — | The one issuer allowed to authorize agents: the token's `iss` must equal it, and it is the only issuer advertised in the RFC 9728 metadata. Unset = any issuer in `oauth2.keys` (startup warning). |
+| `admin.mcp.consul.endpoint` | — | **Required when enabled.** The Consul this node registers in and finds its peers in. Never one of `consulHosts` implicitly. |
+| `admin.mcp.consul.token` | — | ACL token with `service:write` on `capi-admin`. |
+| `admin.mcp.consul.meta` | `[]` | Extra registration metadata — a map, or a list of `key: value` entries. `capi-cluster`, `capi-version`, `admin-scheme`, `mcp-port` are reserved. |
+| `admin.mcp.advertiseAddress` | this host's address | Address peers use to reach this node's `adminPort`. Set it behind NAT or port mappings. |
+| `admin.mcp.peerTlsName` | — | HTTPS admin only: the DNS name in the admin certificate, verified instead of the peer's IP. |
+| `admin.mcp.nodeTimeoutMs` | `5000` | Per-node fan-out timeout. |
+| `admin.mcp.maxConcurrentCalls` | `4` | `tools/call` in flight per node; excess calls are refused, not queued. |
+| `admin.mcp.history.intervalSeconds` | `15` | Metrics sampling interval for the metrics tools and `/info/metrics/history`. |
+| `admin.mcp.history.retentionMinutes` | `60` | Metrics history kept in memory per node. |
+
+`capi-admin` is a **reserved Consul service name**: CAPI never routes it.
 
 ### OpenAPI spec identity
 
@@ -409,6 +446,7 @@ Per-service throttle settings are configured via Consul metadata. See [Service R
 | `mcp.observability.genAi.enabled` | `false` | Emit OpenTelemetry GenAI semconv spans (`gen_ai.system=mcp`, `gen_ai.operation.name`, `gen_ai.tool.name`, `capi.outcome`, …) for every MCP request. Requires `traces.enabled: true`. See [MCP Gateway → Observability](mcp-gateway.md#observability-opentelemetry-genai) for the full attribute list and span model. |
 
 See [MCP Gateway](mcp-gateway.md) for the full design, wire protocol and Consul metadata extensions.
+Not to be confused with the [Admin MCP server](#admin-mcp-server) (`admin.mcp.*`), which exposes CAPI itself to operators.
 
 ## Ports Summary
 
@@ -420,6 +458,7 @@ See [MCP Gateway](mcp-gateway.md) for the full design, wire protocol and Consul 
 | 8383 | MCP Gateway | `capi.mcp.port` |
 | 8384 | gRPC Gateway | `capi.grpc.port` |
 | 8385 | WebDAV Gateway | `capi.webdav.port` |
+| 8390 | Admin MCP server | `capi.admin.mcp.port` |
 
 ## Reverse Proxy Headers
 

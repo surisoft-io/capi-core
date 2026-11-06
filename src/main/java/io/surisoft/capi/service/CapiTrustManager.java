@@ -18,6 +18,8 @@ public final class CapiTrustManager implements X509TrustManager {
     private final String capiTrustStorePath;
     private X509TrustManager trustManager;
     private KeyStore keyStore;
+    /** When the store was last (re)loaded — see {@link #getLoadedAt()}. */
+    private volatile java.util.Date loadedAt;
 
     public CapiTrustManager(InputStream capiTrustStoreStream, String capiTrustStorePath, String capiTrustStorePassword) throws Exception {
         log.info("Starting CAPI Trust Store Manager");
@@ -42,6 +44,7 @@ public final class CapiTrustManager implements X509TrustManager {
     }
 
     public void reloadTrustManager(InputStream capiTrustStoreStream, String capiTrustStorePassword) throws Exception {
+        java.util.Date loading = new java.util.Date();
         keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
         if(capiTrustStoreStream != null) {
             keyStore.load(capiTrustStoreStream, capiTrustStorePassword.toCharArray());
@@ -54,12 +57,22 @@ public final class CapiTrustManager implements X509TrustManager {
         TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
         trustManagerFactory.init(keyStore);
 
+        loadedAt = loading;
         TrustManager[] trustManagerList = trustManagerFactory.getTrustManagers();
         for(TrustManager tempTrustManager : trustManagerList) {
             if (tempTrustManager instanceof X509TrustManager) {
                 trustManager = (X509TrustManager) tempTrustManager;
             }
         }
+    }
+
+    /**
+     * The moment the current store started loading. A JKS file persists each alias's creation date; a
+     * PKCS12 file does not, and Java then reports the load time instead — so an alias "created" at or
+     * after this moment has no real creation date.
+     */
+    public java.util.Date getLoadedAt() {
+        return loadedAt;
     }
 
     public KeyStore getKeyStore() {

@@ -32,6 +32,7 @@ public class CAPIMain {
     private final CAPIConfiguration capiConfiguration;
     private final PathBlocklist pathBlocklist;
     private io.surisoft.capi.service.McpTrustStore mcpTrustStore;
+    private io.surisoft.capi.service.admin.AdminNodeRegistration adminNodeRegistration;
 
     public static void main(String[] args) {
         new CAPIMain();
@@ -59,12 +60,14 @@ public class CAPIMain {
             GrpcGateway grpcGateway = getGrpcGateway(startup);
             WebDavGateway webDavGateway = getWebDavGateway(startup);
             AdminGateway adminGateway = configureAdminGateway(startup);
+            AdminMcpGateway adminMcpGateway = getAdminMcpGateway(startup);
             McpGateway mcpGateway = getMcpGateway(startup);
             RestGateway restGateway = getRestGateway(startup, managedHeaders);
 
             ScheduledExecutorService scheduler = startSchedulers(startup);
 
             registerShutdownHook(websocketGateway, grpcGateway, webDavGateway, mcpGateway, restGateway, scheduler, adminGateway, startup);
+            registerAdminMcpShutdownHook(adminMcpGateway, adminNodeRegistration);
 
             log.info("CAPI Gateway started successfully.");
             Thread.currentThread().join();
@@ -175,8 +178,125 @@ public class CAPIMain {
         if(startup.getJvmObservability() != null) {
             adminGateway.setJvmObservability(startup.getJvmObservability());
         }
+        if(startup.getOauth2Provider() != null) {
+            adminGateway.setOauth2Provider(startup.getOauth2Provider());
+        }
+        if (admin.getMcp() != null && admin.getMcp().isEnabled() && startup.getPrometheusRegistry() != null) {
+            // Each node keeps a short history of its own metrics for the admin MCP metrics tools.
+            CAPIConfiguration.AdminMcp.History h = admin.getMcp().getHistory() != null
+                    ? admin.getMcp().getHistory() : new CAPIConfiguration.AdminMcp.History();
+            io.surisoft.capi.observability.MetricsHistory history = new io.surisoft.capi.observability.MetricsHistory(
+                    startup.getPrometheusRegistry(),
+                    java.time.Duration.ofSeconds(Math.max(5, h.getIntervalSeconds())),
+                    java.time.Duration.ofMinutes(Math.max(1, h.getRetentionMinutes())));
+            history.start();
+            adminGateway.setMetricsHistory(history);
+        }
         adminGateway.start();
         return adminGateway;
+    }
+
+    /**
+     * Admin MCP: a read-only MCP server over the admin API that fans out to every CAPI node of this
+     * cluster, found through the node's own {@code capi-admin} registration in Consul.
+     * See ADMIN-MCP-DESIGN.md.
+     */
+    private @Nullable AdminMcpGateway getAdminMcpGateway(Startup startup) {
+        CAPIConfiguration.Admin admin = capiConfiguration.getAdmin();
+        if (admin == null || admin.getMcp() == null || !admin.getMcp().isEnabled()) {
+            return null;
+        }
+        if (!admin.isProtectedEnabled()) {
+            // Explicit opt-in to a cluster-wide view with no auth in front of it is a contradiction;
+            // fail like admin.protected without a group does, rather than serve it open.
+            throw new IllegalStateException(
+                    "admin.mcp.enabled is true but admin.protected is not — the admin MCP server requires "
+                  + "capi.admin.protected: true and capi.admin.group.");
+        }
+        CAPIConfiguration.AdminMcp cfg = admin.getMcp();
+        CAPIConfiguration.AdminConsul adminConsul = cfg.getConsul();
+        if (adminConsul == null || adminConsul.getEndpoint() == null || adminConsul.getEndpoint().isBlank()) {
+            // No default from consulHosts: CAPI may read several catalogs owned by others, and
+            // picking one to write into would be a guess.
+            throw new IllegalStateException(
+                    "admin.mcp.enabled is true but admin.mcp.consul.endpoint is not set — set the Consul "
+                  + "this node registers in as 'capi-admin' and finds its peers in (token needs service:write on capi-admin).");
+        }
+        java.time.Duration nodeTimeout = java.time.Duration.ofMillis(Math.max(500, cfg.getNodeTimeoutMs()));
+        String cluster = io.surisoft.capi.service.admin.AdminNodeRegistration.clusterName(capiConfiguration.getInstanceName());
+        String serviceId = io.surisoft.capi.service.admin.AdminNodeRegistration.serviceId(
+                cluster, io.surisoft.capi.service.admin.AdminNodeRegistration.localHostName());
+        String address = io.surisoft.capi.service.admin.AdminNodeRegistration.resolveAdvertiseAddress(cfg.getAdvertiseAddress());
+        String scheme = startup.getUndertowSslContext() != null ? "https" : "http";
+
+        adminNodeRegistration = new io.surisoft.capi.service.admin.AdminNodeRegistration(
+                adminConsul, startup::getConsulHttpClient, serviceId, cluster,
+                capiConfiguration.getVersion(), address, capiConfiguration.getAdminPort(), scheme, cfg.getPort(),
+                adminConsul.metaAsMap());
+
+        io.surisoft.capi.service.admin.AdminNode self = new io.surisoft.capi.service.admin.AdminNode(
+                serviceId, address, capiConfiguration.getAdminPort(), scheme, true);
+        io.surisoft.capi.service.admin.AdminNodeDirectory directory = new io.surisoft.capi.service.admin.AdminNodeDirectory(
+                adminConsul, startup::getConsulHttpClient, cluster, self, nodeTimeout);
+        io.surisoft.capi.service.admin.AdminFanOut fanOut =
+                new io.surisoft.capi.service.admin.AdminFanOut(peerHttpClient(startup, cfg, scheme, address), nodeTimeout);
+        AdminMcpGateway gateway = new AdminMcpGateway(cfg.getPort(), startup.getUndertowSslContext(),
+                new io.surisoft.capi.service.admin.AdminMcpTools(directory, fanOut),
+                startup.getHttpUtils(), admin.getGroup(), capiConfiguration);
+        gateway.start();
+        // Own thread, not the shared scheduler: a slow Consul agent must not delay discovery.
+        adminNodeRegistration.start();
+        log.info("Admin MCP node {} (cluster {}, advertised {}://{}:{}) — Consul registration runs on thread capi-admin-registration",
+                serviceId, cluster, scheme, address, capiConfiguration.getAdminPort());
+        return gateway;
+    }
+
+    /**
+     * The client the admin MCP uses to call peers' admin APIs. Over HTTPS peers are dialled by IP, so
+     * with {@code admin.mcp.peerTlsName} set the certificate is checked against that name instead of
+     * the IP (chain still validated by CAPI's trust store). Otherwise the shared client, with standard
+     * hostname verification — which fails for an IP unless the certificate carries that exact IP.
+     */
+    private java.util.function.Supplier<java.net.http.HttpClient> peerHttpClient(Startup startup, CAPIConfiguration.AdminMcp cfg, String scheme, String address) {
+        String peerTlsName = cfg.getPeerTlsName() == null ? "" : cfg.getPeerTlsName().trim();
+        if (!"https".equals(scheme)) {
+            if (!peerTlsName.isEmpty()) {
+                log.info("admin.mcp.peerTlsName is ignored: the admin listener is plain HTTP");
+            }
+            // Per call, never captured: the shared client is replaced on trust-store reload.
+            return startup::getConsulHttpClient;
+        }
+        if (peerTlsName.isEmpty()) {
+            if (address.matches("[0-9.]+") || address.contains(":")) {
+                log.warn("Admin listener is HTTPS and peers are reached by IP ({}), but admin.mcp.peerTlsName is not set — "
+                       + "standard hostname verification only accepts an IP SAN for that exact IP, so every node "
+                       + "(this one included) will show as unreachable. Set admin.mcp.peerTlsName to the DNS name "
+                       + "in the admin certificate.", address);
+            }
+            return startup::getConsulHttpClient;
+        }
+        log.info("Admin MCP verifies peer certificates against '{}' (chain: {})", peerTlsName,
+                startup.getCapiTrustManager() != null ? "CAPI trust store" : "JVM default trust store");
+        // Built once and kept: it is ours (never shut down by a reload), and its trust manager reads
+        // CapiTrustManager live, which reloads in place.
+        java.net.http.HttpClient peerClient = io.surisoft.capi.service.admin.AdminFanOut.peerClient(
+                startup.getCapiTrustManager(), peerTlsName, java.time.Duration.ofSeconds(10));
+        return () -> peerClient;
+    }
+
+    private static void registerAdminMcpShutdownHook(@Nullable AdminMcpGateway gateway,
+                                                     io.surisoft.capi.service.admin.@Nullable AdminNodeRegistration registration) {
+        if (gateway == null && registration == null) {
+            return;
+        }
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            // Deregister first so peers stop fanning out to a node that is going away.
+            if (registration != null) {
+                registration.stop();
+                registration.deregister();
+            }
+            if (gateway != null) gateway.stop();
+        }));
     }
 
     private static void registerShutdownHook(@Nullable WebsocketGateway websocketGateway, @Nullable GrpcGateway grpcGateway, @Nullable WebDavGateway webDavGateway, @Nullable McpGateway mcpGateway, @Nullable RestGateway restGateway, ScheduledExecutorService scheduler, AdminGateway adminGateway, Startup startup) {

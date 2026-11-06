@@ -14,6 +14,26 @@ public class AliasInfo {
     private String serviceId;
     private Date notBefore;
     private Date notAfter;
+    /** When the alias was added to the trust store (KeyStore creation date); null when the store type does not keep it. */
+    private Date addedAt;
+    /** DNS subjectAlternativeNames of the certificate. */
+    private java.util.List<String> dnsNames;
+
+    public Date getAddedAt() {
+        return addedAt;
+    }
+
+    public void setAddedAt(Date addedAt) {
+        this.addedAt = addedAt;
+    }
+
+    public java.util.List<String> getDnsNames() {
+        return dnsNames;
+    }
+
+    public void setDnsNames(java.util.List<String> dnsNames) {
+        this.dnsNames = dnsNames;
+    }
 
     public String getAlias() {
         return alias;

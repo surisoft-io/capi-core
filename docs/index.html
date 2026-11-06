@@ -662,6 +662,21 @@
             <td class="cross">No</td>
           </tr>
           <tr>
+            <!-- VERIFY: checked November 2026 against vendor pages. Kong: remote Konnect MCP server
+                 (global.mcp.konghq.com, public beta Dec 2025) — Konnect only, not self-managed Kong; the older
+                 open-source Kong/mcp-konnect was archived Aug 2026. Traefik: official read-only MCP server
+                 (routers, middlewares, health, traces, metrics, access logs) unlocked by a Traefik Hub token,
+                 even on Traefik Proxy v3. WSO2 4.6/4.7: MCP features are for proxying APIs, nothing to operate
+                 APIM itself (apictl CLI is the closest). Spring Cloud GW: actuator API only; a third-party
+                 plugin PR exists, unmerged. Fast-moving: re-check before relying on it. -->
+            <td><strong>Operations MCP server</strong><br><span style="font-weight:400;opacity:.75">an agent asks the gateway about itself</span></td>
+            <td class="check">Built-in, cluster-wide<br><span style="font-weight:400;opacity:.75">read-only, compares nodes</span></td>
+            <td class="cross">No</td>
+            <td class="cross">Konnect only (hosted)</td>
+            <td class="cross">Traefik Hub license</td>
+            <td class="cross">No</td>
+          </tr>
+          <tr>
             <td><strong>Architecture</strong></td>
             <td class="check">Single process</td>
             <td class="cross">Multi-component</td>

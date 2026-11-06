@@ -16,6 +16,45 @@ capi:
   admin:
     protected: true
     group: capi-admin
+    # Read-only MCP server over the admin API, cluster-wide: the node an agent connects to fans out
+    # to every CAPI node of this cluster (same instanceName). Requires protected: true + group above;
+    # the caller's token is checked here and forwarded to peers.
+    mcp:
+      enabled: false
+      port: 8390
+      # The ONE Consul this node registers in as service "capi-admin" and finds its peers in.
+      # Separate from consulHosts on purpose: those are catalogs CAPI reads, possibly owned by others,
+      # and CAPI never writes into them. Required when enabled. The token needs service:write on
+      # "capi-admin" only. "capi-admin" is a reserved name: CAPI never routes it.
+      consul:
+        endpoint: http://localhost:8500
+        token:
+        # Extra metadata on the capi-admin registration, e.g. what a validating proxy in front of
+        # Consul requires (it answers 422 otherwise). A map or a list of "key: value" entries.
+        # capi-cluster, capi-version, admin-scheme and mcp-port are set by CAPI and cannot be overridden.
+        meta: []
+        #  - group: ops
+        #  - owner: platform
+      # Address peers use to reach THIS node's adminPort. Empty = this host's resolved address
+      # (fine for a pod IP). Set it behind NAT / docker port maps. With TLS, the cert must cover it.
+      advertiseAddress:
+      nodeTimeoutMs: 5000
+      # tools/call in flight per node; past it the call is refused, not queued
+      maxConcurrentCalls: 4
+      # The ONE issuer allowed to authorize agents. CAPI may trust many (oauth2.keys); the admin MCP
+      # accepts only tokens whose iss equals this, and it is the only issuer advertised to MCP clients.
+      # Use the issuer exactly as it appears IN the token. Empty = any trusted issuer (startup warns).
+      authorizationServer:
+      # Each node keeps a short in-memory history of its own metrics for the metrics tools
+      # (traffic, service/node health, security events). Reset on restart.
+      history:
+        intervalSeconds: 15
+        retentionMinutes: 60
+      # HTTPS admin only. Peers are dialled by IP, and standard TLS hostname checks only accept an IP SAN
+      # for that exact IP. Set this to the DNS name in the admin certificate (shared by all nodes): the
+      # chain is still validated against the trust store, then the cert must cover this name — checked
+      # in the handshake, before any token is sent.
+      peerTlsName:
   # The open-api endpoint is owner-supplied and CAPI fetches it itself. Link-local (cloud metadata)
   # is always refused; loopback is refused unless opted in here. RFC1918 is allowed — specs live there.
   openApi:

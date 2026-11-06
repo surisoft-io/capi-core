@@ -90,4 +90,24 @@ class Oauth2ProviderTest {
         assertNotNull(provider.getJwtProcessorList());
         assertTrue(provider.getJwtProcessorList().isEmpty());
     }
+
+    @Test
+    void keyIdsOf_sortsKids_andIdentifiesKidlessKeysByThumbprint() throws Exception {
+        com.nimbusds.jose.jwk.RSAKey withKid = new com.nimbusds.jose.jwk.gen.RSAKeyGenerator(2048).keyID("zeta").generate();
+        com.nimbusds.jose.jwk.RSAKey alsoKid = new com.nimbusds.jose.jwk.gen.RSAKeyGenerator(2048).keyID("alpha").generate();
+        com.nimbusds.jose.jwk.RSAKey noKid = new com.nimbusds.jose.jwk.gen.RSAKeyGenerator(2048).generate();
+        java.util.List<String> ids = Oauth2Provider.keyIdsOf(new com.nimbusds.jose.jwk.JWKSet(
+                java.util.List.of(withKid.toPublicJWK(), noKid.toPublicJWK(), alsoKid.toPublicJWK())));
+        assertEquals(3, ids.size());
+        assertEquals("alpha", ids.get(0));
+        assertEquals("thumbprint:" + noKid.computeThumbprint(), ids.get(1));
+        assertEquals("zeta", ids.get(2));
+    }
+
+    @Test
+    void loadedKeyIds_isEmptyBeforeLoading_andUnmodifiable() {
+        Oauth2Provider provider = new Oauth2Provider(new ArrayList<>());
+        assertTrue(provider.getLoadedKeyIds().isEmpty());
+        assertThrows(UnsupportedOperationException.class, () -> provider.getLoadedKeyIds().put("x", java.util.List.of()));
+    }
 }

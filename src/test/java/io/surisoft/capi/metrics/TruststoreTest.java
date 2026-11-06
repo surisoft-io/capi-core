@@ -101,4 +101,38 @@ class TruststoreTest {
 
         assertEquals(2, truststoreWith(keyStore).getTruststore().size());
     }
+
+    /**
+     * Real files, real CapiTrustManager. JKS persists when an alias was added; PKCS12 does not, and Java
+     * then returns the load time — reported as is, every alias of a PKCS12 store would look "added today".
+     */
+    @Test
+    void addedAt_isReportedForJks_andUnknownForPkcs12(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) throws Exception {
+        String keytool = java.nio.file.Path.of(System.getProperty("java.home"), "bin", "keytool").toString();
+        run(keytool, "-genkeypair", "-alias", "src", "-keyalg", "EC", "-groupname", "secp256r1", "-dname", "CN=backend",
+                "-ext", "SAN=dns:backend.example.test", "-validity", "2", "-storetype", "PKCS12",
+                "-keystore", dir.resolve("src.p12").toString(), "-storepass", "changeit");
+        run(keytool, "-exportcert", "-alias", "src", "-keystore", dir.resolve("src.p12").toString(),
+                "-storepass", "changeit", "-file", dir.resolve("x.cer").toString());
+        for (String type : new String[]{"JKS", "PKCS12"}) {
+            run(keytool, "-importcert", "-noprompt", "-alias", "trusted", "-file", dir.resolve("x.cer").toString(),
+                    "-storetype", type, "-keystore", dir.resolve("trust." + type).toString(), "-storepass", "changeit");
+        }
+        Thread.sleep(20);   // so a persisted creation date is strictly before the load
+
+        AliasInfo jks = new Truststore(true, new CapiTrustManager(null, dir.resolve("trust.JKS").toString(), "changeit"))
+                .getTruststore().getFirst();
+        assertNotNull(jks.getAddedAt(), "JKS keeps the date the alias was added");
+        assertEquals(java.util.List.of("backend.example.test"), jks.getDnsNames());
+
+        AliasInfo p12 = new Truststore(true, new CapiTrustManager(null, dir.resolve("trust.PKCS12").toString(), "changeit"))
+                .getTruststore().getFirst();
+        assertNull(p12.getAddedAt(), "PKCS12 only knows the load time — must be reported as unknown, not as today");
+    }
+
+    private static void run(String... command) throws Exception {
+        Process p = new ProcessBuilder(command).redirectErrorStream(true).start();
+        String output = new String(p.getInputStream().readAllBytes());
+        assertEquals(0, p.waitFor(), String.join(" ", command) + "\n" + output);
+    }
 }

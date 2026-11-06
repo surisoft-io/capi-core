@@ -44,6 +44,8 @@ public class Truststore {
                 aliasInfo.setSubjectDN(certificate.getSubjectX500Principal().getName());
                 aliasInfo.setNotBefore(certificate.getNotBefore());
                 aliasInfo.setNotAfter(certificate.getNotAfter());
+                aliasInfo.setDnsNames(dnsNames(certificate));
+                aliasInfo.setAddedAt(addedAt(keystore, alias, capiTrustManager.getLoadedAt()));
                 aliasList.add(aliasInfo);
             }
         } catch(Exception e) {
@@ -51,6 +53,37 @@ public class Truststore {
             return null;
         }
         return aliasList;
+    }
+
+    /**
+     * When the alias entered the store — not the certificate's issue date — or null when unknown. A
+     * JKS file keeps it; a PKCS12 file does not and Java answers with the load time, which would make
+     * every alias look freshly added. Verified with real files: only a date before the load is real.
+     */
+    static Date addedAt(KeyStore keystore, String alias, Date loadedAt) {
+        try {
+            Date created = keystore.getCreationDate(alias);
+            return created != null && loadedAt != null && created.before(loadedAt) ? created : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    static List<String> dnsNames(X509Certificate certificate) {
+        List<String> names = new ArrayList<>();
+        try {
+            java.util.Collection<List<?>> sans = certificate.getSubjectAlternativeNames();
+            if (sans != null) {
+                for (List<?> san : sans) {
+                    if (san.size() >= 2 && Integer.valueOf(2).equals(san.get(0)) && san.get(1) instanceof String dns) {
+                        names.add(dns);
+                    }
+                }
+            }
+        } catch (java.security.cert.CertificateParsingException e) {
+            // Unparseable SANs: report none.
+        }
+        return names;
     }
 
     /**

@@ -177,6 +177,34 @@ public class Constants {
     /** Carries the negotiated revision on Streamable HTTP (2025-06-18 onwards). */
     public static final String MCP_PROTOCOL_VERSION_HEADER = "MCP-Protocol-Version";
 
+    // Admin MCP (capi.admin.mcp) — see ADMIN-MCP-DESIGN.md
+
+    /**
+     * Consul service name every CAPI node registers its admin API under, so the admin MCP server
+     * can find its peers. Reserved: discovery drops it before any lookup, so CAPI never routes to
+     * its own admin API and a backend registered under this name is invisible to routing.
+     */
+    public static final String CAPI_ADMIN_SERVICE_NAME = "capi-admin";
+    public static final String CAPI_ADMIN_META_CLUSTER = "capi-cluster";
+    public static final String CAPI_ADMIN_META_VERSION = "capi-version";
+    public static final String CAPI_ADMIN_META_SCHEME = "admin-scheme";
+    public static final String CAPI_ADMIN_META_MCP_PORT = "mcp-port";
+    /** Cluster name used when {@code capi.instanceName} is not set. */
+    public static final String CAPI_ADMIN_DEFAULT_CLUSTER = "default";
+    public static final String CAPI_ADMIN_MCP_SERVER_NAME = "capi-admin";
+    /**
+     * Revisions the admin MCP server answers. All are served statelessly: {@code initialize} is
+     * answered but never mints a session, which streamable HTTP allows a server to do.
+     */
+    public static final java.util.List<String> CAPI_ADMIN_MCP_PROTOCOL_VERSIONS =
+            java.util.List.of(MCP_PROTOCOL_VERSION_CURRENT, "2025-11-25", "2025-06-18", MCP_PROTOCOL_VERSION);
+    /**
+     * The revisions {@code initialize} may answer with, newest first. {@code 2026-07-28} is absent on
+     * purpose: it has no handshake, so a client that sent {@code initialize} cannot speak it.
+     */
+    public static final java.util.List<String> CAPI_ADMIN_MCP_HANDSHAKE_VERSIONS =
+            java.util.List.of("2025-11-25", "2025-06-18", MCP_PROTOCOL_VERSION);
+
     /** Standard request headers required on Streamable HTTP POST from 2026-07-28. */
     public static final String MCP_METHOD_HEADER = "Mcp-Method";
     public static final String MCP_NAME_HEADER = "Mcp-Name";
