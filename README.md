@@ -24,8 +24,9 @@ CAPI is a lightweight API Gateway and load balancer built on Undertow's async pr
 * REST, WebSocket, and SSE gateway with fully async proxying (zero threads blocked during backend calls)
 * Service discovery via HashiCorp Consul (automatic route creation and removal)
 * OAuth2 / OIDC token validation (multi-provider, cookie-based auth supported)
+* One authorization model across REST, WebSocket and gRPC: `secured`, subscription groups and OPA policies, with OpenAPI security requirements deciding per operation
 * API Key authentication with per-key throttling (via Consul KV)
-* Fine-grained authorization via OPA (Open Policy Agent, async policy evaluation)
+* Fine-grained authorization via OPA (Open Policy Agent, policies compiled to WebAssembly and evaluated in-process)
 * Distributed throttling (Hazelcast, with Kubernetes discovery)
 * Load balancing (Round Robin) and Failover
 * Distributed tracing (OpenTelemetry / OTLP)
@@ -39,6 +40,7 @@ CAPI is a lightweight API Gateway and load balancer built on Undertow's async pr
 * Reverse proxy headers (`X-Forwarded-*`)
 * **[Experimental]** MCP Gateway — expose services as MCP tools for LLM agents (JSON-RPC 2.0 over Streamable HTTP)
 * **[Experimental]** gRPC Gateway — transparent HTTP/2 reverse proxy for gRPC services with header-based routing
+* **[Experimental]** WebDAV Gateway — RFC 4918 reverse proxy for `type: webdav` services, with host or path routing
 
 ## REST-to-MCP Bridging
 
@@ -109,6 +111,7 @@ See [`helm/capi-core/values.yaml`](helm/capi-core/values.yaml) for all available
 | 8382 | WebSocket gateway | `capi.websocket.port` |
 | 8383 | MCP Gateway (experimental) | `capi.mcp.port` |
 | 8384 | gRPC Gateway (experimental) | `capi.grpc.port` |
+| 8385 | WebDAV Gateway (experimental) | `capi.webdav.port` |
 | 8390 | Admin MCP server | `capi.admin.mcp.port` |
 
 ## Running Modes
@@ -126,9 +129,10 @@ The `runningMode` field controls which types of services CAPI will proxy:
 | Document | Description |
 |----------|-------------|
 | [Service Registration](docs/consul-metadata.md) | How to register services in Consul and configure routing, security, and throttling via metadata |
-| [Security](docs/security.md) | OAuth2/OIDC and OPA authorization configuration |
+| [Security](docs/security.md) | Authorization rules (secured, subscription groups, OPA, OpenAPI security), OAuth2/OIDC and OPA configuration |
 | [Admin API](docs/admin-api.md) | Admin endpoints reference (health, metrics, routes, OpenAPI) |
 | [Configuration Reference](docs/configuration.md) | Complete YAML configuration reference with all fields |
 | [MCP Gateway (Experimental)](docs/mcp-gateway.md) | MCP Gateway for LLM tool integration via JSON-RPC 2.0 |
 | [Admin MCP Server](docs/admin-mcp.md) | Read-only, cluster-wide MCP server for operating CAPI with an AI agent |
 | [gRPC Gateway (Experimental)](docs/grpc-gateway.md) | Transparent gRPC reverse proxy with header-based routing |
+| [WebDAV Gateway (Experimental)](docs/webdav-gateway.md) | WebDAV reverse proxy with host or path routing |
