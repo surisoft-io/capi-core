@@ -268,14 +268,17 @@ public class Startup {
 
         List<TransportHandler> handlers = new ArrayList<>();
         if (configuration.getRest() != null) {
-            handlers.add(new RestTransportHandler(
+            RestTransportHandler restTransportHandler = new RestTransportHandler(
                     configuration.getRest().isEnabled(),
                     restClientMap,
                     websocketUtils,
                     httpUtils,
                     opaWasmService,
                     globalResponseTimeout,
-                    restClientSnapshot));
+                    restClientSnapshot);
+            restTransportHandler.setFetchesOpenApiSpecs(
+                    Constants.FULL_TYPE.equalsIgnoreCase(configuration.getRunningMode()));
+            handlers.add(restTransportHandler);
         }
         if (configuration.getWebsocket() != null) {
             handlers.add(new WebsocketTransportHandler(

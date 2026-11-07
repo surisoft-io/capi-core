@@ -5,7 +5,6 @@ import com.nimbusds.jwt.proc.DefaultJWTProcessor;
 import io.surisoft.capi.configuration.CAPIConfiguration;
 import io.surisoft.capi.configuration.CapiSslContextHolder;
 import io.surisoft.capi.exception.CapiUndertowException;
-import io.surisoft.capi.oidc.WebsocketAuthorization;
 import io.surisoft.capi.schema.*;
 import io.undertow.server.HttpHandler;
 import io.undertow.server.HttpServerExchange;
@@ -132,25 +131,6 @@ class WebsocketUtilsTest {
     void getWebclientId_emptyPath_returnsNull() {
         String result = websocketUtils.getWebclientId("/a");
         assertNull(result);
-    }
-
-    // ---------------------------------------------------------------
-    // createWebsocketAuthorization
-    // ---------------------------------------------------------------
-
-    @Test
-    void createWebsocketAuthorization_withProcessor_returnsAuthorization() throws CapiUndertowException {
-        WebsocketAuthorization auth = websocketUtils.createWebsocketAuthorization();
-        assertNotNull(auth);
-    }
-
-    @Test
-    void createWebsocketAuthorization_withoutProcessor_throwsException() {
-        WebsocketUtils utilsNoProcessor = new WebsocketUtils(
-                websocketConfig, null, null
-        );
-        utilsNoProcessor.setCorsEnabled(true);
-        assertThrows(CapiUndertowException.class, utilsNoProcessor::createWebsocketAuthorization);
     }
 
     // ---------------------------------------------------------------

@@ -78,6 +78,8 @@ public class GrpcUtils {
         grpcClient.setRequiresSubscription(service.getServiceMeta().isSecured());
         // Was never populated, so the gate below had nothing to check against even once it existed.
         grpcClient.setSubscriptionRole(service.getServiceMeta().getSubscriptionGroup());
+        grpcClient.setOpaRego(service.getServiceMeta().getOpaRego());
+        grpcClient.setCanonicalServiceId(service.getId());
         grpcClient.setHttpHandler(createClientHttpHandler(grpcClient, service));
         return grpcClient;
     }

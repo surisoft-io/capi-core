@@ -241,19 +241,6 @@ class HttpUtilsTest {
         assertNull(result);
     }
 
-    @Test
-    void isAuthorized_withNullProcessorList_throwsOrReturnsFalse() {
-        Service service = new Service();
-        ServiceMeta meta = new ServiceMeta();
-        service.setServiceMeta(meta);
-
-        try {
-            assertEquals(HttpUtils.AuthorizationOutcome.DENIED,
-                    httpUtils.authorize("some-token", "/context/path", service, null));
-        } catch (Exception e) {
-            assertNotNull(e);
-        }
-    }
 
     @Test
     void isAuthorized_twoArgWithNullSubscriptionGroup_returnsFalse() {
@@ -596,150 +583,14 @@ class HttpUtilsTest {
         assertEquals("user1", result.getSubject());
     }
 
-    // --- Tests for isAuthorized with OPA ---
 
-    @Test
-    void isAuthorized_withOpaAllowed_returnsTrue() throws IOException {
-        com.nimbusds.jose.jwk.RSAKey key = TestJwts.newKey();
-        HttpUtils verifying = new HttpUtils(null, List.of(TestJwts.processorFor(key)));
-        String token = TestJwts.token(key, "user-1", 300);
-        OpaWasmService opaWasmService = mock(OpaWasmService.class);
-        OpaResult opaResult = new OpaResult();
-        opaResult.setResult(true);
-        when(opaWasmService.isReady()).thenReturn(true);
-        when(opaWasmService.hasPolicy("my-rego")).thenReturn(true);
-        when(opaWasmService.evaluate("svc-1", "my-rego", token, true)).thenReturn(opaResult);
 
-        Service service = new Service();
-        service.setId("svc-1");
-        ServiceMeta meta = new ServiceMeta();
-        meta.setOpaRego("my-rego");
-        service.setServiceMeta(meta);
 
-        assertEquals(HttpUtils.AuthorizationOutcome.ALLOWED,
-                verifying.authorize(token, "/ctx", service, opaWasmService));
-    }
 
-    @Test
-    void authorize_withOpa_noVerifierConfigured_deniesWithoutAskingOpa() throws IOException {
-        // A policy that would allow anything: the refusal must come from the missing verification.
-        OpaWasmService opaWasmService = mock(OpaWasmService.class);
-        OpaResult opaResult = new OpaResult();
-        opaResult.setResult(true);
-        when(opaWasmService.isReady()).thenReturn(true);
-        when(opaWasmService.hasPolicy("my-rego")).thenReturn(true);
-        when(opaWasmService.evaluate(anyString(), anyString(), anyString(), anyBoolean())).thenReturn(opaResult);
 
-        Service service = new Service();
-        service.setId("svc-1");
-        ServiceMeta meta = new ServiceMeta();
-        meta.setOpaRego("my-rego");
-        service.setServiceMeta(meta);
 
-        String forged = TestJwts.token(TestJwts.newKey(), "admin", 300);
-        assertEquals(HttpUtils.AuthorizationOutcome.DENIED,
-                new HttpUtils(null, null).authorize(forged, "/ctx", service, opaWasmService));
-        assertEquals(HttpUtils.AuthorizationOutcome.DENIED,
-                new HttpUtils(null, List.of()).authorize(forged, "/ctx", service, opaWasmService));
-        verify(opaWasmService, never()).evaluate(anyString(), anyString(), anyString(), anyBoolean());
-    }
 
-    @Test
-    void isAuthorized_withOpaDenied_returnsFalse() throws IOException {
-        OpaWasmService opaWasmService = mock(OpaWasmService.class);
-        OpaResult opaResult = new OpaResult();
-        opaResult.setResult(false);
-        when(opaWasmService.isReady()).thenReturn(true);
-        when(opaWasmService.hasPolicy("my-rego")).thenReturn(true);
-        when(opaWasmService.evaluate("svc-1", "my-rego", "token", true)).thenReturn(opaResult);
 
-        Service service = new Service();
-        service.setId("svc-1");
-        ServiceMeta meta = new ServiceMeta();
-        meta.setOpaRego("my-rego");
-        service.setServiceMeta(meta);
-
-        assertEquals(HttpUtils.AuthorizationOutcome.DENIED,
-                httpUtils.authorize("token", "/ctx", service, opaWasmService));
-    }
-
-    // --- Tests for isAuthorized with JWT role checking ---
-
-    @SuppressWarnings("unchecked")
-    @Test
-    void isAuthorized_withSubscribedRole_returnsTrue() throws Exception {
-        DefaultJWTProcessor<SecurityContext> mockProcessor = mock(DefaultJWTProcessor.class);
-        Map<String, Object> realmAccess = new HashMap<>();
-        realmAccess.put("roles", List.of("ctx"));
-        JWTClaimsSet claims = new JWTClaimsSet.Builder()
-                .claim("realm_access", realmAccess)
-                .build();
-        when(mockProcessor.process("token", null)).thenReturn(claims);
-
-        HttpUtils httpUtilsWithProcessor = new HttpUtils(null, List.of(mockProcessor));
-        Service service = new Service();
-        ServiceMeta meta = new ServiceMeta();
-        service.setServiceMeta(meta);
-
-        assertEquals(HttpUtils.AuthorizationOutcome.ALLOWED,
-                httpUtilsWithProcessor.authorize("token", "/ctx", service, null));
-    }
-
-    @SuppressWarnings("unchecked")
-    @Test
-    void isAuthorized_notSubscribedButInGroup_returnsTrue() throws Exception {
-        DefaultJWTProcessor<SecurityContext> mockProcessor = mock(DefaultJWTProcessor.class);
-        JWTClaimsSet claims = new JWTClaimsSet.Builder()
-                .claim("realm_access", Map.of("roles", List.of("other-role")))
-                .claim("subscriptions", List.of("my-group"))
-                .build();
-        when(mockProcessor.process("token", null)).thenReturn(claims);
-
-        HttpUtils httpUtilsWithProcessor = new HttpUtils(null, List.of(mockProcessor));
-        Service service = new Service();
-        ServiceMeta meta = new ServiceMeta();
-        meta.setSubscriptionGroup("my-group");
-        service.setServiceMeta(meta);
-
-        assertEquals(HttpUtils.AuthorizationOutcome.ALLOWED,
-                httpUtilsWithProcessor.authorize("token", "/ctx", service, null));
-    }
-
-    @SuppressWarnings("unchecked")
-    @Test
-    void isAuthorized_notSubscribedNotInGroup_returnsFalse() throws Exception {
-        DefaultJWTProcessor<SecurityContext> mockProcessor = mock(DefaultJWTProcessor.class);
-        JWTClaimsSet claims = new JWTClaimsSet.Builder()
-                .claim("realm_access", Map.of("roles", List.of("other-role")))
-                .claim("subscriptions", List.of("wrong-group"))
-                .build();
-        when(mockProcessor.process("token", null)).thenReturn(claims);
-
-        HttpUtils httpUtilsWithProcessor = new HttpUtils(null, List.of(mockProcessor));
-        Service service = new Service();
-        ServiceMeta meta = new ServiceMeta();
-        meta.setSubscriptionGroup("my-group");
-        service.setServiceMeta(meta);
-
-        assertEquals(HttpUtils.AuthorizationOutcome.DENIED,
-                httpUtilsWithProcessor.authorize("token", "/ctx", service, null));
-    }
-
-    @SuppressWarnings("unchecked")
-    @Test
-    void isAuthorized_noRealmAccessClaim_nullGroup_returnsFalse() throws Exception {
-        DefaultJWTProcessor<SecurityContext> mockProcessor = mock(DefaultJWTProcessor.class);
-        JWTClaimsSet claims = new JWTClaimsSet.Builder().subject("user").build();
-        when(mockProcessor.process("token", null)).thenReturn(claims);
-
-        HttpUtils httpUtilsWithProcessor = new HttpUtils(null, List.of(mockProcessor));
-        Service service = new Service();
-        ServiceMeta meta = new ServiceMeta();
-        service.setServiceMeta(meta);
-
-        assertEquals(HttpUtils.AuthorizationOutcome.DENIED,
-                httpUtilsWithProcessor.authorize("token", "/ctx", service, null));
-    }
 
     // --- Tests for isAuthorized two-arg with group matching ---
 

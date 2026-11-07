@@ -72,7 +72,8 @@ CAPI automatically enables **Round Robin load balancing** and **Failover** when 
 
 ### 3. Secure with OAuth2
 
-Add `secured: true` to require a valid Bearer token on every request:
+Add `secured: true` to require authorization on every request, and `subscription-group` to say who
+is authorized — the token's `subscriptions` claim must contain it:
 
 ```bash
 curl -X PUT http://localhost:8500/v1/agent/service/register \
@@ -85,12 +86,17 @@ curl -X PUT http://localhost:8500/v1/agent/service/register \
       "group": "v1",
       "root-context": "/orders",
       "scheme": "http",
-      "secured": "true"
+      "secured": "true",
+      "subscription-group": "orders-consumers"
     }
   }'
 ```
 
-CAPI validates the token against the JWKS endpoints configured in `capi.oauth2.keys`. See [Security](security.md) for details.
+CAPI validates the token against the JWKS endpoints configured in `capi.oauth2.keys`, then checks the
+group. **A `secured` service needs a `subscription-group`, an `opa-rego`, or both** — with neither,
+every call is refused with `403`, because there is nothing to authorize the caller against. See
+[Security — Authorization rules](security.md#authorization-rules) for the full table, including how an
+OpenAPI spec makes individual operations anonymous on a service that is not `secured`.
 
 Test the secured endpoint:
 
@@ -98,7 +104,9 @@ Test the secured endpoint:
 # Without token - returns 401
 curl -i http://localhost:8380/api/order-service/v1/orders
 
-# With token - proxied to backend
+# With a token outside the group - returns 403
+
+# With a token in the group - proxied to backend
 curl -H "Authorization: Bearer <token>" \
   http://localhost:8380/api/order-service/v1/orders
 ```
@@ -124,7 +132,9 @@ curl -X PUT http://localhost:8500/v1/agent/service/register \
   }'
 ```
 
-CAPI sends the request context to OPA at the configured endpoint and enforces the decision. See [Security](security.md) for policy details.
+CAPI evaluates the policy in-process and enforces the decision. `opa-rego` protects the service even
+without `secured: true`; with a `subscription-group` as well, the caller must pass both. See
+[Security](security.md) for policy details.
 
 ### 5. Enable Throttling
 
@@ -453,8 +463,9 @@ treated as a configuration mistake, not as evidence of staleness.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `secured` | `false` | When `true`, requires a valid OAuth2/OIDC Bearer token. |
-| `opa-rego` | — | OPA Rego policy path for fine-grained authorization (e.g. `capi/order_policy`). |
+| `secured` | `false` | When `true`, every call must be authorized: a valid OAuth2/OIDC Bearer token plus the service's `subscription-group` and/or `opa-rego`. With neither, every call is refused. When `false`, an OpenAPI spec decides per operation. See [Authorization rules](security.md#authorization-rules). |
+| `subscription-group` | — | The token's `subscriptions` claim must contain this group (comma-separated for several). Applies on REST, WebSocket and gRPC. |
+| `opa-rego` | — | OPA Rego policy path for fine-grained authorization (e.g. `capi/order_policy`). Protects the service even when `secured` is `false`. |
 | `allowed-origins` | — | Comma-separated CORS origins for **this service only**. Replaces the gateway-wide `capi.allowedOrigins` for this service rather than adding to it; omit to inherit that list. Exact match on scheme+host+port. Requires `capi.corsEnabled: true` — the master switch overrides per-service origins. |
 
 > **Read since 2.23.** This key was parsed off the service metadata but never consulted by any CORS
@@ -528,5 +539,4 @@ See [MCP Gateway](mcp-gateway.md) for the full design, the `tools/list` / `tools
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `subscription-group` | — | Subscription group for SSE/WebSocket services. |
 | `allow-subscriptions` | `false` | Enable subscription functionality. |

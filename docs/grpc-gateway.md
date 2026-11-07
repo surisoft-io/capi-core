@@ -58,7 +58,7 @@ curl -X PUT http://localhost:8500/v1/agent/service/register \
 | `group` | Service group (e.g., `dev`, `prod`). Combined with service name for routing. |
 | `scheme` | `http` for plaintext gRPC (h2c). `https` for TLS-encrypted gRPC. |
 | `root-context` | Typically `/` for gRPC services |
-| `secured` | Set to `true` to require OAuth2 token validation |
+| `secured` | Set to `true` to require authorization: a valid token plus the service's `subscription-group` and/or `opa-rego` (with neither, every call is refused). `opa-rego` alone also protects the service. See [Authorization rules](security.md#authorization-rules). |
 
 ## Client usage
 

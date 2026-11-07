@@ -1,6 +1,8 @@
 package io.surisoft.capi.undertow;
 
 import io.surisoft.capi.exception.AuthorizationException;
+import io.surisoft.capi.oidc.AccessGate;
+import io.surisoft.capi.service.OpaWasmService;
 import io.surisoft.capi.schema.GrpcClient;
 import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.HttpUtils;
@@ -23,10 +25,12 @@ public class GrpcGateway {
     /** gRPC status codes (google.rpc.Code): 16 UNAUTHENTICATED, 7 PERMISSION_DENIED. */
     private static final int GRPC_STATUS_UNAUTHENTICATED = 16;
     private static final int GRPC_STATUS_PERMISSION_DENIED = 7;
+    private static final int GRPC_STATUS_UNAVAILABLE = 14;
     private final int grpcPort;
     private final Map<String, GrpcClient> grpcClients;
     private final SSLContext sslContext;
     private HttpUtils httpUtils;
+    private OpaWasmService opaWasmService;
     private Undertow server;
 
     public GrpcGateway(int grpcPort,
@@ -44,6 +48,11 @@ public class GrpcGateway {
      */
     public void setHttpUtils(HttpUtils httpUtils) {
         this.httpUtils = httpUtils;
+    }
+
+    /** OPA engine for services with {@code opa-rego}. Absent = those services are refused. */
+    public void setOpaWasmService(OpaWasmService opaWasmService) {
+        this.opaWasmService = opaWasmService;
     }
 
     /**
@@ -114,30 +123,34 @@ public class GrpcGateway {
 
             GrpcClient grpcClient = grpcClients.get(grpcClientId);
 
-            // REST and WebSocket both gate `secured` services; this listener dispatched straight to
-            // the backend, so any client that could reach the port could invoke RPC methods on
-            // internal microservices. The subscription check mirrors the WebSocket gateway.
-            if (grpcClient.requiresSubscription()) {
-                if (httpUtils == null) {
-                    log.error("gRPC service {} is secured but no token validator is configured; refusing", serviceHeader);
-                    sendGrpcStatus(httpServerExchange, GRPC_STATUS_UNAUTHENTICATED, "Authorization not available");
-                    return;
+            // The shared access gate (AccessGate), as on the REST and WebSocket listeners.
+            if (AccessGate.requiresAuthorization(grpcClient.requiresSubscription(), false, false, grpcClient.getOpaRego())) {
+                String accessToken = null;
+                if (httpUtils != null) {
+                    try {
+                        accessToken = httpUtils.processAuthorizationAccessToken(httpServerExchange);
+                    } catch (AuthorizationException e) {
+                        sendGrpcStatus(httpServerExchange, GRPC_STATUS_UNAUTHENTICATED, "Invalid authorization");
+                        return;
+                    }
                 }
-                String accessToken;
-                try {
-                    accessToken = httpUtils.processAuthorizationAccessToken(httpServerExchange);
-                } catch (AuthorizationException e) {
-                    sendGrpcStatus(httpServerExchange, GRPC_STATUS_UNAUTHENTICATED, "Invalid authorization");
-                    return;
-                }
-                if (accessToken == null) {
-                    sendGrpcStatus(httpServerExchange, GRPC_STATUS_UNAUTHENTICATED, "Authorization required");
-                    return;
-                }
-                if (!httpUtils.isAuthorized(accessToken, grpcClient.getSubscriptionRole())) {
-                    log.debug("gRPC call to {} denied: token not in subscription group", serviceHeader);
-                    sendGrpcStatus(httpServerExchange, GRPC_STATUS_PERMISSION_DENIED, "Not subscribed");
-                    return;
+                AccessGate.Decision decision = new AccessGate(httpUtils, opaWasmService).authorize(
+                        grpcClient.getCanonicalServiceId(), grpcClient.getSubscriptionRole(), grpcClient.getOpaRego(), accessToken);
+                switch (decision.outcome()) {
+                    case ALLOWED -> { }
+                    case UNAUTHENTICATED -> {
+                        sendGrpcStatus(httpServerExchange, GRPC_STATUS_UNAUTHENTICATED, decision.message());
+                        return;
+                    }
+                    case FORBIDDEN -> {
+                        log.debug("gRPC call to {} denied: {}", serviceHeader, decision.message());
+                        sendGrpcStatus(httpServerExchange, GRPC_STATUS_PERMISSION_DENIED, decision.message());
+                        return;
+                    }
+                    case POLICY_UNAVAILABLE -> {
+                        sendGrpcStatus(httpServerExchange, GRPC_STATUS_UNAVAILABLE, decision.message());
+                        return;
+                    }
                 }
             }
 

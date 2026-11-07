@@ -1,7 +1,10 @@
 package io.surisoft.capi.undertow;
 
 import io.surisoft.capi.exception.CapiUndertowException;
-import io.surisoft.capi.oidc.WebsocketAuthorization;
+import io.surisoft.capi.exception.AuthorizationException;
+import io.surisoft.capi.oidc.AccessGate;
+import io.surisoft.capi.service.OpaWasmService;
+import io.surisoft.capi.utils.HttpUtils;
 import io.surisoft.capi.schema.WebsocketClient;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -32,7 +35,8 @@ public class WebsocketGateway {
     private final int port;
     private final int ioThreads;
     private final Map<String, WebsocketClient> webSocketClients;
-    private WebsocketAuthorization websocketAuthorization;
+    private HttpUtils httpUtils;
+    private OpaWasmService opaWasmService;
     private final WebsocketUtils websocketUtils;
     private final SSLContext sslContext;
     //private final Optional<CapiUndertowTracer> capiUndertowTracer;
@@ -68,11 +72,6 @@ public class WebsocketGateway {
     }
 
     public void runProxy() {
-        try {
-            websocketAuthorization = websocketUtils.createWebsocketAuthorization();
-        } catch (CapiUndertowException e) {
-            log.warn(e.getMessage());
-        }
 
         Undertow.Builder builder = Undertow.builder()
                 .setIoThreads(ioThreads);
@@ -116,28 +115,16 @@ public class WebsocketGateway {
                                         return;
                                     }
                                     if (httpServerExchange.getProtocol().equals(Constants.PROTOCOL_HTTP)) {
-                                        if (websocketAuthorization != null) {
-                                            if (websocketAuthorization.isAuthorized(websocketClient, httpServerExchange)) {
-                                                log.debug(ErrorMessage.IS_AUTHORIZED, httpServerExchange.getRequestPath());
-                                                httpServerExchange.setRequestURI(websocketUtils.normalizePathForForwarding(websocketClient, requestPath));
-                                                httpServerExchange.setRelativePath(websocketUtils.normalizePathForForwarding(websocketClient, requestPath));
-                                                websocketClient.getHttpHandler().handleRequest(httpServerExchange);
-                                            } else {
-                                                log.debug(ErrorMessage.IS_NOT_AUTHORIZED, httpServerExchange.getRequestPath());
-                                                httpServerExchange.setStatusCode(Constants.FORBIDDEN_CODE);
-                                                httpServerExchange.endExchange();
-                                            }
+                                        int refusal = authorize(websocketClient, httpServerExchange);
+                                        if (refusal == 0) {
+                                            log.debug(ErrorMessage.IS_AUTHORIZED, httpServerExchange.getRequestPath());
+                                            httpServerExchange.setRequestURI(websocketUtils.normalizePathForForwarding(websocketClient, requestPath));
+                                            httpServerExchange.setRelativePath(websocketUtils.normalizePathForForwarding(websocketClient, requestPath));
+                                            websocketClient.getHttpHandler().handleRequest(httpServerExchange);
                                         } else {
-                                            if (!websocketClient.requiresSubscription()) {
-                                                log.debug(ErrorMessage.IS_AUTHORIZED, httpServerExchange.getRequestPath());
-                                                httpServerExchange.setRequestURI(websocketUtils.normalizePathForForwarding(websocketClient, requestPath));
-                                                httpServerExchange.setRelativePath(websocketUtils.normalizePathForForwarding(websocketClient, requestPath));
-                                                websocketClient.getHttpHandler().handleRequest(httpServerExchange);
-                                            } else {
-                                                log.debug(ErrorMessage.IS_NOT_AUTHORIZED, httpServerExchange.getRequestPath());
-                                                httpServerExchange.setStatusCode(Constants.FORBIDDEN_CODE);
-                                                httpServerExchange.endExchange();
-                                            }
+                                            log.debug(ErrorMessage.IS_NOT_AUTHORIZED, httpServerExchange.getRequestPath());
+                                            httpServerExchange.setStatusCode(refusal);
+                                            httpServerExchange.endExchange();
                                         }
                                     }
                                 }
@@ -211,6 +198,72 @@ public class WebsocketGateway {
     }
 
     /** Origins allowed to open a WebSocket. Shares the CORS allowlist. */
+    /** Token verification for protected services. Absent = every protected upgrade is refused. */
+    public void setHttpUtils(@Nullable HttpUtils httpUtils) {
+        this.httpUtils = httpUtils;
+    }
+
+    /** OPA engine for services with {@code opa-rego}. Absent = those services are refused. */
+    public void setOpaWasmService(@Nullable OpaWasmService opaWasmService) {
+        this.opaWasmService = opaWasmService;
+    }
+
+    /**
+     * The shared access gate ({@link AccessGate}) at the upgrade request. Returns 0 to proceed, or
+     * the status to refuse with: 401 no or invalid token, 403 refused, 503 policy engine not ready.
+     *
+     * <p>Browsers cannot set headers on a WebSocket upgrade, so the {@code access_token} query
+     * parameter is always accepted here, and stripped before the upgrade is forwarded.
+     */
+    int authorize(WebsocketClient websocketClient, HttpServerExchange exchange) {
+        if (!AccessGate.requiresAuthorization(websocketClient.requiresSubscription(), false, false,
+                websocketClient.getOpaRego())) {
+            return 0;
+        }
+        String accessToken = null;
+        if (httpUtils != null) {
+            try {
+                accessToken = httpUtils.processAuthorizationAccessToken(exchange);
+            } catch (AuthorizationException e) {
+                return Constants.UNAUTHORIZED_CODE;
+            }
+        }
+        java.util.Deque<String> queryToken = exchange.getQueryParameters().get(Constants.AUTHORIZATION_REQUEST_PARAMETER);
+        if (queryToken != null && !queryToken.isEmpty()) {
+            if (accessToken == null) {
+                accessToken = queryToken.getFirst();
+            }
+            removeTokenFromQuery(exchange);
+        }
+        AccessGate.Decision decision = new AccessGate(httpUtils, opaWasmService).authorize(
+                websocketClient.getCanonicalServiceId(), websocketClient.getSubscriptionRole(),
+                websocketClient.getOpaRego(), accessToken);
+        return switch (decision.outcome()) {
+            case ALLOWED -> 0;
+            case UNAUTHENTICATED -> Constants.UNAUTHORIZED_CODE;
+            case FORBIDDEN -> Constants.FORBIDDEN_CODE;
+            case POLICY_UNAVAILABLE -> 503;
+        };
+    }
+
+    private static void removeTokenFromQuery(HttpServerExchange exchange) {
+        StringBuilder query = new StringBuilder();
+        exchange.getQueryParameters().forEach((key, values) -> {
+            if (!key.equals(Constants.AUTHORIZATION_REQUEST_PARAMETER)) {
+                for (String value : values) {
+                    if (!query.isEmpty()) {
+                        query.append('&');
+                    }
+                    query.append(java.net.URLEncoder.encode(key, java.nio.charset.StandardCharsets.UTF_8))
+                            .append('=')
+                            .append(java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8));
+                }
+            }
+        });
+        exchange.getQueryParameters().remove(Constants.AUTHORIZATION_REQUEST_PARAMETER);
+        exchange.setQueryString(query.toString());
+    }
+
     public void setCorsPolicy(@Nullable CorsPolicy corsPolicy) {
         this.corsPolicy = corsPolicy != null ? corsPolicy : CorsPolicy.denyAll();
     }

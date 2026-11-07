@@ -56,4 +56,14 @@ public final class TestJwts {
                 .expirationTime(new Date(System.currentTimeMillis() + secondsFromNow * 1000))
                 .build());
     }
+
+    /** Like {@link #token}, carrying {@code groups} in the {@code subscriptions} claim. */
+    public static String tokenWithSubscriptions(RSAKey key, String subject, long secondsFromNow, String... groups) {
+        return sign(key, new JWTClaimsSet.Builder()
+                .subject(subject)
+                .issuer("http://keycloak/realms/test")
+                .expirationTime(new Date(System.currentTimeMillis() + secondsFromNow * 1000))
+                .claim("subscriptions", java.util.List.of(groups))
+                .build());
+    }
 }

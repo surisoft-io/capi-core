@@ -161,13 +161,13 @@ class AdminNodeRegistrationTest {
         CAPIConfiguration.HostConfig host = new CAPIConfiguration.HostConfig();
         host.setEndpoint("http://127.0.0.1:" + consul.getAddress().getPort());
         AdminNodeRegistration withMeta = new AdminNodeRegistration(host, HttpClient::newHttpClient,
-                "capi-admin-ext-capi1", "ext", "2.25", "10.1.2.3", 8381, "https", 8390,
+                "capi-admin-prod-node1", "prod", "2.25", "10.1.2.3", 8381, "https", 8390,
                 java.util.Map.of("group", "ops", "owner", "platform"));
         withMeta.heartbeat();
         JsonNode meta = JSON.readTree(registrationBody).path("Meta");
         assertEquals("ops", meta.path("group").asText());
         assertEquals("platform", meta.path("owner").asText());
-        assertEquals("ext", meta.path("capi-cluster").asText());
+        assertEquals("prod", meta.path("capi-cluster").asText());
         assertEquals("8390", meta.path("mcp-port").asText());
     }
 
@@ -176,7 +176,7 @@ class AdminNodeRegistrationTest {
         CAPIConfiguration.HostConfig host = new CAPIConfiguration.HostConfig();
         host.setEndpoint("http://127.0.0.1:1");
         IllegalStateException e = assertThrows(IllegalStateException.class, () -> new AdminNodeRegistration(
-                host, HttpClient::newHttpClient, "id", "ext", "2.25", "10.1.2.3", 8381, "https", 8390,
+                host, HttpClient::newHttpClient, "id", "prod", "2.25", "10.1.2.3", 8381, "https", 8390,
                 java.util.Map.of("capi-cluster", "someone-elses")));
         assertTrue(e.getMessage().contains("capi-cluster"), e.getMessage());
     }
@@ -192,7 +192,7 @@ class AdminNodeRegistrationTest {
         host.setEndpoint("http://127.0.0.1:" + consul.getAddress().getPort());
         java.util.concurrent.atomic.AtomicReference<HttpClient> shared = new java.util.concurrent.atomic.AtomicReference<>(HttpClient.newHttpClient());
         AdminNodeRegistration reg = new AdminNodeRegistration(host, shared::get,
-                "capi-admin-ext-capi1", "ext", "2.25", "10.1.2.3", 8381, "https", 8390);
+                "capi-admin-prod-node1", "prod", "2.25", "10.1.2.3", 8381, "https", 8390);
         reg.heartbeat();
         assertTrue(calls.contains("PUT /v1/agent/service/register"));
 
@@ -210,7 +210,7 @@ class AdminNodeRegistrationTest {
 
         calls.clear();
         reg.heartbeat();
-        assertEquals(List.of("PUT /v1/agent/check/pass/service:capi-admin-ext-capi1"), calls,
+        assertEquals(List.of("PUT /v1/agent/check/pass/service:capi-admin-prod-node1"), calls,
                 "the heartbeat must use the CURRENT shared client, not the one captured at startup");
     }
 

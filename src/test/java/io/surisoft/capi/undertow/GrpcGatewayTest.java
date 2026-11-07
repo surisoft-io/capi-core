@@ -82,7 +82,9 @@ class GrpcGatewayTest {
 
         io.surisoft.capi.utils.HttpUtils httpUtils = mock(io.surisoft.capi.utils.HttpUtils.class);
         when(httpUtils.processAuthorizationAccessToken(any(io.undertow.server.HttpServerExchange.class))).thenReturn("tok");
-        when(httpUtils.isAuthorized("tok", "grpc-group")).thenReturn(false);
+        com.nimbusds.jwt.JWTClaimsSet claims = new com.nimbusds.jwt.JWTClaimsSet.Builder().subject("u").build();
+        when(httpUtils.authorizeRequest("tok")).thenReturn(claims);
+        when(httpUtils.isInSubscriptionGroup(claims, "grpc-group")).thenReturn(false);
 
         GrpcGateway gateway = new GrpcGateway(TEST_PORT + 21, clients, null);
         gateway.setHttpUtils(httpUtils);
@@ -104,7 +106,9 @@ class GrpcGatewayTest {
 
         io.surisoft.capi.utils.HttpUtils httpUtils = mock(io.surisoft.capi.utils.HttpUtils.class);
         when(httpUtils.processAuthorizationAccessToken(any(io.undertow.server.HttpServerExchange.class))).thenReturn("tok");
-        when(httpUtils.isAuthorized("tok", "grpc-group")).thenReturn(true);
+        com.nimbusds.jwt.JWTClaimsSet claims = new com.nimbusds.jwt.JWTClaimsSet.Builder().subject("u").build();
+        when(httpUtils.authorizeRequest("tok")).thenReturn(claims);
+        when(httpUtils.isInSubscriptionGroup(claims, "grpc-group")).thenReturn(true);
 
         GrpcGateway gateway = new GrpcGateway(TEST_PORT + 22, clients, null);
         gateway.setHttpUtils(httpUtils);
@@ -266,5 +270,75 @@ class GrpcGatewayTest {
         GrpcGateway gateway = new GrpcGateway(TEST_PORT + 5, clients, null);
         // Never called runProxy, so server is null
         assertDoesNotThrow(gateway::stop);
+    }
+
+    // ---- Shared access gate: opa-rego on gRPC ----
+
+    private static GrpcClient policyClient(java.util.List<String> reachedBackend) {
+        GrpcClient client = new GrpcClient();
+        client.setServiceId("/greeter");
+        client.setCanonicalServiceId("greeter:v1");
+        client.setRequiresSubscription(false);     // not secured: the policy alone keeps it protected
+        client.setOpaRego("capi/greeter");
+        client.setHttpHandler(exchange -> {
+            reachedBackend.add(exchange.getRequestPath());
+            exchange.setStatusCode(200);
+            exchange.endExchange();
+        });
+        return client;
+    }
+
+    @Test
+    void policyOnlyService_isGated_andAnUnreadyEngineIsUnavailable() throws Exception {
+        java.util.List<String> reachedBackend = new java.util.concurrent.CopyOnWriteArrayList<>();
+        Map<String, GrpcClient> clients = new ConcurrentHashMap<>();
+        clients.put("/greeter", policyClient(reachedBackend));
+        com.nimbusds.jose.jwk.RSAKey trusted = io.surisoft.capi.utils.TestJwts.newKey();
+        io.surisoft.capi.service.OpaWasmService opa = mock(io.surisoft.capi.service.OpaWasmService.class);
+        when(opa.isReady()).thenReturn(false);
+        when(opa.hasPolicy("capi/greeter")).thenReturn(true);
+        io.surisoft.capi.schema.OpaResult allow = new io.surisoft.capi.schema.OpaResult();
+        allow.setResult(true);
+        when(opa.evaluate(eq("greeter:v1"), eq("capi/greeter"), anyString(), eq(true))).thenReturn(allow);
+
+        int port = io.surisoft.capi.TestPorts.next();
+        GrpcGateway gateway = new GrpcGateway(port, clients, null);
+        gateway.setHttpUtils(new io.surisoft.capi.utils.HttpUtils(null,
+                java.util.List.of(io.surisoft.capi.utils.TestJwts.processorFor(trusted))));
+        gateway.setOpaWasmService(opa);
+        gateway.runProxy();
+        try {
+            String bearer = "Bearer " + io.surisoft.capi.utils.TestJwts.token(trusted, "user-1", 300);
+            assertEquals("16", callGrpc(port, null).headers().firstValue("grpc-status").orElse(null));
+            assertEquals("14", callGrpc(port, bearer).headers().firstValue("grpc-status").orElse(null)); // UNAVAILABLE
+            assertTrue(reachedBackend.isEmpty());
+
+            when(opa.isReady()).thenReturn(true);
+            callGrpc(port, bearer);
+            assertEquals(1, reachedBackend.size());
+        } finally {
+            gateway.stop();
+        }
+    }
+
+    @Test
+    void policyOnlyService_withOpaDisabled_isPermissionDenied() throws Exception {
+        java.util.List<String> reachedBackend = new java.util.concurrent.CopyOnWriteArrayList<>();
+        Map<String, GrpcClient> clients = new ConcurrentHashMap<>();
+        clients.put("/greeter", policyClient(reachedBackend));
+        com.nimbusds.jose.jwk.RSAKey trusted = io.surisoft.capi.utils.TestJwts.newKey();
+
+        int port = io.surisoft.capi.TestPorts.next();
+        GrpcGateway gateway = new GrpcGateway(port, clients, null);
+        gateway.setHttpUtils(new io.surisoft.capi.utils.HttpUtils(null,
+                java.util.List.of(io.surisoft.capi.utils.TestJwts.processorFor(trusted))));
+        gateway.runProxy();
+        try {
+            String bearer = "Bearer " + io.surisoft.capi.utils.TestJwts.token(trusted, "user-1", 300);
+            assertEquals("7", callGrpc(port, bearer).headers().firstValue("grpc-status").orElse(null));
+            assertTrue(reachedBackend.isEmpty());
+        } finally {
+            gateway.stop();
+        }
     }
 }

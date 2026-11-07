@@ -2,9 +2,54 @@
 
 CAPI supports two complementary authorization mechanisms: **OAuth2/OIDC** for token validation and **OPA (Open Policy Agent)** for fine-grained policy decisions. Both can be used independently or together.
 
+## Authorization rules
+
+The REST, WebSocket and gRPC listeners share one authorization gate, so a service is protected the
+same way whichever listener reaches it. (WebDAV has its own; see [WebDAV Gateway](webdav-gateway.md).)
+The gate answers two questions.
+
+### 1. Does this call need authorizing?
+
+| `secured` | OpenAPI spec (`open-api`) | `opa-rego` | Which calls |
+|---|---|---|---|
+| `true` | any | any | **Every call.** The spec's security requirements are ignored. |
+| `false` | none | none | None — anonymous. |
+| `false` | none | set | **Every call.** A policy is never dropped because `secured` was left false. |
+| `false` | declared | any | Only the operations the spec protects; the others are anonymous. |
+
+An operation is protected when it has a `security` requirement — its own or, when it declares none,
+the spec's global `security`. `security: []` on an operation, or a requirement list containing an
+empty object `{}` (OpenAPI's "authentication optional"), makes it anonymous. A path or method the spec
+does not declare is refused with `400`. A service whose declared spec is not loaded is refused with
+`503` rather than treated as having no spec.
+
+### 2. Is this caller allowed?
+
+1. A token must be present and verify — signature and expiry, against `oauth2.keys`. Otherwise **`401`**.
+2. **Every rule the service declares must pass**:
+   - `subscription-group` — the token's **`subscriptions` claim** must contain the group. Realm roles
+     (`realm_access.roles`) are not consulted.
+   - `opa-rego` — the policy must allow the call. OPA disabled, or a policy the bundle does not
+     declare, is a refusal; a bundle not loaded yet is `503` with `Retry-After: 1`. An OPA policy
+     never falls through to a weaker check.
+3. **A service declaring neither `subscription-group` nor `opa-rego` refuses every protected call**
+   with `403`, even with a valid token: there is nothing to authorize the caller against.
+
+A refused caller gets **`403`**. On the gRPC listener the same outcomes are `grpc-status` 16
+(UNAUTHENTICATED), 7 (PERMISSION_DENIED) and 14 (UNAVAILABLE).
+
+**API keys.** On a service with `apiKey` enabled, a valid key stands in for the token when the
+service is `secured` and declares no `opa-rego`. It never satisfies a policy (there are no claims to
+evaluate), nor an operation the spec protects on a service that is not `secured`.
+
+> **Changed in 2.25.1.** See the release notes: a `secured` service with neither group nor policy now
+> refuses every call; realm roles no longer count as group membership; a missing or invalid token is
+> `401` (it was `403` on the subscription and OPA checks); and the WebSocket and gRPC listeners now
+> enforce `opa-rego`.
+
 ## OAuth2 / OIDC
 
-When a service declares `"secured": "true"` in its Consul metadata, CAPI validates the Bearer token on every request before proxying to the backend.
+When a call needs authorizing (see [Authorization rules](#authorization-rules)), CAPI validates the Bearer token before proxying to the backend.
 
 ### Configuration
 
@@ -29,8 +74,8 @@ capi:
 1. Client sends a request with `Authorization: Bearer <token>` header
 2. CAPI validates the JWT signature against the configured JWKS endpoints
 3. CAPI checks token expiration
-4. If valid, the request is proxied to the backend
-5. If invalid or missing, CAPI returns `401 Unauthorized`
+4. If missing or invalid, CAPI returns `401 Unauthorized`
+5. If valid, the service's `subscription-group` and `opa-rego` are checked; a refusal is `403 Forbidden`
 
 ### Token Sources
 
@@ -112,6 +157,10 @@ curl -X PUT http://localhost:8500/v1/agent/service/register \
   }'
 ```
 
+`opa-rego` protects the service even when `secured` is false: without an OpenAPI spec every call is
+authorized, with one only the operations the spec protects. Add `subscription-group` as well and the
+caller must pass both.
+
 CAPI evaluates the `capi/order_policy` entrypoint from the loaded Wasm bundle. The bundle must
 declare an entrypoint at `<opa-rego>/allow`; a service naming a policy the bundle does not declare is
 rejected with `403 Unknown policy`.
@@ -167,14 +216,16 @@ pool (`wasmPoolSize`) that grows under load and self-heals if an evaluation fail
 ### Authorization Flow
 
 1. Client sends a request with a Bearer token
-2. CAPI extracts the token — **no token is `403`**, the OPA path does not skip authentication
-3. If the policy engine has no bundle loaded yet, CAPI returns **`503` with `Retry-After: 1`**
+2. CAPI extracts the token — **no token is `401`**, the OPA path does not skip authentication
+3. CAPI **verifies the JWT signature and expiry** before trusting any decoded claim — **`401 Invalid
+   authentication`** if it does not verify. OPA never sees an unverified token.
+4. If the service also declares a `subscription-group`, the token must be in it — **`403 Not subscribed`**
+5. OPA disabled on this CAPI — **`403 Policy engine not enabled`**
+6. If the policy engine has no bundle loaded yet, CAPI returns **`503` with `Retry-After: 1`**
    rather than falling back to a weaker check
-4. A service naming a policy the bundle does not declare is rejected with **`403 Unknown policy`**
-5. CAPI **verifies the JWT signature** before trusting any decoded claim, and returns `403 Invalid
-   token signature` if it does not verify
-6. The policy is evaluated in-process and returns allow/deny
-7. Allowed requests are proxied; denied requests get **`403 Access denied by policy`**
+7. A service naming a policy the bundle does not declare is rejected with **`403 Unknown policy`**
+8. The policy is evaluated in-process and returns allow/deny
+9. Allowed requests are proxied; denied requests get **`403 Access denied by policy`**
 
 ## SSL / TLS
 
@@ -386,24 +437,25 @@ capi:
 
 ## gRPC
 
-The gRPC listener routes by the `x-capi-service` header. A service registered with `secured: "true"`
-now requires a valid token whose `subscriptions` claim contains its `subscriptionGroup`, matching the
-REST and WebSocket gateways. Until 2026-09-29 this listener dispatched straight to the backend, so any
-client that could reach the port could invoke RPC methods on internal services.
+The gRPC listener routes by the `x-capi-service` header and applies the same
+[authorization rules](#authorization-rules) as REST and WebSocket: `secured` and `opa-rego` protect a
+service, and the caller must pass its `subscription-group` and its policy. (There is no OpenAPI spec
+on this listener.) Until 2026-09-29 this listener dispatched straight to the backend; until 2.25.1 it
+ignored `opa-rego`.
 
 Refusals use gRPC semantics rather than HTTP status codes, because a gRPC client reads `grpc-status`
 and would surface a bare 401 as an opaque transport error:
 
 | Situation | Response |
 |---|---|
-| No token on a `secured` service | HTTP 200, `grpc-status: 16` (UNAUTHENTICATED) |
-| Token not in the subscription group | HTTP 200, `grpc-status: 7` (PERMISSION_DENIED) |
-| `oauth2` not configured, service `secured` | HTTP 200, `grpc-status: 16` — refused, not passed through |
+| No token, or a token that does not verify | HTTP 200, `grpc-status: 16` (UNAUTHENTICATED) |
+| Not in the subscription group, refused by the policy, or no rule declared | HTTP 200, `grpc-status: 7` (PERMISSION_DENIED) |
+| Policy engine not loaded yet | HTTP 200, `grpc-status: 14` (UNAVAILABLE) |
+| `oauth2` not configured, service protected | HTTP 200, `grpc-status: 16` — refused, not passed through |
 
-Services without `secured` are unaffected and still route without a token.
+Services with neither `secured` nor `opa-rego` are unaffected and still route without a token.
 
-> Note this listener still has **no OPA, throttle or request-time watchdog**. Only the subscription
-> gate is applied. Treat the gRPC port as internal.
+> Note this listener still has **no throttle or request-time watchdog**. Treat the gRPC port as internal.
 
 ## CORS
 

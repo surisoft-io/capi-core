@@ -382,84 +382,6 @@ public class HttpUtils {
         return value;
     }
 
-    /** Outcome of an authorization decision, so "cannot decide" is distinguishable from "no". */
-    public enum AuthorizationOutcome {
-        ALLOWED,
-        DENIED,
-        /** The policy engine has no bundle loaded. Transient — the caller must not fall back. */
-        POLICY_UNAVAILABLE,
-        /** The service names a policy the loaded bundle does not declare. A config error. */
-        POLICY_UNKNOWN
-    }
-
-    /**
-     * Authorizes a request for a service, using its OPA policy when it declares one and the
-     * subscription claim otherwise.
-     *
-     * <p>Returns an outcome rather than a boolean because "denied" and "could not decide" need
-     * different answers. This previously returned {@code boolean} and, when a service declared an
-     * OPA policy the engine could not evaluate, silently fell through to the subscription check —
-     * so an OPA-governed service was authorized by group membership alone whenever the bundle
-     * server was down, the pool was still loading, or {@code opa-rego} named a policy the bundle
-     * did not declare. No error, no log: a request that should have been held succeeded against a
-     * weaker check than the operator configured.
-     *
-     * <p>The mapping now matches {@code RestGateway}'s main OPA gate exactly — 503 when the engine
-     * is unavailable, 403 for an unknown policy — so the two paths cannot disagree about what
-     * "OPA not ready" means.
-     *
-     * <p>The JWT signature is verified before the token is handed to OPA. The policy decides on
-     * decoded claims, so an unverified token would let a caller assert whatever claims it liked.
-     * The main gate has always done this; this path did not.
-     */
-    public AuthorizationOutcome authorize(String accessToken, String contextPath, Service service, OpaWasmService opaWasmService) {
-        try {
-            String opaRego = service.getServiceMeta() != null ? service.getServiceMeta().getOpaRego() : null;
-
-            if (opaRego == null) {
-                // No policy declared, so the subscription claim is the correct and only gate.
-                return isSubscribed(accessToken, contextPath, service) ? AuthorizationOutcome.ALLOWED : AuthorizationOutcome.DENIED;
-            }
-            if (opaWasmService == null || !opaWasmService.isReady()) {
-                return AuthorizationOutcome.POLICY_UNAVAILABLE;
-            }
-            if (!opaWasmService.hasPolicy(opaRego)) {
-                return AuthorizationOutcome.POLICY_UNKNOWN;
-            }
-            // Verify the signature before OPA sees the claims. A null result means no verifier is
-            // configured, which is a refusal, not a pass.
-            if (authorizeRequest(accessToken) == null) {
-                return AuthorizationOutcome.DENIED;
-            }
-
-            OpaResult opaResult = opaWasmService.evaluate(service.getId(), opaRego, accessToken, true);
-            return (opaResult != null && opaResult.isAllowed())
-                    ? AuthorizationOutcome.ALLOWED
-                    : AuthorizationOutcome.DENIED;
-        } catch (AuthorizationException | ParseException | IOException e) {
-            log.debug(e.getMessage());
-            return AuthorizationOutcome.DENIED;
-        }
-    }
-
-    private boolean isSubscribed(String accessToken, String contextPath, Service service)
-            throws AuthorizationException, ParseException, JsonProcessingException {
-        JWTClaimsSet jwtClaimsSet = authorizeRequest(accessToken);
-        if (jwtClaimsSet == null) {
-            // authorizeRequest returns null rather than throwing when no JWT processor is
-            // configured — oauth2 disabled, or no key set resolved at startup. There are no claims
-            // to check a subscription against, so this is a refusal. It used to dereference the
-            // null and throw NPE, which the caller turned into a 401 by accident rather than design.
-            log.debug("No JWT processor available to verify the token; refusing the subscription check");
-            return false;
-        }
-        if (isApiSubscribed(jwtClaimsSet, contextToRole(contextPath))) {
-            return true;
-        }
-        return isTokenInGroup(jwtClaimsSet, service.getServiceMeta() != null
-                ? service.getServiceMeta().getSubscriptionGroup() : null);
-    }
-
     /**
      * Whether the token verifies — signature, expiry and the other checks of the configured JWT
      * processors. False when it does not, and false when no processor is configured: a token nothing
@@ -488,17 +410,12 @@ public class HttpUtils {
         return true;
     }
 
-    private boolean isApiSubscribed(JWTClaimsSet jwtClaimsSet, String role) throws ParseException, JsonProcessingException {
-        Map<String, Object> claimSetMap = jwtClaimsSet.getJSONObjectClaim(Oauth2Constants.REALMS_CLAIM);
-        if(claimSetMap != null && claimSetMap.containsKey(Oauth2Constants.ROLES_CLAIM)) {
-            List<String> roleList = (List<String>) claimSetMap.get(Oauth2Constants.ROLES_CLAIM);
-            for(String claimRole : roleList) {
-                if(claimRole.equals(role)) {
-                    return true;
-                }
-            }
-        }
-        return false;
+    /**
+     * Whether verified claims carry one of {@code groups} (comma-separated) in the {@code subscriptions}
+     * claim. The only membership test the access gate uses: realm roles are not consulted.
+     */
+    public boolean isInSubscriptionGroup(JWTClaimsSet jwtClaimsSet, String groups) {
+        return jwtClaimsSet != null && isTokenInGroup(jwtClaimsSet, groups);
     }
 
     private boolean isTokenInGroup(JWTClaimsSet jwtClaimsSet, String groups) {

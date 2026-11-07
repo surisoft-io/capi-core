@@ -1,7 +1,6 @@
 package io.surisoft.capi.undertow;
 
 import io.surisoft.capi.exception.CapiUndertowException;
-import io.surisoft.capi.oidc.WebsocketAuthorization;
 import io.surisoft.capi.schema.WebsocketClient;
 import io.surisoft.capi.utils.Constants;
 import io.surisoft.capi.utils.WebsocketUtils;
@@ -408,7 +407,6 @@ class WebsocketGatewayTest {
     @Test
     void runProxy_healthEndpoint_returns200() throws Exception {
         int port = pickPort();
-        when(websocketUtils.createWebsocketAuthorization()).thenThrow(new CapiUndertowException("no oidc"));
 
         runningGateway = new WebsocketGateway(
                 port, 2, webSocketClients, websocketUtils, null,
@@ -429,7 +427,6 @@ class WebsocketGatewayTest {
     @Test
     void runProxy_unknownPath_returns404() throws Exception {
         int port = pickPort();
-        when(websocketUtils.createWebsocketAuthorization()).thenThrow(new CapiUndertowException("no oidc"));
         when(websocketUtils.getWebclientId("/unknown/path")).thenReturn("unknown-client");
 
         runningGateway = new WebsocketGateway(
@@ -451,7 +448,6 @@ class WebsocketGatewayTest {
     @Test
     void runProxy_knownPath_noAuth_noSubscription_forwards() throws Exception {
         int port = pickPort();
-        when(websocketUtils.createWebsocketAuthorization()).thenThrow(new CapiUndertowException("no oidc"));
 
         String clientKey = "/test/ws";
         String requestPath = "/capi/test/ws/extra";
@@ -489,7 +485,6 @@ class WebsocketGatewayTest {
     @Test
     void runProxy_blockedPath_returns404AndNeverForwards() throws Exception {
         int port = pickPort();
-        when(websocketUtils.createWebsocketAuthorization()).thenThrow(new CapiUndertowException("no oidc"));
 
         String clientKey = "/test/ws";
         when(websocketUtils.getWebclientId(anyString())).thenReturn(clientKey);
@@ -533,7 +528,6 @@ class WebsocketGatewayTest {
     @Test
     void runProxy_knownPath_noAuth_requiresSubscription_returns403() throws Exception {
         int port = pickPort();
-        when(websocketUtils.createWebsocketAuthorization()).thenThrow(new CapiUndertowException("no oidc"));
 
         String clientKey = "/test/ws";
         String requestPath = "/capi/test/ws/data";
@@ -566,15 +560,14 @@ class WebsocketGatewayTest {
     }
 
     @Test
-    void runProxy_createsWebsocketAuthorization_exception() throws Exception {
+    void runProxy_withoutTokenVerification_stillServesHealth() throws Exception {
         int port = pickPort();
-        when(websocketUtils.createWebsocketAuthorization()).thenThrow(new CapiUndertowException("no oidc provider"));
 
         runningGateway = new WebsocketGateway(
                 port, 2, webSocketClients, websocketUtils, null,
                 accessControlAllowHeaders, null
         );
-        // Should not throw even though createWebsocketAuthorization fails
+        // No HttpUtils / OPA wired: protected services are refused, the listener still starts.
         assertDoesNotThrow(() -> runningGateway.runProxy());
 
         // Verify it still works (health endpoint)
@@ -590,7 +583,6 @@ class WebsocketGatewayTest {
     @Test
     void runProxy_bluecoatHeaderIsRemoved() throws Exception {
         int port = pickPort();
-        when(websocketUtils.createWebsocketAuthorization()).thenThrow(new CapiUndertowException("no oidc"));
 
         runningGateway = new WebsocketGateway(
                 port, 2, webSocketClients, websocketUtils, null,
@@ -614,7 +606,6 @@ class WebsocketGatewayTest {
     @Test
     void runProxy_optionsRequest_knownPath_returnsCorsHeaders() throws Exception {
         int port = pickPort();
-        when(websocketUtils.createWebsocketAuthorization()).thenThrow(new CapiUndertowException("no oidc"));
         io.surisoft.capi.configuration.CAPIConfiguration.Websocket wsConfig = new io.surisoft.capi.configuration.CAPIConfiguration.Websocket();
         wsConfig.setContextPath("/ws/*");
         WebsocketUtils realUtils = new WebsocketUtils(wsConfig, null, null);
@@ -663,7 +654,6 @@ class WebsocketGatewayTest {
     @Test
     void runProxy_xForwardedForHeader_doesNotThrow() throws Exception {
         int port = pickPort();
-        when(websocketUtils.createWebsocketAuthorization()).thenThrow(new CapiUndertowException("no oidc"));
 
         runningGateway = new WebsocketGateway(
                 port, 2, webSocketClients, websocketUtils, null,
@@ -686,7 +676,6 @@ class WebsocketGatewayTest {
     @Test
     void runProxy_stopAfterStart_stopsCleanly() throws Exception {
         int port = pickPort();
-        when(websocketUtils.createWebsocketAuthorization()).thenThrow(new CapiUndertowException("no oidc"));
 
         runningGateway = new WebsocketGateway(
                 port, 2, webSocketClients, websocketUtils, null,
@@ -711,7 +700,6 @@ class WebsocketGatewayTest {
     @Test
     void runProxy_optionsRequest_withoutOauth2Cookie_returnsCors() throws Exception {
         int port = pickPort();
-        when(websocketUtils.createWebsocketAuthorization()).thenThrow(new CapiUndertowException("no oidc"));
         io.surisoft.capi.configuration.CAPIConfiguration.Websocket wsConfig = new io.surisoft.capi.configuration.CAPIConfiguration.Websocket();
         wsConfig.setContextPath("/ws/*");
         WebsocketUtils realUtils = new WebsocketUtils(wsConfig, null, null);
@@ -756,7 +744,6 @@ class WebsocketGatewayTest {
     @Test
     void runProxy_bluecoatHeaderRemoved_thenNotFound() throws Exception {
         int port = pickPort();
-        when(websocketUtils.createWebsocketAuthorization()).thenThrow(new CapiUndertowException("no oidc"));
         when(websocketUtils.getWebclientId("/some/unknown/path")).thenReturn("missing-client");
 
         runningGateway = new WebsocketGateway(
@@ -774,5 +761,88 @@ class WebsocketGatewayTest {
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
         assertEquals(404, response.statusCode());
+    }
+
+    // ---- Shared access gate (AccessGate) on the upgrade request ----
+
+    /** A protected WebSocket service whose backend records the forwarded query string. */
+    private WebsocketClient gatedClient(String group, String rego, java.util.List<String> forwardedQueries) {
+        WebsocketClient wsClient = new WebsocketClient();
+        wsClient.setServiceId("test");
+        wsClient.setCanonicalServiceId("test:v1");
+        wsClient.setPath("/capi/test/ws");
+        wsClient.setRequiresSubscription(false);
+        wsClient.setSubscriptionRole(group);
+        wsClient.setOpaRego(rego);
+        wsClient.setHttpHandler(exchange -> {
+            forwardedQueries.add(exchange.getQueryString());
+            exchange.setStatusCode(200);
+            exchange.endExchange();
+        });
+        return wsClient;
+    }
+
+    private int upgradeStatus(int port, String pathAndQuery, String authorization) throws Exception {
+        HttpRequest.Builder request = HttpRequest.newBuilder().uri(URI.create("http://localhost:" + port + pathAndQuery)).GET();
+        if (authorization != null) {
+            request.header("Authorization", authorization);
+        }
+        return HttpClient.newHttpClient().send(request.build(), HttpResponse.BodyHandlers.ofString()).statusCode();
+    }
+
+    @Test
+    void policyOnUnsecuredService_staysProtected_andAQueryTokenIsAcceptedThenStripped() throws Exception {
+        int port = pickPort();
+        com.nimbusds.jose.jwk.RSAKey trusted = io.surisoft.capi.utils.TestJwts.newKey();
+        when(websocketUtils.getWebclientId(anyString())).thenReturn("/test/ws");
+        when(websocketUtils.normalizePathForForwarding(any(WebsocketClient.class), anyString())).thenReturn("/extra");
+        java.util.List<String> forwarded = new java.util.concurrent.CopyOnWriteArrayList<>();
+        webSocketClients.put("/test/ws", gatedClient(null, "capi/ws", forwarded));
+
+        io.surisoft.capi.service.OpaWasmService opa = mock(io.surisoft.capi.service.OpaWasmService.class);
+        when(opa.isReady()).thenReturn(true);
+        when(opa.hasPolicy("capi/ws")).thenReturn(true);
+        io.surisoft.capi.schema.OpaResult allow = new io.surisoft.capi.schema.OpaResult();
+        allow.setResult(true);
+        when(opa.evaluate(eq("test:v1"), eq("capi/ws"), anyString(), eq(true))).thenReturn(allow);
+
+        runningGateway = new WebsocketGateway(port, 2, webSocketClients, websocketUtils, null, accessControlAllowHeaders, null);
+        runningGateway.setHttpUtils(new io.surisoft.capi.utils.HttpUtils(null,
+                java.util.List.of(io.surisoft.capi.utils.TestJwts.processorFor(trusted))));
+        runningGateway.setOpaWasmService(opa);
+        runningGateway.runProxy();
+
+        assertEquals(401, upgradeStatus(port, "/capi/test/ws/extra", null));
+        String token = io.surisoft.capi.utils.TestJwts.token(trusted, "user-1", 300);
+        assertEquals(200, upgradeStatus(port, "/capi/test/ws/extra?room=a&access_token=" + token, null));
+        assertEquals(java.util.List.of("room=a"), forwarded, "the token must not be forwarded in the query");
+    }
+
+    @Test
+    void groupIsTheSubscriptionsClaim_andAMissingRuleRefuses() throws Exception {
+        int port = pickPort();
+        com.nimbusds.jose.jwk.RSAKey trusted = io.surisoft.capi.utils.TestJwts.newKey();
+        when(websocketUtils.getWebclientId(anyString())).thenReturn("/test/ws");
+        when(websocketUtils.normalizePathForForwarding(any(WebsocketClient.class), anyString())).thenReturn("/extra");
+        java.util.List<String> forwarded = new java.util.concurrent.CopyOnWriteArrayList<>();
+        WebsocketClient client = gatedClient("premium", null, forwarded);
+        client.setRequiresSubscription(true);
+        webSocketClients.put("/test/ws", client);
+
+        runningGateway = new WebsocketGateway(port, 2, webSocketClients, websocketUtils, null, accessControlAllowHeaders, null);
+        runningGateway.setHttpUtils(new io.surisoft.capi.utils.HttpUtils(null,
+                java.util.List.of(io.surisoft.capi.utils.TestJwts.processorFor(trusted))));
+        runningGateway.runProxy();
+
+        assertEquals(403, upgradeStatus(port, "/capi/test/ws/extra",
+                "Bearer " + io.surisoft.capi.utils.TestJwts.tokenWithSubscriptions(trusted, "u", 300, "basic")));
+        assertEquals(200, upgradeStatus(port, "/capi/test/ws/extra",
+                "Bearer " + io.surisoft.capi.utils.TestJwts.tokenWithSubscriptions(trusted, "u", 300, "premium")));
+
+        client.setSubscriptionRole(null);
+        assertEquals(403, upgradeStatus(port, "/capi/test/ws/extra",
+                "Bearer " + io.surisoft.capi.utils.TestJwts.tokenWithSubscriptions(trusted, "u", 300, "premium")),
+                "secured with neither group nor policy is refused");
+        assertEquals(1, forwarded.size());
     }
 }

@@ -1161,7 +1161,6 @@ class CAPIMainTest {
         when(mockStartup.getUndertowSslContext()).thenReturn(null);
 
         io.surisoft.capi.utils.WebsocketUtils mockWsUtils = mock(io.surisoft.capi.utils.WebsocketUtils.class);
-        when(mockWsUtils.createWebsocketAuthorization()).thenThrow(new RuntimeException("No OIDC configured"));
         when(mockStartup.getWebsocketUtils()).thenReturn(mockWsUtils);
 
         when(mockStartup.getOpaWasmService()).thenReturn(mock(io.surisoft.capi.service.OpaWasmService.class));

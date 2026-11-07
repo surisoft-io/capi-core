@@ -6,7 +6,6 @@ import io.surisoft.capi.configuration.CAPIConfiguration;
 import io.surisoft.capi.configuration.CapiSslContextHolder;
 import io.surisoft.capi.exception.HttpErrorHandler;
 import io.surisoft.capi.exception.CapiUndertowException;
-import io.surisoft.capi.oidc.WebsocketAuthorization;
 import io.surisoft.capi.schema.HttpProtocol;
 import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.schema.WebsocketClient;
@@ -101,13 +100,6 @@ public class WebsocketUtils {
         return builder.build();
     }
 
-    public WebsocketAuthorization createWebsocketAuthorization() throws CapiUndertowException {
-        if(defaultJWTProcessor != null && !defaultJWTProcessor.isEmpty()) {
-            return new WebsocketAuthorization(defaultJWTProcessor);
-        }
-        throw new CapiUndertowException("No OIDC provider enabled, consider enabling OIDC");
-    }
-
     public String normalizePathForForwarding(WebsocketClient websocketClient, String path) {
         String pathWithoutCapiContext = path.replaceFirst(websocketConfiguration.getContextPath(), "/");
         pathWithoutCapiContext = pathWithoutCapiContext.replaceAll(websocketClient.getServiceId(), "");
@@ -147,6 +139,8 @@ public class WebsocketUtils {
         websocketClient.setPath(websocketContext);
         websocketClient.setRequiresSubscription(service.getServiceMeta().isSecured());
         websocketClient.setSubscriptionRole(service.getServiceMeta().getSubscriptionGroup());
+        websocketClient.setOpaRego(service.getServiceMeta().getOpaRego());
+        websocketClient.setCanonicalServiceId(service.getId());
         websocketClient.setCorsPolicy(CorsPolicy.fromCsv(service.getServiceMeta().getAllowedOrigins()));
         websocketClient.setHttpHandler(createClientHttpHandler(websocketClient, service, null));
         return websocketClient;
