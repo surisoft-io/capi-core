@@ -14,6 +14,8 @@ public class GrpcClient {
     private HttpHandler httpHandler;
     private boolean requiresSubscription;
     private String subscriptionRole;
+    private String opaRego;
+    private String canonicalServiceId;
     private String rootContext;
 
     public String getPath() {
@@ -73,5 +75,23 @@ public class GrpcClient {
     }
     public void setRootContext(String rootContext) {
         this.rootContext = rootContext;
+    }
+
+    /** The service's {@code opa-rego} policy, evaluated by the access gate. */
+    public String getOpaRego() {
+        return opaRego;
+    }
+
+    public void setOpaRego(String opaRego) {
+        this.opaRego = opaRego;
+    }
+
+    /** {@code name:group} — handed to OPA as the service id, as on the REST listener. */
+    public String getCanonicalServiceId() {
+        return canonicalServiceId;
+    }
+
+    public void setCanonicalServiceId(String canonicalServiceId) {
+        this.canonicalServiceId = canonicalServiceId;
     }
 }

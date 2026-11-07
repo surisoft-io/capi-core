@@ -26,6 +26,12 @@ public class RestTransportHandler implements TransportHandler {
     private final OpaWasmService opaWasmService;
     private final int globalResponseTimeout;
     private final RestClientSnapshot restClientSnapshot;
+    /** Whether CAPI fetches OpenAPI specs at all (full running mode only). Default true: fail closed. */
+    private boolean fetchesOpenApiSpecs = true;
+
+    public void setFetchesOpenApiSpecs(boolean fetchesOpenApiSpecs) {
+        this.fetchesOpenApiSpecs = fetchesOpenApiSpecs;
+    }
 
     public RestTransportHandler(boolean enabled,
                                 Map<String, RestClient> restClientMap,
@@ -137,6 +143,9 @@ public class RestTransportHandler implements TransportHandler {
         if (service.getOpenAPI() != null) {
             restClient.setOpenAPI(service.getOpenAPI());
         }
+        String openApiEndpoint = service.getServiceMeta().getOpenApiEndpoint();
+        restClient.setOpenApiDeclared(service.getOpenAPI() != null
+                || (fetchesOpenApiSpecs && openApiEndpoint != null && !openApiEndpoint.isBlank()));
 
         WebsocketClient tempClient = new WebsocketClient();
         tempClient.setMappingList(service.getMappingList());

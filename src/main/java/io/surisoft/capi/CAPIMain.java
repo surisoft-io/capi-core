@@ -470,6 +470,8 @@ public class CAPIMain {
             websocketGateway.setEnforceOriginCheck(capiConfiguration.getWebsocket().isEnforceOriginCheck());
             websocketGateway.setMeterRegistry(startup.getPrometheusRegistry());
             websocketGateway.setPathBlocklist(pathBlocklist);
+            websocketGateway.setHttpUtils(startup.getHttpUtils());
+            websocketGateway.setOpaWasmService(startup.getOpaWasmService());
             websocketGateway.runProxy();
         }
         return websocketGateway;
@@ -485,6 +487,7 @@ public class CAPIMain {
                     startup.getUndertowSslContext()
             );
             gateway.setHttpUtils(startup.getHttpUtils());
+            gateway.setOpaWasmService(startup.getOpaWasmService());
             gateway.setMaxRequestSize(capiConfiguration.getGrpc().getMaxRequestSize());
             gateway.runProxy();
             return gateway;

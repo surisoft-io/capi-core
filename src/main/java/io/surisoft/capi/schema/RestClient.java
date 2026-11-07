@@ -22,6 +22,7 @@ public class RestClient {
     private boolean secured;
     private String subscriptionGroup;
     private String opaRego;
+    private boolean openApiDeclared;
     private boolean apiKeyEnabled;
 
     // Throttle
@@ -182,6 +183,20 @@ public class RestClient {
 
     public OpenAPI getOpenAPI() {
         return openAPI;
+    }
+
+    /**
+     * The service declares an OpenAPI spec that CAPI fetches ({@code open-api} meta, full running
+     * mode). Kept apart from {@link #getOpenAPI()} so that a declared spec that is not loaded is
+     * refused instead of being mistaken for a service without one — which, with {@code secured: false},
+     * would make every operation anonymous.
+     */
+    public boolean isOpenApiDeclared() {
+        return openApiDeclared;
+    }
+
+    public void setOpenApiDeclared(boolean openApiDeclared) {
+        this.openApiDeclared = openApiDeclared;
     }
 
     public void setOpenAPI(OpenAPI openAPI) {

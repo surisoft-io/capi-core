@@ -5,11 +5,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.surisoft.capi.exception.AuthorizationException;
 import io.surisoft.capi.exception.HttpErrorHandler;
 import io.surisoft.capi.metrics.OpenAPIDefinition;
+import io.surisoft.capi.oidc.AccessGate;
 import io.surisoft.capi.processor.ThrottleProcessor;
 import io.surisoft.capi.service.consul.ConsulCatalogService;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
-import io.surisoft.capi.schema.OpaResult;
 import io.surisoft.capi.schema.ApiKeyEntry;
 import io.surisoft.capi.schema.ApiKeyStoreEntry;
 import io.surisoft.capi.schema.RestClient;
@@ -70,6 +70,7 @@ public class RestGateway {
 
     @Nullable
     private OpaWasmService opaWasmService;
+    private volatile AccessGate accessGate;
     @Nullable
     private ThrottleProcessor throttleProcessor;
     @Nullable
@@ -214,6 +215,7 @@ public class RestGateway {
 
     public void setOpaWasmService(@Nullable OpaWasmService opaWasmService) {
         this.opaWasmService = opaWasmService;
+        this.accessGate = null;
     }
 
     /**
@@ -435,20 +437,25 @@ public class RestGateway {
 
             // --- Pre-proxy checks (all synchronous, fast, no I/O to backends) ---
 
-            // 0. OpenAPI operation validation — match against the API-facing path (root context
-            // stripped); the spec's paths are relative to servers.url, not the backend root context.
-            if (restClient.getOpenAPI() != null) {
-                String apiPath = stripToApiPath(restClient, requestPath);
-                GateRejection openApiResult = checkOpenApi(exchange, restClient, apiPath);
-                if (openApiResult != null) {
-                    if (openApiResult.statusCode() == 503) {
-                        // Same contract as the main OPA gate: transient, so tell a well-behaved
-                        // client to retry rather than letting it treat this as a hard refusal.
-                        exchange.getResponseHeaders().put(Headers.RETRY_AFTER, "1");
-                    }
-                    httpErrorHandler.sendError(exchange, openApiResult.statusCode(), openApiResult.message());
+            // --- Authorization: one gate, shared with the WebSocket and gRPC listeners (AccessGate) ---
+
+            // 0. OpenAPI operation matching. A declared spec that is not loaded is refused rather than
+            // treated as "no spec": with secured: false that would make every operation anonymous.
+            boolean openApiDeclared = restClient.isOpenApiDeclared() || restClient.getOpenAPI() != null;
+            boolean operationSecured = false;
+            if (openApiDeclared) {
+                OpenAPI spec = restClient.getOpenAPI();
+                if (spec == null) {
+                    exchange.getResponseHeaders().put(Headers.RETRY_AFTER, "1");
+                    httpErrorHandler.sendError(exchange, 503, "API definition not available");
                     return;
                 }
+                Operation operation = matchOperation(exchange, spec, stripToApiPath(restClient, requestPath));
+                if (operation == null) {
+                    httpErrorHandler.sendError(exchange, 400, "Call not allowed");
+                    return;
+                }
+                operationSecured = AccessGate.operationRequiresSecurity(spec, operation);
             }
 
             // 1. API Key check
@@ -460,59 +467,49 @@ public class RestGateway {
                     return;
                 }
                 // checkApiKey returns null for two reasons:
-                // (a) API key was valid — Authorization header removed (line 468)
+                // (a) API key was valid — Authorization header removed
                 // (b) Bearer token detected — fell through for OAuth2 to handle
                 // If the header was removed, the API key path succeeded.
                 apiKeyAuthenticated = !exchange.getRequestHeaders().contains(Constants.AUTHORIZATION_HEADER);
             }
 
-            // 3. OPA policy check
-            if (restClient.getOpaRego() != null) {
-                try {
-                    String accessToken = httpUtils.processAuthorizationAccessToken(exchange);
-                    if (accessToken == null) {
-                        httpErrorHandler.sendError(exchange, 403, "No authorization header provided");
+            // 2. Access gate
+            if (AccessGate.requiresAuthorization(restClient.isSecured(), openApiDeclared, operationSecured, restClient.getOpaRego())) {
+                if (apiKeyAuthenticated) {
+                    // A valid API key stands in for the token of a `secured` service. It cannot satisfy
+                    // a policy (there are no claims to evaluate) nor an operation the spec protects on a
+                    // service that is not `secured` — both refused, as before.
+                    if (!restClient.isSecured() || restClient.getOpaRego() != null) {
+                        httpErrorHandler.sendError(exchange, 403, "API key not accepted for this call");
                         return;
                     }
-
-                    if (opaWasmService == null || !opaWasmService.isReady()) {
-                        // Pool not loaded yet (cold start, bundle server unreachable,
-                        // bundle load threw). Transient — tell well-behaved clients to retry.
-                        exchange.getResponseHeaders().put(Headers.RETRY_AFTER, "1");
-                        httpErrorHandler.sendError(exchange, 503, "Policy engine not ready");
+                } else {
+                    String accessToken;
+                    try {
+                        accessToken = httpUtils.processAuthorizationAccessToken(exchange);
+                    } catch (AuthorizationException e) {
+                        httpErrorHandler.sendError(exchange, 401, e.getMessage());
                         return;
                     }
-                    if (!opaWasmService.hasPolicy(restClient.getOpaRego())) {
-                        // Service references a policy the bundle doesn't declare — config error,
-                        // not transient. Reject with a distinct status so retries don't paper over it.
-                        httpErrorHandler.sendError(exchange, 403,
-                                "Unknown policy: " + restClient.getOpaRego());
-                        return;
+                    AccessGate.Decision decision = accessGate().authorize(restClient.getCanonicalServiceId(),
+                            restClient.getSubscriptionGroup(), restClient.getOpaRego(), accessToken);
+                    switch (decision.outcome()) {
+                        case ALLOWED -> exchange.putAttachment(TOKEN_VERIFIED, Boolean.TRUE);
+                        case UNAUTHENTICATED -> {
+                            httpErrorHandler.sendError(exchange, 401, decision.message());
+                            return;
+                        }
+                        case FORBIDDEN -> {
+                            httpErrorHandler.sendError(exchange, 403, decision.message());
+                            return;
+                        }
+                        case POLICY_UNAVAILABLE -> {
+                            // Transient — tell a well-behaved client to retry.
+                            exchange.getResponseHeaders().put(Headers.RETRY_AFTER, "1");
+                            httpErrorHandler.sendError(exchange, 503, decision.message());
+                            return;
+                        }
                     }
-                    // Verify JWT signature before trusting decoded claims. isTokenValid is also false
-                    // when no verifier is configured: OPA must never decide on claims nothing checked.
-                    if (!httpUtils.isTokenValid(accessToken)) {
-                        httpErrorHandler.sendError(exchange, 403, "Invalid token signature");
-                        return;
-                    }
-                    OpaResult opaResult = opaWasmService.evaluate(restClient.getCanonicalServiceId(), restClient.getOpaRego(), accessToken, true);
-                    if (opaResult == null || !opaResult.isAllowed()) {
-                        httpErrorHandler.sendError(exchange, 403, "Access denied by policy");
-                        return;
-                    }
-                    exchange.putAttachment(TOKEN_VERIFIED, Boolean.TRUE);
-                } catch (AuthorizationException e) {
-                    httpErrorHandler.sendError(exchange, 403, e.getMessage());
-                    return;
-                }
-            }
-
-            // 2. OAuth2 / Subscription check
-            if (restClient.isSecured() && !apiKeyAuthenticated) {
-                String authResult = checkAuthorization(exchange, restClient);
-                if (authResult != null) {
-                    httpErrorHandler.sendError(exchange, 403, authResult);
-                    return;
                 }
             }
 
@@ -757,38 +754,14 @@ public class RestGateway {
         }
     }
 
-    private String checkAuthorization(HttpServerExchange exchange, RestClient restClient) {
-        try {
-            String accessToken = httpUtils.processAuthorizationAccessToken(exchange);
-            if (accessToken == null) {
-                return "No authorization header provided";
-            }
-            // Check subscription group (isAuthorized verifies the token first)
-            if (restClient.getSubscriptionGroup() != null) {
-                if (!httpUtils.isAuthorized(accessToken, restClient.getSubscriptionGroup())) {
-                    return "Not subscribed";
-                }
-            } else if (!httpUtils.isTokenValid(accessToken)) {
-                // Without a group there is nothing to check the token against, but it must still be
-                // genuine: presence alone is not authentication.
-                return "Invalid authentication";
-            }
-            exchange.putAttachment(TOKEN_VERIFIED, Boolean.TRUE);
-            return null; // Authorized
-        } catch (AuthorizationException e) {
-            return e.getMessage();
+    /** The spec operation this request calls, or null when the spec declares none for its path and method. */
+    private Operation matchOperation(HttpServerExchange exchange, OpenAPI openAPI, String apiPath) {
+        if (openAPI.getPaths() == null) {
+            return null;
         }
-    }
-
-    /** A refusal from the OpenAPI operation gate: the status to send and why. */
-    record GateRejection(int statusCode, String message) {}
-
-    private GateRejection checkOpenApi(HttpServerExchange exchange, RestClient restClient, String forwardPath) {
-        OpenAPI openAPI = restClient.getOpenAPI();
         String callingMethod = exchange.getRequestMethod().toString().toLowerCase();
-
         for (String path : openAPI.getPaths().keySet()) {
-            if (isOpenApiPathMatch(forwardPath, path)) {
+            if (isOpenApiPathMatch(apiPath, path)) {
                 Operation operation = switch (callingMethod) {
                     case "get" -> openAPI.getPaths().get(path).getGet();
                     case "post" -> openAPI.getPaths().get(path).getPost();
@@ -798,43 +771,20 @@ public class RestGateway {
                     default -> null;
                 };
                 if (operation != null) {
-                    if (operation.getSecurity() != null && !operation.getSecurity().isEmpty()) {
-                        try {
-                            String accessToken = httpUtils.processAuthorizationAccessToken(exchange);
-                            if (accessToken == null) {
-                                return new GateRejection(401, "No authorization provided");
-                            }
-                            String serviceKey = restClient.getCanonicalServiceId();
-                            Service service = serviceCache.get(serviceKey);
-                            if (service == null) {
-                                return new GateRejection(400, "Call not allowed");
-                            }
-                            // Mirrors the main OPA gate below: an engine that cannot decide must
-                            // not fall through to a weaker check.
-                            HttpUtils.AuthorizationOutcome outcome =
-                                    httpUtils.authorize(accessToken, serviceKey, service, opaWasmService);
-                            switch (outcome) {
-                                case POLICY_UNAVAILABLE -> {
-                                    return new GateRejection(503, "Policy engine not ready");
-                                }
-                                case POLICY_UNKNOWN -> {
-                                    return new GateRejection(403,
-                                            "Unknown policy: " + service.getServiceMeta().getOpaRego());
-                                }
-                                case DENIED -> {
-                                    return new GateRejection(401, "Invalid authentication");
-                                }
-                                default -> exchange.putAttachment(TOKEN_VERIFIED, Boolean.TRUE);
-                            }
-                        } catch (Exception e) {
-                            return new GateRejection(401, "Invalid authorization provided");
-                        }
-                    }
-                    return null; // Operation found, no security or authorized
+                    return operation;
                 }
             }
         }
-        return new GateRejection(400, "Call not allowed"); // No matching operation found
+        return null;
+    }
+
+    private AccessGate accessGate() {
+        AccessGate gate = accessGate;
+        if (gate == null) {
+            gate = new AccessGate(httpUtils, opaWasmService);
+            accessGate = gate;
+        }
+        return gate;
     }
 
     private boolean isOpenApiPathMatch(String requestPath, String definedPath) {

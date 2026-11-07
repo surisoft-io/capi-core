@@ -1071,6 +1071,7 @@ class RestGatewayTest {
 
         RestClient rc = createOpenRestClient("/my-service/v1");
         rc.setOpenAPI(openAPI);
+        rc.setSubscriptionGroup("my-group");
         restClientMap.put("/my-service/v1", rc);
         when(httpUtils.processAuthorizationAccessToken(any(io.undertow.server.HttpServerExchange.class))).thenReturn(null);
         runningGateway = createGateway(port);
@@ -1323,12 +1324,15 @@ class RestGatewayTest {
         RestClient rc = createOpenRestClient("/apikey-secured/v1");
         rc.setApiKeyEnabled(true);
         rc.setSecured(true);
+        rc.setSubscriptionGroup("my-group");
         restClientMap.put("/apikey-secured/v1", rc);
 
         // When Bearer is provided on an apiKey+secured service, checkApiKey returns null (fall through)
         // Then checkAuthorization runs. Mock it to succeed.
         when(httpUtils.processAuthorizationAccessToken(any(io.undertow.server.HttpServerExchange.class))).thenReturn("valid-token");
-        when(httpUtils.isTokenValid("valid-token")).thenReturn(true);
+        com.nimbusds.jwt.JWTClaimsSet claims = new com.nimbusds.jwt.JWTClaimsSet.Builder().subject("u").build();
+        when(httpUtils.authorizeRequest("valid-token")).thenReturn(claims);
+        when(httpUtils.isInSubscriptionGroup(claims, "my-group")).thenReturn(true);
 
         Cache<String, ApiKeyStoreEntry> apiKeyCache = Cache2kBuilder.of(String.class, ApiKeyStoreEntry.class)
                 .name("apiKeyCacheTest3-" + System.nanoTime())
@@ -1383,8 +1387,15 @@ class RestGatewayTest {
     /** Gateway with a real HttpUtils verifying against {@code processors}, and a backend that counts hits. */
     private RestGateway createVerifyingGateway(int port, String serviceId, java.util.List<String> seen,
             java.util.List<com.nimbusds.jwt.proc.DefaultJWTProcessor<com.nimbusds.jose.proc.SecurityContext>> processors) {
+        return createVerifyingGateway(port, serviceId, seen, processors, "premium");
+    }
+
+    private RestGateway createVerifyingGateway(int port, String serviceId, java.util.List<String> seen,
+            java.util.List<com.nimbusds.jwt.proc.DefaultJWTProcessor<com.nimbusds.jose.proc.SecurityContext>> processors,
+            String subscriptionGroup) {
         RestClient rc = createPathEchoRestClient(serviceId, seen);
         rc.setSecured(true);
+        rc.setSubscriptionGroup(subscriptionGroup);
         restClientMap.put(serviceId, rc);
         RestGateway gw = new RestGateway(port, 2, "/api", restClientMap,
                 new HttpUtils(null, processors), serviceCache, null, allowedHeaders, null);
@@ -1400,7 +1411,7 @@ class RestGatewayTest {
     }
 
     @Test
-    void securedService_noGroup_rejectsAnyTokenThatDoesNotVerify() throws Exception {
+    void securedService_withGroup_onlyAVerifiedTokenInTheGroupPasses() throws Exception {
         int port = pickPort();
         java.util.List<String> seen = new java.util.ArrayList<>();
         com.nimbusds.jose.jwk.RSAKey trusted = io.surisoft.capi.utils.TestJwts.newKey();
@@ -1409,16 +1420,34 @@ class RestGatewayTest {
         runningGateway.runProxy();
 
         String path = "/api/plain-secured/v1/data";
-        assertEquals(403, getWithBearer(port, path, "garbage"));
+        assertEquals(401, getWithBearer(port, path, "garbage"));
+        assertEquals(401, getWithBearer(port, path,
+                io.surisoft.capi.utils.TestJwts.tokenWithSubscriptions(io.surisoft.capi.utils.TestJwts.newKey(), "intruder", 300, "premium")));
+        assertEquals(401, getWithBearer(port, path,
+                io.surisoft.capi.utils.TestJwts.tokenWithSubscriptions(trusted, "late", -600, "premium")));
+        assertEquals(401, getWithBearer(port, path, "eyJhbGciOiJub25lIn0.eyJzdWIiOiJ4In0."));
         assertEquals(403, getWithBearer(port, path,
-                io.surisoft.capi.utils.TestJwts.token(io.surisoft.capi.utils.TestJwts.newKey(), "intruder", 300)));
-        assertEquals(403, getWithBearer(port, path,
-                io.surisoft.capi.utils.TestJwts.token(trusted, "late", -600)));
-        assertEquals(403, getWithBearer(port, path, "eyJhbGciOiJub25lIn0.eyJzdWIiOiJ4In0."));
-        assertTrue(seen.isEmpty(), "no unverifiable token may reach the backend: " + seen);
+                io.surisoft.capi.utils.TestJwts.tokenWithSubscriptions(trusted, "other", 300, "basic")));
+        assertTrue(seen.isEmpty(), "no unverified or unsubscribed token may reach the backend: " + seen);
 
-        assertEquals(200, getWithBearer(port, path, io.surisoft.capi.utils.TestJwts.token(trusted, "user-1", 300)));
+        assertEquals(200, getWithBearer(port, path,
+                io.surisoft.capi.utils.TestJwts.tokenWithSubscriptions(trusted, "user-1", 300, "premium")));
         assertEquals(1, seen.size());
+    }
+
+    /** Nothing to authorize against: refused even with a perfectly valid token. */
+    @Test
+    void securedService_noGroupNoRego_refusesEvenAValidToken() throws Exception {
+        int port = pickPort();
+        java.util.List<String> seen = new java.util.ArrayList<>();
+        com.nimbusds.jose.jwk.RSAKey trusted = io.surisoft.capi.utils.TestJwts.newKey();
+        runningGateway = createVerifyingGateway(port, "/plain-secured/v1", seen,
+                java.util.List.of(io.surisoft.capi.utils.TestJwts.processorFor(trusted)), null);
+        runningGateway.runProxy();
+
+        assertEquals(403, getWithBearer(port, "/api/plain-secured/v1/data",
+                io.surisoft.capi.utils.TestJwts.tokenWithSubscriptions(trusted, "user-1", 300, "premium")));
+        assertTrue(seen.isEmpty());
     }
 
     @Test
@@ -1434,10 +1463,10 @@ class RestGatewayTest {
         runningGateway = gw;
         runningGateway.runProxy();
 
-        String good = io.surisoft.capi.utils.TestJwts.token(trusted, "user-1", 300);
-        String forged = io.surisoft.capi.utils.TestJwts.token(io.surisoft.capi.utils.TestJwts.newKey(), "user-1", 300);
+        String good = io.surisoft.capi.utils.TestJwts.tokenWithSubscriptions(trusted, "user-1", 300, "premium");
+        String forged = io.surisoft.capi.utils.TestJwts.tokenWithSubscriptions(io.surisoft.capi.utils.TestJwts.newKey(), "user-1", 300, "premium");
 
-        assertEquals(403, getWithBearer(port, "/api/plain-secured/v1/x", forged));
+        assertEquals(401, getWithBearer(port, "/api/plain-secured/v1/x", forged));
         assertEquals(200, getWithBearer(port, "/api/open-svc/v1/x", good));       // unsecured: nothing verified it
         verify(tracer, never()).recordVerifiedSubject(any(), anyString());
 
@@ -1454,7 +1483,7 @@ class RestGatewayTest {
 
         // Even a correctly signed token is refused when CAPI has no key to check it with.
         String token = io.surisoft.capi.utils.TestJwts.token(io.surisoft.capi.utils.TestJwts.newKey(), "user-1", 300);
-        assertEquals(403, getWithBearer(port, "/api/plain-secured/v1/data", token));
+        assertEquals(401, getWithBearer(port, "/api/plain-secured/v1/data", token));
         assertTrue(seen.isEmpty());
     }
 
@@ -1469,7 +1498,9 @@ class RestGatewayTest {
         restClientMap.put("/sub-svc/v1", rc);
 
         when(httpUtils.processAuthorizationAccessToken(any(io.undertow.server.HttpServerExchange.class))).thenReturn("some-token");
-        when(httpUtils.isAuthorized("some-token", "premium-group")).thenReturn(false);
+        com.nimbusds.jwt.JWTClaimsSet claims = new com.nimbusds.jwt.JWTClaimsSet.Builder().subject("u").build();
+        when(httpUtils.authorizeRequest("some-token")).thenReturn(claims);
+        when(httpUtils.isInSubscriptionGroup(claims, "premium-group")).thenReturn(false);
 
         runningGateway = createGateway(port);
         runningGateway.runProxy();
@@ -1493,7 +1524,9 @@ class RestGatewayTest {
         restClientMap.put("/sub-svc/v1", rc);
 
         when(httpUtils.processAuthorizationAccessToken(any(io.undertow.server.HttpServerExchange.class))).thenReturn("valid-token");
-        when(httpUtils.isAuthorized("valid-token", "premium-group")).thenReturn(true);
+        com.nimbusds.jwt.JWTClaimsSet claims = new com.nimbusds.jwt.JWTClaimsSet.Builder().subject("u").build();
+        when(httpUtils.authorizeRequest("valid-token")).thenReturn(claims);
+        when(httpUtils.isInSubscriptionGroup(claims, "premium-group")).thenReturn(true);
 
         runningGateway = createGateway(port);
         runningGateway.runProxy();
@@ -1521,7 +1554,7 @@ class RestGatewayTest {
         restClientMap.put("/opa-svc/v1", rc);
 
         when(httpUtils.processAuthorizationAccessToken(any(io.undertow.server.HttpServerExchange.class))).thenReturn("opa-token");
-        when(httpUtils.isTokenValid("opa-token")).thenReturn(true);
+        when(httpUtils.authorizeRequest("opa-token")).thenReturn(new com.nimbusds.jwt.JWTClaimsSet.Builder().subject("u").build());
 
         OpaWasmService opaWasmService = mock(OpaWasmService.class);
         OpaResult denied = new OpaResult();
@@ -1554,7 +1587,7 @@ class RestGatewayTest {
         restClientMap.put("/opa-svc/v1", rc);
 
         when(httpUtils.processAuthorizationAccessToken(any(io.undertow.server.HttpServerExchange.class))).thenReturn("opa-token");
-        when(httpUtils.isTokenValid("opa-token")).thenReturn(true);
+        when(httpUtils.authorizeRequest("opa-token")).thenReturn(new com.nimbusds.jwt.JWTClaimsSet.Builder().subject("u").build());
 
         OpaWasmService opaWasmService = mock(OpaWasmService.class);
         OpaResult allowed = new OpaResult();
@@ -1598,13 +1631,13 @@ class RestGatewayTest {
         runningGateway.runProxy();
 
         String forged = io.surisoft.capi.utils.TestJwts.token(io.surisoft.capi.utils.TestJwts.newKey(), "admin", 300);
-        assertEquals(403, getWithBearer(port, "/api/opa-svc/v1/x", forged));
+        assertEquals(401, getWithBearer(port, "/api/opa-svc/v1/x", forged));
         assertTrue(seen.isEmpty());
         verify(opaWasmService, never()).evaluate(anyString(), anyString(), anyString(), anyBoolean());
     }
 
     @Test
-    void opaService_noAuthHeader_returns403() throws Exception {
+    void opaService_noAuthHeader_returns401() throws Exception {
         int port = pickPort();
         RestClient rc = createOpenRestClient("/opa-svc/v1");
         rc.setOpaRego("my-rego-policy");
@@ -1623,7 +1656,7 @@ class RestGatewayTest {
                         .GET().build(),
                 HttpResponse.BodyHandlers.ofString());
 
-        assertEquals(403, resp.statusCode());
+        assertEquals(401, resp.statusCode());
     }
 
     // === Authorization propagation ===
