@@ -300,6 +300,7 @@ Both instances route the service; `production` requires a token, `staging` does 
 | `ignore-open-api` | `capi-instance-staging-ignore-open-api` | Drop the spec entirely for this instance. |
 | `route-group-first` | `capi-instance-production-route-group-first` | Path order for this instance only. |
 | `ingress` | `capi-instance-internal-ingress` | Point this instance at a **different backend**, e.g. an internal vs. external hostname. Port is derived from the scheme (`http`→80, `https`→443); arbitrary ports are not supported here. |
+| `opa-rego` | `capi-instance-external-opa-rego` | The OPA policy this instance applies, replacing the top-level `opa-rego`. An empty value removes the policy on this instance. Since 2.25.2. |
 
 Any other property name is **silently ignored** — there is no error and no log line. Note the
 spelling is kebab-case (`route-group-first`, not `routeGroupFirst`).

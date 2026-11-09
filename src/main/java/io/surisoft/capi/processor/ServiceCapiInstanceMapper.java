@@ -52,6 +52,9 @@ public class ServiceCapiInstanceMapper {
             case "ingress":
                 instance.setIngress(value);
                 break;
+            case "opa-rego":
+                instance.setOpaRego(value);
+                break;
         }
     }
 }

@@ -376,6 +376,40 @@ class ServiceUtilsTest {
     }
 
     @Test
+    void didServiceChange_opaRegoChangedFromNullToValue_returnsTrue() {
+        Service existing = createServiceWithMapping("svc", "dev", "host1", 8080);
+        Service incoming = createServiceWithMapping("svc", "dev", "host1", 8080);
+        incoming.getServiceMeta().setOpaRego("capi/a");
+        assertTrue(serviceUtils.didServiceChange(existing, incoming));
+    }
+
+    @Test
+    void didServiceChange_opaRegoChangedFromValueToNull_returnsTrue() {
+        Service existing = createServiceWithMapping("svc", "dev", "host1", 8080);
+        existing.getServiceMeta().setOpaRego("capi/a");
+        Service incoming = createServiceWithMapping("svc", "dev", "host1", 8080);
+        assertTrue(serviceUtils.didServiceChange(existing, incoming));
+    }
+
+    @Test
+    void didServiceChange_opaRegoChangedValues_returnsTrue() {
+        Service existing = createServiceWithMapping("svc", "dev", "host1", 8080);
+        existing.getServiceMeta().setOpaRego("capi/a");
+        Service incoming = createServiceWithMapping("svc", "dev", "host1", 8080);
+        incoming.getServiceMeta().setOpaRego("capi/b");
+        assertTrue(serviceUtils.didServiceChange(existing, incoming));
+    }
+
+    @Test
+    void didServiceChange_opaRegoBothSame_returnsFalse() {
+        Service existing = createServiceWithMapping("svc", "dev", "host1", 8080);
+        existing.getServiceMeta().setOpaRego("capi/a");
+        Service incoming = createServiceWithMapping("svc", "dev", "host1", 8080);
+        incoming.getServiceMeta().setOpaRego("capi/a");
+        assertFalse(serviceUtils.didServiceChange(existing, incoming));
+    }
+
+    @Test
     void didServiceChange_subscriptionGroupChangedFromNullToValue_returnsTrue() {
         Service existing = createServiceWithMapping("svc", "dev", "host1", 8080);
         Service incoming = createServiceWithMapping("svc", "dev", "host1", 8080);

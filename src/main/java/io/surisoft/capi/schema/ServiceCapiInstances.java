@@ -14,6 +14,8 @@ public class ServiceCapiInstances {
         private String scheme;
         private boolean ignoreOpenApi;
         private String ingress;
+        private String opaRego;
+        private boolean opaRegoOverridden;
 
         private boolean assumeParentSecured = true;
         private boolean assumeParentRouteGroupFirst = true;
@@ -64,6 +66,25 @@ public class ServiceCapiInstances {
 
         public void setIngress(String ingress) {
             this.ingress = ingress;
+        }
+
+        /** This instance's policy; {@code null} means no policy. Only meaningful when {@link #isOpaRegoOverridden()}. */
+        public String getOpaRego() {
+            return opaRego;
+        }
+
+        /**
+         * A blank value is stored as {@code null}: an explicit "no policy on this instance", so the
+         * service-level {@code opa-rego} is removed here rather than half-applied.
+         */
+        public void setOpaRego(String opaRego) {
+            this.opaRego = (opaRego == null || opaRego.isBlank()) ? null : opaRego.trim();
+            this.opaRegoOverridden = true;
+        }
+
+        /** Whether {@code capi-instance-<name>-opa-rego} was declared; otherwise the service-level value applies. */
+        public boolean isOpaRegoOverridden() {
+            return opaRegoOverridden;
         }
 
         public boolean isAssumeParentSecured() {

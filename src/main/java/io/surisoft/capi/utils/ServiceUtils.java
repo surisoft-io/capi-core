@@ -234,6 +234,11 @@ public class ServiceUtils {
             return true;
         }
 
+        // A policy change must rebuild the clients: REST, WebSocket, gRPC and WebDAV copy opa-rego at creation.
+        if (!java.util.Objects.equals(existingService.getServiceMeta().getOpaRego(), incomingService.getServiceMeta().getOpaRego())) {
+            return true;
+        }
+
         return didSubscriptionGroupChange(existingService.getServiceMeta().getSubscriptionGroup(), incomingService.getServiceMeta().getSubscriptionGroup());
     }
 

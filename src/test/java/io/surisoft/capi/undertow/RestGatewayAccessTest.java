@@ -304,6 +304,74 @@ class RestGatewayAccessTest {
         assertTrue(seen.isEmpty());
     }
 
+    /**
+     * A templated path declared before a literal one must not capture it: {@code /items/{id}} is
+     * anonymous, {@code /items/search} is protected, and the request for the literal path has to be
+     * checked against the literal operation, whatever the declaration order.
+     */
+    @Test
+    void literalPath_winsOverATemplateDeclaredBeforeIt() throws Exception {
+        Paths paths = new Paths();
+        paths.addPathItem("/items/{id}", new PathItem().get(new Operation().security(List.of())));
+        paths.addPathItem("/items/search", new PathItem().get(new Operation()
+                .security(List.of(new SecurityRequirement().addList("bearer")))));
+        service(false, null, POLICY).setOpenAPI(new OpenAPI().paths(paths));
+        start();
+
+        assertEquals(401, status("/items/search", null), "the literal, protected operation applies");
+        policyAllows(false);
+        assertEquals(403, status("/items/search", bearer()), "and its policy is evaluated");
+        assertEquals(200, status("/items/42", null), "the templated operation stays anonymous");
+        assertFalse(seen.stream().anyMatch(u -> u.endsWith("/items/search")), "nothing reached the backend for search");
+    }
+
+    /** More literal segments win, compared left to right: {@code /a/{x}/c} beats {@code /a/{x}/{y}}. */
+    @Test
+    void mostSpecificTemplate_wins() throws Exception {
+        Paths paths = new Paths();
+        paths.addPathItem("/a/{x}/{y}", new PathItem().get(new Operation().security(List.of())));
+        paths.addPathItem("/a/{x}/c", new PathItem().get(new Operation()
+                .security(List.of(new SecurityRequirement().addList("bearer")))));
+        service(false, null, POLICY).setOpenAPI(new OpenAPI().paths(paths));
+        start();
+
+        assertEquals(401, status("/a/1/c", null));
+        assertEquals(200, status("/a/1/d", null));
+    }
+
+    /**
+     * The spec as CAPI really gets it: JSON text through the same parser as discovery, not an object built in code. A protected operation must reach the policy.
+     */
+    @Test
+    void parsedSpec_protectedOperation_reachesThePolicy() throws Exception {
+        String json = """
+                {"openapi":"3.0.1","info":{"title":"orders","version":"1"},
+                 "components":{"securitySchemes":{"bearerAuth":{"type":"http","scheme":"bearer","bearerFormat":"JWT"}}},
+                 "paths":{
+                   "/orders/{id}":{"get":{"responses":{"200":{"description":"ok"}}}},
+                   "/orders/mine":{"get":{"security":[{"bearerAuth":[]}],"responses":{"200":{"description":"ok"}}}},
+                   "/orders":{"post":{"security":[{"bearerAuth":[]}],"responses":{"200":{"description":"ok"}}},
+                              "get":{"responses":{"200":{"description":"ok"}}}}
+                 }}
+                """;
+        OpenAPI spec = new io.swagger.v3.parser.OpenAPIV3Parser().readContents(json).getOpenAPI();
+        assertNotNull(spec);
+        service(false, null, POLICY).setOpenAPI(spec);
+        start();
+
+        assertEquals(401, status("/orders/mine", null), "protected, declared after a template");
+        policyAllows(false);
+        assertEquals(403, status("/orders/mine", bearer()), "policy evaluated and refuses");
+        policyAllows(true);
+        assertEquals(200, status("/orders/mine", bearer()), "policy evaluated and allows");
+        assertEquals(200, status("/orders/7", null), "no security declared: anonymous");
+        assertEquals(200, status("/orders", null), "GET /orders declares none: anonymous");
+        HttpRequest post = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/orders/v1/orders"))
+                .POST(HttpRequest.BodyPublishers.noBody()).build();
+        assertEquals(401, HttpClient.newHttpClient().send(post, HttpResponse.BodyHandlers.ofString()).statusCode(),
+                "POST /orders is protected");
+    }
+
     @Test
     void operationNotInTheSpec_is400() throws Exception {
         service(false, GROUP, null).setOpenAPI(spec());
