@@ -754,28 +754,58 @@ public class RestGateway {
         }
     }
 
-    /** The spec operation this request calls, or null when the spec declares none for its path and method. */
+    /**
+     * The spec operation this request calls, or null when the spec declares none for its path and method.
+     *
+     * <p>When several paths match, the most specific wins: compared segment by segment from the left,
+     * a literal segment beats a template ({@code /items/search} over {@code /items/{id}}), as OpenAPI
+     * requires. Taking the first match in declaration order let a templated path capture a literal
+     * one, so a protected operation could be authorized as the anonymous operation declared before it.
+     */
     private Operation matchOperation(HttpServerExchange exchange, OpenAPI openAPI, String apiPath) {
         if (openAPI.getPaths() == null) {
             return null;
         }
         String callingMethod = exchange.getRequestMethod().toString().toLowerCase();
-        for (String path : openAPI.getPaths().keySet()) {
-            if (isOpenApiPathMatch(apiPath, path)) {
-                Operation operation = switch (callingMethod) {
-                    case "get" -> openAPI.getPaths().get(path).getGet();
-                    case "post" -> openAPI.getPaths().get(path).getPost();
-                    case "put" -> openAPI.getPaths().get(path).getPut();
-                    case "patch" -> openAPI.getPaths().get(path).getPatch();
-                    case "delete" -> openAPI.getPaths().get(path).getDelete();
-                    default -> null;
-                };
-                if (operation != null) {
-                    return operation;
-                }
+        Operation best = null;
+        String bestPath = null;
+        for (Map.Entry<String, io.swagger.v3.oas.models.PathItem> entry : openAPI.getPaths().entrySet()) {
+            String path = entry.getKey();
+            if (entry.getValue() == null || !isOpenApiPathMatch(apiPath, path)) {
+                continue;
+            }
+            Operation operation = switch (callingMethod) {
+                case "get" -> entry.getValue().getGet();
+                case "post" -> entry.getValue().getPost();
+                case "put" -> entry.getValue().getPut();
+                case "patch" -> entry.getValue().getPatch();
+                case "delete" -> entry.getValue().getDelete();
+                default -> null;
+            };
+            if (operation != null && (bestPath == null || isMoreSpecific(path, bestPath))) {
+                best = operation;
+                bestPath = path;
             }
         }
-        return null;
+        return best;
+    }
+
+    /** Whether {@code a} is more specific than {@code b}: at the first differing segment, a literal beats a template. */
+    static boolean isMoreSpecific(String a, String b) {
+        String[] as = SLASH_TRIM.matcher(a).replaceAll("").split("/");
+        String[] bs = SLASH_TRIM.matcher(b).replaceAll("").split("/");
+        for (int i = 0; i < Math.min(as.length, bs.length); i++) {
+            boolean aTemplate = isPathTemplate(as[i]);
+            boolean bTemplate = isPathTemplate(bs[i]);
+            if (aTemplate != bTemplate) {
+                return !aTemplate;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isPathTemplate(String segment) {
+        return segment.length() >= 2 && segment.charAt(0) == '{' && segment.charAt(segment.length() - 1) == '}';
     }
 
     private AccessGate accessGate() {

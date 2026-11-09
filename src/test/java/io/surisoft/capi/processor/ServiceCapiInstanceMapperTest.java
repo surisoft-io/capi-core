@@ -86,4 +86,37 @@ class ServiceCapiInstanceMapperTest {
         assertFalse(instance.isSecured());
         assertFalse(instance.isAssumeParentSecured());
     }
+
+    @Test
+    void convert_opaRego_overridesPolicy() {
+        Map<String, String> flat = new HashMap<>();
+        flat.put("capi-instance-prod-opa-rego", "capi/deny_external");
+
+        ServiceCapiInstances.Instance instance = mapper.convert(flat).getInstances().get("prod");
+
+        assertTrue(instance.isOpaRegoOverridden());
+        assertEquals("capi/deny_external", instance.getOpaRego());
+    }
+
+    @Test
+    void convert_opaRegoBlank_removesPolicy() {
+        Map<String, String> flat = new HashMap<>();
+        flat.put("capi-instance-dev-opa-rego", " ");
+
+        ServiceCapiInstances.Instance instance = mapper.convert(flat).getInstances().get("dev");
+
+        assertTrue(instance.isOpaRegoOverridden(), "a declared blank value is an explicit override");
+        assertNull(instance.getOpaRego());
+    }
+
+    @Test
+    void convert_opaRegoAbsent_notOverridden() {
+        Map<String, String> flat = new HashMap<>();
+        flat.put("capi-instance-prod-secured", "true");
+
+        ServiceCapiInstances.Instance instance = mapper.convert(flat).getInstances().get("prod");
+
+        assertFalse(instance.isOpaRegoOverridden());
+        assertNull(instance.getOpaRego());
+    }
 }

@@ -576,6 +576,9 @@ public class ConsulCatalogService {
         if (thisInstance.getScheme() != null && !thisInstance.getScheme().isEmpty()) {
             svc.getServiceMeta().setScheme(thisInstance.getScheme());
         }
+        if (thisInstance.isOpaRegoOverridden()) {
+            svc.getServiceMeta().setOpaRego(thisInstance.getOpaRego());
+        }
         // Per-instance backend override: repoint every mapping at this instance's
         // ingress. Rebuild the set (hostname/port participate in Mapping.hashCode,
         // so mutating in place would corrupt the HashSet).

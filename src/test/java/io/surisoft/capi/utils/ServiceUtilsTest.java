@@ -186,15 +186,15 @@ class ServiceUtilsTest {
     @Test
     void consulObjectToMapping_withoutIngress_stripsSchemeFromAddress() {
         ConsulObject co = new ConsulObject();
-        co.setServiceName("rag-connectors");
-        co.setServiceAddress("http://vpce-009158417dfc77ff3.eu-west-1.vpce.amazonaws.com");
+        co.setServiceName("orders");
+        co.setServiceAddress("http://vpce-0123456789abcdef0.eu-west-1.vpce.amazonaws.com");
         co.setServicePort(1818);
         ServiceMeta meta = new ServiceMeta();
         meta.setGroup("dev");
         co.setServiceMeta(meta);
 
         Mapping result = serviceUtils.consulObjectToMapping(co);
-        assertEquals("vpce-009158417dfc77ff3.eu-west-1.vpce.amazonaws.com", result.getHostname());
+        assertEquals("vpce-0123456789abcdef0.eu-west-1.vpce.amazonaws.com", result.getHostname());
         assertEquals(1818, result.getPort());
         assertFalse(result.isIngress());
     }
@@ -372,6 +372,40 @@ class ServiceUtilsTest {
         existing.getServiceMeta().setVersion("1.0");
         Service incoming = createServiceWithMapping("svc", "dev", "host1", 8080);
         incoming.getServiceMeta().setVersion("1.0");
+        assertFalse(serviceUtils.didServiceChange(existing, incoming));
+    }
+
+    @Test
+    void didServiceChange_opaRegoChangedFromNullToValue_returnsTrue() {
+        Service existing = createServiceWithMapping("svc", "dev", "host1", 8080);
+        Service incoming = createServiceWithMapping("svc", "dev", "host1", 8080);
+        incoming.getServiceMeta().setOpaRego("capi/a");
+        assertTrue(serviceUtils.didServiceChange(existing, incoming));
+    }
+
+    @Test
+    void didServiceChange_opaRegoChangedFromValueToNull_returnsTrue() {
+        Service existing = createServiceWithMapping("svc", "dev", "host1", 8080);
+        existing.getServiceMeta().setOpaRego("capi/a");
+        Service incoming = createServiceWithMapping("svc", "dev", "host1", 8080);
+        assertTrue(serviceUtils.didServiceChange(existing, incoming));
+    }
+
+    @Test
+    void didServiceChange_opaRegoChangedValues_returnsTrue() {
+        Service existing = createServiceWithMapping("svc", "dev", "host1", 8080);
+        existing.getServiceMeta().setOpaRego("capi/a");
+        Service incoming = createServiceWithMapping("svc", "dev", "host1", 8080);
+        incoming.getServiceMeta().setOpaRego("capi/b");
+        assertTrue(serviceUtils.didServiceChange(existing, incoming));
+    }
+
+    @Test
+    void didServiceChange_opaRegoBothSame_returnsFalse() {
+        Service existing = createServiceWithMapping("svc", "dev", "host1", 8080);
+        existing.getServiceMeta().setOpaRego("capi/a");
+        Service incoming = createServiceWithMapping("svc", "dev", "host1", 8080);
+        incoming.getServiceMeta().setOpaRego("capi/a");
         assertFalse(serviceUtils.didServiceChange(existing, incoming));
     }
 
