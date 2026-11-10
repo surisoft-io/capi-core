@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CAPI Routes</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cmask id='m'%3E%3Crect width='100' height='100' fill='%23fff'/%3E%3Cpath d='M 66.95 39.41 A 19.99 19.99 0 1 0 66.95 60.59' stroke='%23000' stroke-width='9.31' stroke-linecap='round' fill='none'/%3E%3C/mask%3E%3Cpath d='M 82.91 36.70 Q 82.91 31.00 77.97 28.15 L 54.94 14.85 Q 50.00 12.00 45.06 14.85 L 22.03 28.15 Q 17.09 31.00 17.09 36.70 L 17.09 63.30 Q 17.09 69.00 22.03 71.85 L 45.06 85.15 Q 50.00 88.00 54.94 85.15 L 77.97 71.85 Q 82.91 69.00 82.91 63.30 Z' fill='%232f5fd0' mask='url(%23m)'/%3E%3C/svg%3E">
 <style>
   :root {
     --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --line: #e2e1dc;
@@ -74,32 +75,124 @@
   .err { color: var(--bad); font-size: 13px; margin-top: 10px; white-space: pre-wrap; }
   details { margin-top: 14px; font-size: 13px; }
   summary { cursor: pointer; color: var(--muted); }
+  .ts { border-top: 1px solid var(--line); margin: 4px 0 14px; padding-top: 12px; }
+  .ts textarea { width: 100%; min-height: 90px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px;
+                 background: var(--bg); color: var(--text); font: 12px ui-monospace, monospace; }
+  .ts select { padding: 7px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg);
+               color: var(--text); font: inherit; max-width: 100%; }
+  .ts .row { align-items: center; margin-top: 8px; }
+  .msg { font-size: 13px; margin-top: 8px; white-space: pre-wrap; }
+  button.danger { color: var(--bad); }
+  button.danger.armed { background: var(--bad); border-color: var(--bad); color: #fff; }
+  td.act { white-space: nowrap; text-align: right; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .tab { border-radius: 999px; padding: 6px 14px; }
+  .tab.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .tab .count { opacity: .75; font-weight: 400; margin-left: 4px; }
+  .inst-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .inst-head .chips { margin-top: 0; }
+  .chip.ro { padding-right: 12px; }
+  .disc { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-top: 14px; }
+  .disc[open] summary { margin-bottom: 4px; }
+  .disc .found { margin-top: 10px; display: grid; gap: 4px; }
+  dialog .disc .found label { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-weight: 400; margin: 0; }
+  dialog .disc .found input { flex: none; width: auto; margin: 0; }
+  .disc .found .meta { color: var(--muted); font-size: 12px; }
+  dialog { max-height: calc(100vh - 32px); overflow-y: auto; }
+  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .brand h1 { margin: 0; }
+  .logo { width: 34px; height: 34px; color: var(--accent); flex: none; }
+  .ni th.node-col { font-family: ui-monospace, monospace; font-size: 12px; font-weight: 600; word-break: break-all; min-width: 140px; }
+  .ni td.v { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-word; }
+  .ni td.v.odd { color: var(--warn); font-weight: 600; }
+  .ni td.k { color: var(--muted); white-space: nowrap; }
+  .ni tr.group td { font-weight: 600; color: var(--text); padding-top: 14px; border-bottom: 1px solid var(--line); }
+  .ni .info { color: var(--muted); }
+  .inst-tools { display: flex; gap: 6px; margin-left: auto; }
+  .tabs-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 </style>
 </head>
 <body>
 <main>
   <header class="top">
     <div>
+      <div class="brand">
+      <svg class="logo" viewBox="0 0 100 100" aria-hidden="true">
+        <mask id="capi-mark"><rect width="100" height="100" fill="#fff"/>
+          <path d="M 66.95 39.41 A 19.99 19.99 0 1 0 66.95 60.59" stroke="#000" stroke-width="9.31" stroke-linecap="round" fill="none"/></mask>
+        <path d="M 82.91 36.70 Q 82.91 31.00 77.97 28.15 L 54.94 14.85 Q 50.00 12.00 45.06 14.85 L 22.03 28.15 Q 17.09 31.00 17.09 36.70 L 17.09 63.30 Q 17.09 69.00 22.03 71.85 L 45.06 85.15 Q 50.00 88.00 54.94 85.15 L 77.97 71.85 Q 82.91 69.00 82.91 63.30 Z" fill="currentColor" mask="url(#capi-mark)"/>
+      </svg>
       <h1>CAPI Routes</h1>
-      <p class="sub">Compares <span class="mono">/info/routes</span> and <span class="mono">/info/invalid-services</span> across nodes. Click a route for its operations and security on every node.</p>
+      </div>
+      <p class="sub">Compares node configuration, routes, invalid services and the trust store across the nodes of a CAPI instance. Click a route for its operations and security on every node.</p>
     </div>
     <div class="auth" id="authBox"></div>
   </header>
 
   <section>
-    <label for="node">Nodes</label>
-    <div class="row">
-      <input id="node" placeholder="http://capi-node-1.example.com:8381" autocomplete="off">
-      <button id="add">Add</button>
+    <label>CAPI instance</label>
+    <div class="tabs-row">
+      <div class="tabs" id="instTabs"></div>
+      <div class="inst-tools">
+        <button id="instExport" title="Download the instances and their nodes as JSON (no tokens)">Export</button>
+        <button id="instImport" title="Add instances from an exported JSON file">Import</button>
+        <input type="file" id="instImportFile" accept=".json,application/json" hidden>
+      </div>
     </div>
-    <div class="chips" id="chips"></div>
-    <div class="hint">Base URL of each node's admin port. The list is remembered in this browser; tokens and secrets are not.</div>
+    <div class="msg" id="instMsg"></div>
+    <div class="inst-head" id="instHead">
+      <div class="chips" id="chips"></div>
+      <div class="row">
+        <button id="instEdit">Edit</button>
+        <button class="danger" id="instDelete">Delete</button>
+      </div>
+    </div>
+    <div class="hint">Instances and their nodes are remembered in this browser; tokens and secrets are not.</div>
   </section>
+
+  <dialog id="instDialog">
+    <form method="dialog" id="instForm">
+      <h2 id="instDialogTitle">New CAPI instance</h2>
+      <label for="instName">Name</label>
+      <input id="instName" placeholder="internal" autocomplete="off" required>
+      <label for="node">Nodes</label>
+      <div class="row">
+        <input id="node" placeholder="http://capi-node-1.example.com:8381" autocomplete="off">
+        <button type="button" id="add">Add</button>
+      </div>
+      <div class="chips" id="draftChips"></div>
+      <div class="hint">Base URL of each node's admin port. Paste several at once, separated by spaces, commas or new lines.</div>
+      <details class="disc" id="disc">
+        <summary>Discover from Consul</summary>
+        <div class="hint" style="margin-top:0">Reads the <span class="mono">capi-admin</span> registrations that each node's admin MCP writes to its Consul (<span class="mono">admin.mcp.consul</span>).</div>
+        <label for="discConsul">Consul</label>
+        <input id="discConsul" placeholder="https://consul.example.com:8500" autocomplete="off">
+        <label for="discToken">Consul token</label>
+        <input id="discToken" type="password" autocomplete="off" placeholder="optional">
+        <label for="discCluster">CAPI instance name</label>
+        <div class="row">
+          <input id="discCluster" placeholder="default" autocomplete="off">
+          <button type="button" id="discGo">Discover</button>
+        </div>
+        <div class="hint">The <span class="mono">capi.instanceName</span> of the nodes; <span class="mono">default</span> when they have none.</div>
+        <div class="msg" id="discMsg"></div>
+        <div class="found" id="discFound"></div>
+        <div class="actions" id="discActions" hidden><button type="button" id="discAdd">Add selected nodes</button></div>
+      </details>
+      <div class="err" id="instErr"></div>
+      <div class="actions">
+        <button type="button" id="instCancel">Cancel</button>
+        <button class="primary" type="submit">Save</button>
+      </div>
+    </form>
+  </dialog>
 
   <section>
     <div class="row">
+      <button id="runInfo">Node info</button>
       <button class="primary" id="run">List routes</button>
       <button id="runInvalid">Invalid services</button>
+      <button id="runTrust">Truststore</button>
     </div>
   </section>
 
@@ -125,10 +218,32 @@
     </form>
   </dialog>
 
+  <section id="nodeInfo" class="ni" hidden>
+    <h2 style="font-size:16px;margin:0 0 10px">Node info</h2>
+    <p class="align" id="niAlign"></p>
+    <div class="filters">
+      <label><input type="checkbox" id="niOnlyDiff" style="flex:none"> Only settings that differ between nodes</label>
+    </div>
+    <div class="scroll"><table id="niTable"></table></div>
+    <div class="hint">From each node's <span class="mono">/info/capi</span> and <span class="mono">/info/health</span>. A value in amber differs from most nodes. Start time and uptime are shown, not compared.</div>
+  </section>
+
   <section id="results" hidden>
     <h2 id="viewTitle" style="font-size:16px;margin:0 0 10px"></h2>
     <div class="summary" id="summary"></div>
     <p class="align" id="align"></p>
+    <div class="ts" id="tsTools" hidden>
+      <label for="tsPem">Add certificates</label>
+      <textarea id="tsPem" placeholder="-----BEGIN CERTIFICATE-----&#10;…&#10;-----END CERTIFICATE-----"></textarea>
+      <div class="row">
+        <input type="file" id="tsFile" accept=".pem,.crt,.cer,.txt" style="flex:0 1 auto">
+        <span class="hint" style="margin:0">Send through</span>
+        <select id="tsVia"></select>
+        <button class="primary" id="tsAdd">Add</button>
+      </div>
+      <div class="hint">The alias is the certificate's CN, lower-cased. Changes go to one node, which writes the trust store to Consul KV; every node, that one included, reloads it on its next KV sync. A PEM with several certificates is added one by one.</div>
+      <div class="msg" id="tsMsg"></div>
+    </div>
     <div class="filters">
       <input id="filter" placeholder="Filter" style="flex:1 1 240px">
       <label><input type="checkbox" id="onlyDiff" style="flex:none"> Only rows that differ between nodes</label>
@@ -150,47 +265,250 @@
 </main>
 
 <script>
-const KEY = "capi-routes-viewer.nodes";
+const KEY = "capi-routes-viewer.instances";      // { current, list: [{ name, nodes }] }
+const OLD_NODES_KEY = "capi-routes-viewer.nodes";  // the single node list of earlier versions
 const $ = id => document.getElementById(id);
-let nodes = [];
-let lastResults = null;
+let instances = [];
+let current = null;   // name of the selected instance
+let nodes = [];       // nodes of the selected instance; everything below reads this
 
 function load() {
-  try { nodes = JSON.parse(localStorage.getItem(KEY)) || []; } catch { nodes = []; }
+  try {
+    const saved = JSON.parse(localStorage.getItem(KEY));
+    if (saved && Array.isArray(saved.list)) {
+      instances = saved.list.filter(i => i && i.name && Array.isArray(i.nodes));
+      current = saved.current;
+    } else {
+      const old = JSON.parse(localStorage.getItem(OLD_NODES_KEY));
+      if (Array.isArray(old) && old.length) { instances = [{ name: "default", nodes: old }]; current = "default"; }
+    }
+  } catch { instances = []; }
+  if (!instances.some(i => i.name === current)) current = instances[0]?.name ?? null;
+  nodes = instances.find(i => i.name === current)?.nodes ?? [];
 }
 function save() {
-  try { localStorage.setItem(KEY, JSON.stringify(nodes)); } catch { /* storage unavailable */ }
+  try {
+    localStorage.setItem(KEY, JSON.stringify({ current, list: instances }));
+    localStorage.removeItem(OLD_NODES_KEY);
+  } catch { /* storage unavailable */ }
 }
 function normalize(url) {
   url = url.trim().replace(/\/+$/, "");
   if (!/^https?:\/\//i.test(url)) url = "http://" + url;
   return url;
 }
+
+function selectInstance(name) {
+  if (name === current) return;
+  current = name;
+  nodes = instances.find(i => i.name === current)?.nodes ?? [];
+  save();
+  resetResults();
+  renderInstances();
+}
+
+// Results belong to the instance they were fetched from.
+function resetResults() {
+  propagation++;
+  for (const k of Object.keys(resultsByView)) delete resultsByView[k];
+  $("results").hidden = true;
+  $("ops").hidden = true; opsState = null;
+  $("nodeInfo").hidden = true; nodeInfo = null;
+  tsMessage("");
+}
+
+function renderInstances() {
+  const tabs = instances.map(inst => {
+    const b = document.createElement("button");
+    b.className = "tab" + (inst.name === current ? " active" : "");
+    b.textContent = inst.name;
+    const c = document.createElement("span"); c.className = "count"; c.textContent = inst.nodes.length;
+    b.title = inst.nodes.join("\n");
+    b.append(c);
+    b.onclick = () => selectInstance(inst.name);
+    return b;
+  });
+  const add = document.createElement("button");
+  add.className = "tab"; add.textContent = "+ New instance";
+  add.onclick = () => openInstance(null);
+  const disc = document.createElement("button");
+  disc.className = "tab"; disc.textContent = "Discover instance";
+  disc.onclick = () => openInstance(null, true);
+  $("instTabs").replaceChildren(...tabs, add, disc);
+  $("instHead").hidden = !current;
+  renderChips();
+}
+
 function renderChips() {
-  const box = $("chips");
-  box.replaceChildren(...nodes.map((n, i) => {
+  $("chips").replaceChildren(...nodes.map(n => {
     const chip = document.createElement("span");
-    chip.className = "chip";
+    chip.className = "chip ro";
     chip.textContent = n;
-    const x = document.createElement("button");
-    x.textContent = "×";
-    x.title = "Remove";
-    x.onclick = () => { nodes.splice(i, 1); save(); renderChips(); };
-    chip.append(x);
     return chip;
   }));
   $("run").disabled = nodes.length === 0;
   $("runInvalid").disabled = nodes.length === 0;
+  $("runTrust").disabled = nodes.length === 0;
+  $("runInfo").disabled = nodes.length === 0;
+  renderVia();
+}
+
+// ---- instance dialog (create / edit)
+let editing = null;   // name being edited, or null for a new instance
+let draft = [];       // nodes in the dialog, applied on Save
+
+function renderDraft() {
+  $("draftChips").replaceChildren(...draft.map((n, i) => {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.textContent = n;
+    const x = document.createElement("button");
+    x.type = "button"; x.textContent = "×"; x.title = "Remove";
+    x.onclick = () => { draft.splice(i, 1); renderDraft(); renderFound(); };
+    chip.append(x);
+    return chip;
+  }));
 }
 function addNode() {
-  const raw = $("node").value;
-  raw.split(/[\s,]+/).filter(Boolean).forEach(v => {
+  $("node").value.split(/[\s,]+/).filter(Boolean).forEach(v => {
     const n = normalize(v);
-    if (!nodes.includes(n)) nodes.push(n);
+    if (!draft.includes(n)) draft.push(n);
   });
   $("node").value = "";
-  save(); renderChips();
+  renderDraft(); renderFound();
 }
+function openInstance(name, discover) {
+  editing = name;
+  const inst = instances.find(i => i.name === name);
+  resetDiscovery(inst, discover);
+  $("instDialogTitle").textContent = inst ? `Edit ${inst.name}` : "New CAPI instance";
+  $("instName").value = inst ? inst.name : "";
+  draft = inst ? inst.nodes.slice() : [];
+  $("node").value = "";
+  $("instErr").textContent = "";
+  renderDraft();
+  $("instDialog").showModal();
+  if (discover) ($("discConsul").value ? $("discCluster") : $("discConsul")).focus();
+  else (inst ? $("node") : $("instName")).focus();
+}
+
+// ---- discovery from the admin MCP's Consul
+const CONSUL_KEY = "capi-routes-viewer.consul";   // the Consul URL only; never the token
+let found = [];
+
+function resetDiscovery(inst, open) {
+  let consul = inst?.consul;
+  try { consul = consul || localStorage.getItem(CONSUL_KEY) || ""; } catch { consul = consul || ""; }
+  $("discConsul").value = consul;
+  $("discToken").value = "";
+  $("discCluster").value = inst?.cluster || "";
+  $("discMsg").textContent = ""; $("discMsg").className = "msg";
+  found = [];
+  renderFound();
+  $("disc").open = !!open || !!inst?.consul;
+}
+
+function renderFound() {
+  $("discFound").replaceChildren(...found.map(n => {
+    const label = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = n.status === "passing" && !draft.includes(n.url);
+    cb.disabled = draft.includes(n.url);
+    cb.onchange = () => { n.selected = cb.checked; };
+    n.selected = cb.checked;
+    const url = document.createElement("span"); url.className = "mono"; url.textContent = n.url;
+    const meta = document.createElement("span"); meta.className = "meta";
+    meta.textContent = [n.status !== "passing" && n.status, n.version && "v" + n.version, n.consulNode,
+                        draft.includes(n.url) && "already added"].filter(Boolean).join(" · ");
+    if (n.status !== "passing") meta.classList.add(n.status === "critical" ? "bad" : "warn");
+    label.title = n.id || "";
+    label.append(cb, url, meta);
+    return label;
+  }));
+  $("discActions").hidden = !found.some(n => !draft.includes(n.url));
+}
+
+async function discover() {
+  const consul = normalize($("discConsul").value);
+  const cluster = $("discCluster").value.trim() || $("instName").value.trim() || "default";
+  if (!$("discConsul").value.trim()) { $("discMsg").className = "msg bad"; $("discMsg").textContent = "Enter the Consul URL."; return; }
+  $("discCluster").value = cluster;
+  $("discGo").disabled = true; $("discGo").textContent = "Discovering…";
+  $("discMsg").className = "msg"; $("discMsg").textContent = "";
+  found = []; renderFound();
+  try {
+    const res = await fetch("/discover", { method: "POST", headers: { "Content-Type": "application/json" },
+                                           body: JSON.stringify({ consul, token: $("discToken").value, cluster }) });
+    const out = await res.json();
+    if (out.error) throw new Error(out.error);
+    try { localStorage.setItem(CONSUL_KEY, consul); } catch { /* ignore */ }
+    $("discConsul").value = consul;
+    found = out.nodes;
+    const others = Object.entries(out.clusters || {}).filter(([c]) => c !== cluster);
+    const otherText = others.length ? `Other instances in this Consul: ${others.map(([c, n]) => `${c} (${n})`).join(", ")}.` : "";
+    if (!found.length) {
+      $("discMsg").className = "msg warn";
+      $("discMsg").textContent = `No node of ${cluster} is registered.` + (otherText ? " " + otherText : " No capi-admin registrations at all: is admin.mcp enabled on the nodes, and is this its Consul?");
+    } else {
+      const down = found.filter(n => n.status !== "passing").length;
+      $("discMsg").className = "msg " + (down ? "warn" : "ok");
+      $("discMsg").textContent = `${found.length} node${found.length > 1 ? "s" : ""} of ${cluster}` +
+        (down ? `, ${down} not passing (left unselected)` : "") + "." + (otherText ? " " + otherText : "");
+      if (!$("instName").value.trim()) $("instName").value = cluster;
+    }
+    renderFound();
+  } catch (e) {
+    $("discMsg").className = "msg bad";
+    $("discMsg").textContent = e.message.startsWith("Failed to fetch") ? "Local helper unreachable: " + e.message : e.message;
+  } finally {
+    $("discGo").disabled = false; $("discGo").textContent = "Discover";
+  }
+}
+$("discGo").onclick = discover;
+$("discCluster").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); discover(); } });
+$("discConsul").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); discover(); } });
+$("discToken").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); discover(); } });
+$("discAdd").onclick = () => {
+  found.filter(n => n.selected && !draft.includes(n.url)).forEach(n => draft.push(n.url));
+  renderDraft(); renderFound();
+};
+$("instForm").addEventListener("submit", e => {
+  e.preventDefault();
+  if ($("node").value.trim()) addNode();   // a URL typed but not yet added still counts
+  const name = $("instName").value.trim();
+  if (!name) { $("instErr").textContent = "The instance needs a name."; return; }
+  if (instances.some(i => i.name.toLowerCase() === name.toLowerCase() && i.name !== editing)) {
+    $("instErr").textContent = `An instance called ${name} already exists.`; return;
+  }
+  if (!draft.length) { $("instErr").textContent = "Add at least one node."; return; }
+  const inst = instances.find(i => i.name === editing) || { };
+  if (!instances.includes(inst)) instances.push(inst);
+  Object.assign(inst, { name, nodes: draft.slice() });
+  if (found.length) { inst.consul = normalize($("discConsul").value); inst.cluster = $("discCluster").value.trim(); }
+  current = name;
+  nodes = draft.slice();
+  save();
+  resetResults();
+  renderInstances();
+  $("instDialog").close();
+});
+$("instCancel").onclick = () => $("instDialog").close();
+$("instEdit").onclick = () => openInstance(current);
+$("instDelete").onclick = () => {
+  const btn = $("instDelete");
+  if (!btn.classList.contains("armed")) {
+    btn.classList.add("armed"); btn.textContent = `Delete ${current}?`;
+    setTimeout(() => { btn.classList.remove("armed"); btn.textContent = "Delete"; }, 4000);
+    return;
+  }
+  btn.classList.remove("armed"); btn.textContent = "Delete";
+  instances = instances.filter(i => i.name !== current);
+  current = instances[0]?.name ?? null;
+  nodes = instances[0]?.nodes ?? [];
+  save();
+  resetResults();
+  renderInstances();
+};
 
 const VIEWS = {
   routes: {
@@ -220,6 +538,29 @@ const VIEWS = {
     missingTitle: "Routed normally on:",
     empty: "No invalid services.",
   },
+  truststore: {
+    path: "/info/truststore",
+    button: "Truststore",
+    title: "Truststore",
+    noun: ["certificate", "certificates"],
+    headers: ["Alias", "Certificate", "Expires", "Aligned", ""],
+    key: item => item.alias,
+    // Compared across nodes: the same alias holding a different certificate shows as a difference.
+    value: item => `${item.subjectDN || "?"}  ·  until ${fmtDate(item.notAfter)}`,
+    detail: item => [item.issuerDN && "issuer: " + item.issuerDN,
+                     item.notBefore != null && "valid from: " + fmtDate(item.notBefore),
+                     item.notAfter != null && "valid until: " + fmtDate(item.notAfter),
+                     item.dnsNames && item.dnsNames.length && "DNS: " + item.dnsNames.join(", "),
+                     item.addedAt != null && "added: " + fmtDate(item.addedAt),
+                     item.serviceId && "service: " + item.serviceId,
+                     item.additionalInfo && item.additionalInfo].filter(Boolean).join("\n"),
+    extraCells: r => [expiryCell(r)],
+    actionCell: r => deleteCell(r.k),
+    nodesLabel: (present, total, r) => `${r.agreeing}/${total}`,
+    nodesClass: r => r.missing ? "bad" : (r.differs ? "warn" : "ok"),
+    missingTitle: "Missing on:",
+    empty: "No certificates.",
+  },
 };
 let view = "routes";
 const resultsByView = {};
@@ -245,9 +586,10 @@ async function fetchNode(node, token, path) {
 }
 
 async function run(which) {
+  if (which !== "truststore") propagation++;   // leaving the trust store stops a pending refresh loop
   view = which;
   const cfg = VIEWS[which];
-  const btn = which === "routes" ? $("run") : $("runInvalid");
+  const btn = { routes: $("run"), invalid: $("runInvalid"), truststore: $("runTrust") }[which];
   btn.disabled = true; btn.textContent = "Loading…";
   const token = await currentToken();
   resultsByView[which] = await Promise.all(nodes.map(n => fetchNode(n, token, cfg.path)));
@@ -260,7 +602,9 @@ function render() {
   const results = resultsByView[view];
   if (!results) return;
   $("results").hidden = false;
-  $("viewTitle").textContent = cfg.button === "List routes" ? "Routes" : "Invalid services";
+  $("nodeInfo").hidden = true;
+  $("viewTitle").textContent = cfg.title || (cfg.button === "List routes" ? "Routes" : "Invalid services");
+  $("tsTools").hidden = view !== "truststore";
   const ok = results.filter(r => r.items);
 
   $("summary").replaceChildren(...results.map(r => {
@@ -273,6 +617,11 @@ function render() {
     else {
       const n = r.items.length;
       line.className = view === "invalid" && n > 0 ? "warn" : "ok";
+      if (view === "truststore") {
+        const expired = r.items.filter(i => i.notAfter != null && new Date(i.notAfter) < new Date()).length;
+        if (expired) { line.className = "warn"; line.textContent = `${n} ${cfg.noun[n === 1 ? 0 : 1]}, ${expired} expired · ${r.ms} ms`; }
+        else line.textContent = `${n} ${cfg.noun[n === 1 ? 0 : 1]} · ${r.ms} ms`;
+      } else
       line.textContent = `${n} ${cfg.noun[n === 1 ? 0 : 1]} · ${r.ms} ms`;
     }
     d.append(name, line);
@@ -300,7 +649,7 @@ function render() {
     for (const item of r.items) {
       const k = cfg.key(item);
       if (!byKey.has(k)) byKey.set(k, new Map());
-      byKey.get(k).set(r.node, { value: cfg.value(item), detail: cfg.detail(item) });
+      byKey.get(k).set(r.node, { value: cfg.value(item), detail: cfg.detail(item), item });
     }
   }
 
@@ -365,18 +714,338 @@ function render() {
     nodesCell.textContent = cfg.nodesLabel(ok.length - r.missing, ok.length, r);
     nodesCell.className = cfg.nodesClass(r);
     if (r.missing) nodesCell.title = cfg.missingTitle + "\n" + ok.filter(res => !r.perNode.has(res.node)).map(res => res.node).join("\n");
-    tr.append(keyCell, valCell, nodesCell);
+    tr.append(keyCell, valCell, ...(cfg.extraCells ? cfg.extraCells(r) : []), nodesCell);
+    if (cfg.actionCell) tr.append(cfg.actionCell(r));
     return tr;
   });
   if (body.length === 0) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 3; td.textContent = ok.length ? cfg.empty : "No node answered.";
+    td.colSpan = cfg.headers.length; td.textContent = ok.length ? cfg.empty : "No node answered.";
     tr.append(td); body.push(tr);
   }
   table.replaceChildren(head, ...body);
 }
 
+
+// ---------------------------------------------------------------- node info (/info/capi + /info/health)
+let nodeInfo = null;   // [{ node, info, health, error }]
+
+// [label, value(info) -> string, compared?]. Keys /info/capi returns that are not listed here are
+// shown under "Other", so a newer CAPI's fields are not hidden.
+const list = v => Array.isArray(v) ? (v.length ? v.join(", ") : "—") : v;
+const onOff = (on, extra) => on === undefined || on === null ? undefined : (on ? "on" + (extra ? " · " + extra : "") : "off");
+const NI_GROUPS = [
+  ["Node", [
+    ["Health", (i, n) => n.health, true, []],
+    ["CAPI version", i => i.capiVersion, true, ["capiVersion"]],
+    ["Java", i => i.javaVersion, true, ["javaVersion"]],
+    ["Started", i => i.startTimestamp != null ? new Date(i.startTimestamp).toLocaleString() : undefined, false, ["startTimestamp"]],
+    ["Uptime", i => i.uptime, false, ["uptime"]],
+    ["Namespace", i => i.capiNameSpace, true, ["capiNameSpace"]],
+  ]],
+  ["Routing", [
+    ["REST routes", i => i.totalRoutes, true, ["totalRoutes"]],
+    ["Services cached", i => i.serviceCount, true, ["serviceCount"]],
+    ["Invalid services", i => i.invalidServiceCount, true, ["invalidServiceCount"]],
+    ["WebSocket routes", i => i.websocketRoutes, true, ["websocketRoutes"]],
+    ["WebDAV routes", i => i.webdavRoutes, true, ["webdavRoutes"]],
+    ["Consul hosts", i => list(i.consulHosts), true, ["consulEnabled", "consulHosts"]],
+    ["Consul interval", i => i.consulTimerInterval, true, ["consulTimerInterval"]],
+    ["Routes path", i => i.routesContextPath, true, ["routesContextPath"]],
+    ["Reverse proxy host", i => i.reverseProxyHost, true, ["reverseProxyHost"]],
+  ]],
+  ["Security", [
+    ["OAuth2", i => onOff(i.oauth2Enabled, i.oauth2Endpoint), true, ["oauth2Enabled", "oauth2Endpoint"]],
+    ["Token cookie", i => i.oauth2CookieName, true, ["oauth2CookieName"]],
+    ["JWKS key ids", i => i.jwksKeyIds ? Object.entries(i.jwksKeyIds).map(([iss, k]) => `${iss}: ${list(k)}`).join("\n") : undefined, true, ["jwksKeyIds"]],
+    ["OPA", i => onOff(i.opaEnabled, i.opaWasmBundleUrl), true, ["opaEnabled", "opaWasmBundleUrl"]],
+    ["API keys", i => onOff(i.apiKeyStoreEnabled), true, ["apiKeyStoreEnabled"]],
+    ["Throttle", i => onOff(i.throttleEnabled), true, ["throttleEnabled"]],
+    ["Trust store", i => onOff(i.trustStoreEnabled), true, ["trustStoreEnabled"]],
+    ["SSL", i => onOff(i.sslEnabled), true, ["sslEnabled"]],
+    ["CORS", i => onOff(i.corsEnabled), true, ["corsEnabled"]],
+  ]],
+  ["Listeners", [
+    ["REST port", i => i.restPort, true, ["restPort"]],
+    ["Admin port", i => i.adminPort, true, ["adminPort"]],
+    ["WebSocket", i => onOff(i.websocketEnabled, i.websocketPort && "port " + i.websocketPort), true, ["websocketEnabled", "websocketPort"]],
+    ["gRPC", i => onOff(i.grpcEnabled, i.grpcPort && "port " + i.grpcPort), true, ["grpcEnabled", "grpcPort"]],
+    ["MCP", i => onOff(i.mcpEnabled, i.mcpPort && "port " + i.mcpPort), true, ["mcpEnabled", "mcpPort"]],
+  ]],
+  ["Observability", [
+    ["Traces", i => onOff(i.tracesEnabled, i.tracesEndpoint), true, ["tracesEnabled", "tracesEndpoint"]],
+    ["Metrics path", i => i.metricsContextPath, true, ["metricsContextPath"]],
+  ]],
+];
+
+async function runNodeInfo() {
+  const btn = $("runInfo");
+  btn.disabled = true; btn.textContent = "Loading…";
+  propagation++;
+  const token = await currentToken();
+  nodeInfo = await Promise.all(nodes.map(async node => {
+    const [info, health] = await Promise.all([fetchObject(node, token, "/info/capi"), fetchHealth(node)]);
+    return { node, info: info.data, error: info.error, health };
+  }));
+  btn.disabled = false; btn.textContent = "Node info";
+  $("results").hidden = true; $("ops").hidden = true;
+  renderNodeInfo();
+}
+
+// /info/health needs no token and answers 503 {"status":"DOWN"} when the node lost Consul.
+async function fetchHealth(node) {
+  try {
+    const res = await fetch("/proxy", { method: "POST", headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({ node, token: "", path: "/info/health" }) });
+    const out = await res.json();
+    if (out.error) return "unreachable";
+    try { return JSON.parse(out.body).status || `HTTP ${out.status}`; } catch { return `HTTP ${out.status}`; }
+  } catch { return "unreachable"; }
+}
+
+function renderNodeInfo() {
+  if (!nodeInfo) return;
+  $("nodeInfo").hidden = false;
+  const onlyDiff = $("niOnlyDiff").checked;
+  const answered = nodeInfo.filter(n => n.info);
+  const known = new Set(NI_GROUPS.flatMap(([, rows]) => rows.flatMap(r => r[3])));
+  const other = [...new Set(answered.flatMap(n => Object.keys(n.info)))].filter(k => !known.has(k)).sort()
+    .map(k => [k, i => { const v = i[k]; return v !== null && typeof v === "object" ? JSON.stringify(v) : v; }, true, [k]]);
+  const groups = other.length ? [...NI_GROUPS, ["Other", other]] : NI_GROUPS;
+
+  const head = document.createElement("tr");
+  const th0 = document.createElement("th"); th0.textContent = "Setting"; head.append(th0);
+  for (const n of nodeInfo) {
+    const th = document.createElement("th"); th.className = "node-col"; th.textContent = n.node.replace(/^https?:\/\//, "");
+    th.title = n.node; head.append(th);
+  }
+  const thA = document.createElement("th"); thA.textContent = "Aligned"; head.append(thA);
+
+  const rows = [head];
+  let compared = 0, differing = 0;
+  for (const [group, fields] of groups) {
+    const groupRows = [];
+    for (const [label, get, compare] of fields) {
+      const values = nodeInfo.map(n => {
+        if (label === "Health") return n.health;
+        if (!n.info) return undefined;
+        const v = get(n.info, n);
+        return v === undefined || v === null || v === "" ? "—" : String(v);
+      });
+      const present = values.filter(v => v !== undefined);
+      if (!present.length || present.every(v => v === "—") && label !== "Health") continue;
+      const counts = new Map();
+      present.forEach(v => counts.set(v, (counts.get(v) || 0) + 1));
+      const [majority, agreeing] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+      const differs = compare && counts.size > 1;
+      if (compare) { compared++; if (differs) differing++; }
+      if (onlyDiff && !differs) continue;
+      const tr = document.createElement("tr");
+      const k = document.createElement("td"); k.className = "k"; k.textContent = label; tr.append(k);
+      values.forEach((v, idx) => {
+        const td = document.createElement("td"); td.className = "v";
+        td.style.whiteSpace = "pre-line";
+        if (v === undefined) { td.textContent = nodeInfo[idx].error ? "?" : "—"; td.title = nodeInfo[idx].error || ""; td.classList.add("info"); }
+        else td.textContent = v;
+        if (label === "Health" && v !== "UP") td.className = "v bad";
+        else if (differs && v !== undefined && v !== majority) td.classList.add("odd");
+        if (!compare) td.classList.add("info");
+        tr.append(td);
+      });
+      const a = document.createElement("td");
+      if (compare) { a.textContent = `${agreeing}/${nodeInfo.length}`; a.className = differs || agreeing < nodeInfo.length ? "warn" : "ok"; }
+      else { a.textContent = "·"; a.className = "info"; a.title = "Not compared"; }
+      tr.append(a);
+      groupRows.push(tr);
+    }
+    if (groupRows.length) {
+      const g = document.createElement("tr"); g.className = "group";
+      const td = document.createElement("td"); td.colSpan = nodeInfo.length + 2; td.textContent = group;
+      g.append(td);
+      rows.push(g, ...groupRows);
+    }
+  }
+  $("niTable").replaceChildren(...rows);
+
+  const versions = new Map();
+  answered.forEach(n => versions.set(n.info.capiVersion, (versions.get(n.info.capiVersion) || 0) + 1));
+  const failed = nodeInfo.length - answered.length;
+  const down = nodeInfo.filter(n => n.health !== "UP").length;
+  const versionText = versions.size === 1 ? `all on ${[...versions.keys()][0]}`
+    : versions.size ? "mixed versions: " + [...versions.entries()].map(([v, c]) => `${v} on ${c}`).join(", ") : "";
+  $("niAlign").className = "align " + (differing || failed || down || versions.size > 1 ? "warn" : "ok");
+  $("niAlign").textContent = [
+    answered.length && `${compared - differing} of ${compared} settings aligned on ${answered.length}/${nodeInfo.length} nodes`,
+    versionText,
+    down && `${down} node${down > 1 ? "s" : ""} not UP`,
+    failed && `${failed} not answering /info/capi`,
+  ].filter(Boolean).join(" · ") || "No node answered.";
+}
+$("runInfo").onclick = runNodeInfo;
+$("niOnlyDiff").onchange = renderNodeInfo;
+
+// ---------------------------------------------------------------- export / import instances
+function instMessage(text, cls) { $("instMsg").className = "msg " + (cls || ""); $("instMsg").textContent = text; }
+$("instExport").onclick = () => {
+  if (!instances.length) { instMessage("Nothing to export yet.", "warn"); return; }
+  const data = { format: "capi-routes-viewer/instances", version: 1, instances };
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+  a.download = "capi-instances.json";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  instMessage(`Exported ${instances.length} instance${instances.length > 1 ? "s" : ""}.`, "ok");
+};
+$("instImport").onclick = () => $("instImportFile").click();
+$("instImportFile").onchange = async () => {
+  const f = $("instImportFile").files[0];
+  $("instImportFile").value = "";
+  if (!f) return;
+  try {
+    const data = JSON.parse(await f.text());
+    const incoming = (Array.isArray(data) ? data : data.instances || []).filter(i => i && typeof i.name === "string" && i.name.trim() && Array.isArray(i.nodes));
+    if (!incoming.length) throw new Error("no instances in that file");
+    let added = 0, updated = 0;
+    for (const i of incoming) {
+      // Only names, node URLs and the Consul URL are taken; anything else in the file is ignored.
+      const clean = { name: i.name.trim(), nodes: [...new Set(i.nodes.map(String).filter(n => /^https?:\/\//i.test(n)).map(normalize))] };
+      if (typeof i.consul === "string" && /^https?:\/\//i.test(i.consul)) clean.consul = normalize(i.consul);
+      if (typeof i.cluster === "string") clean.cluster = i.cluster;
+      const existing = instances.find(x => x.name.toLowerCase() === clean.name.toLowerCase());
+      if (existing) { Object.assign(existing, clean, { name: existing.name }); updated++; }   // keep the name, so a selected tab stays selected else { instances.push(clean); added++; }
+    }
+    if (!current) { current = instances[0].name; }
+    nodes = instances.find(x => x.name === current)?.nodes ?? [];
+    save(); resetResults(); renderInstances();
+    instMessage(`Imported: ${added} new, ${updated} replaced (same name).`, "ok");
+  } catch (e) {
+    instMessage("Import failed: " + e.message, "bad");
+  }
+};
+
+// ---------------------------------------------------------------- trust store
+const VIA_KEY = "capi-routes-viewer.truststore-via";
+const DAY = 86400000;
+
+function fmtDate(v) {
+  if (v === undefined || v === null) return "?";
+  const d = new Date(v);
+  return isNaN(d) ? String(v) : d.toISOString().slice(0, 10);
+}
+
+// Expiry of the certificate held under this alias; the earliest one when nodes disagree.
+function expiryCell(r) {
+  const td = document.createElement("td");
+  const dates = [...r.perNode.values()].map(v => v.item.notAfter).filter(v => v != null).map(v => new Date(v));
+  if (!dates.length) { td.textContent = "?"; return td; }
+  const left = Math.min(...dates) - Date.now();
+  const days = Math.round(Math.abs(left) / DAY);
+  td.textContent = left < 0 ? `expired ${days} d ago` : `in ${days} d`;
+  td.className = left < 0 ? "bad" : (left < 30 * DAY ? "warn" : "ok");
+  td.title = dates.map(d => d.toISOString()).join("\n");
+  return td;
+}
+
+function renderVia() {
+  const sel = $("tsVia");
+  let saved = sel.value;
+  try { saved = saved || localStorage.getItem(VIA_KEY); } catch { /* storage unavailable */ }
+  sel.replaceChildren(...nodes.map(n => { const o = document.createElement("option"); o.value = o.textContent = n; return o; }));
+  if (nodes.includes(saved)) sel.value = saved;
+  $("tsAdd").disabled = nodes.length === 0;
+}
+
+function tsMessage(text, cls) {
+  $("tsMsg").className = "msg " + (cls || "");
+  $("tsMsg").textContent = text;
+}
+
+// A write through the selected node. Returns { ok, text }.
+async function writeTrust(method, path, body) {
+  const node = $("tsVia").value;
+  try {
+    const res = await fetch("/proxy", { method: "POST", headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({ node, token: await currentToken(), path, method, body }) });
+    const out = await res.json();
+    if (out.error) return { ok: false, text: out.error };
+    let msg = out.body;
+    try { const j = JSON.parse(out.body); msg = j.message || j.errorMessage || j.error || out.body; } catch { /* not JSON */ }
+    return { ok: out.status === 200, text: out.status === 200 ? msg : `HTTP ${out.status}: ${String(msg).slice(0, 300)}` };
+  } catch (e) {
+    return { ok: false, text: "Local helper unreachable: " + e.message };
+  }
+}
+
+// Every answering node reloads from Consul KV on its own schedule; poll until they all agree.
+let propagation = 0;
+async function awaitPropagation(done, label) {
+  const mine = ++propagation;
+  const until = Date.now() + 120000;
+  while (mine === propagation) {
+    await run("truststore");
+    const ok = (resultsByView.truststore || []).filter(r => r.items);
+    const there = ok.filter(r => done(r.items)).length;
+    if (ok.length && there === ok.length) { tsMessage(`${label} · on ${there}/${ok.length} nodes`, "ok"); return; }
+    if (Date.now() > until) {
+      tsMessage(`${label} · on ${there}/${ok.length} nodes after 2 min. The rest pick it up on their next Consul KV sync; refresh with Truststore.`, "warn");
+      return;
+    }
+    tsMessage(`${label} · waiting for the nodes to reload: ${there}/${ok.length}`, "warn");
+    await new Promise(res => setTimeout(res, 5000));
+  }
+}
+
+async function addCertificates() {
+  const blocks = $("tsPem").value.match(/-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/g) || [];
+  if (!blocks.length) { tsMessage("Paste or choose a PEM certificate first.", "bad"); return; }
+  try { localStorage.setItem(VIA_KEY, $("tsVia").value); } catch { /* ignore */ }
+  const before = new Set(((resultsByView.truststore || []).find(r => r.items) || { items: [] }).items.map(i => i.alias));
+  $("tsAdd").disabled = true;
+  const lines = [];
+  let added = 0;
+  // One at a time: each write reads the store from Consul KV, adds one entry and writes it back.
+  for (let i = 0; i < blocks.length; i++) {
+    tsMessage(`Adding ${i + 1}/${blocks.length}…`);
+    const r = await writeTrust("PUT", "/info/truststore", blocks[i] + "\n");
+    lines.push(`${blocks.length > 1 ? `#${i + 1}: ` : ""}${r.text}`);
+    if (r.ok) added++;
+  }
+  $("tsAdd").disabled = false;
+  if (!added) { tsMessage(lines.join("\n"), "bad"); return; }
+  $("tsPem").value = ""; $("tsFile").value = "";
+  const summary = lines.join("\n");
+  await awaitPropagation(items => items.filter(i => !before.has(i.alias)).length >= added, summary);
+}
+
+function deleteCell(alias) {
+  const td = document.createElement("td");
+  td.className = "act";
+  const btn = document.createElement("button");
+  btn.className = "danger"; btn.textContent = "Delete"; btn.title = `Remove ${alias} from the trust store on every node`;
+  let timer = null;
+  btn.onclick = async () => {
+    if (!btn.classList.contains("armed")) {
+      btn.classList.add("armed"); btn.textContent = "Confirm";
+      timer = setTimeout(() => { btn.classList.remove("armed"); btn.textContent = "Delete"; }, 4000);
+      return;
+    }
+    clearTimeout(timer);
+    btn.disabled = true; btn.textContent = "Deleting…";
+    try { localStorage.setItem(VIA_KEY, $("tsVia").value); } catch { /* ignore */ }
+    const r = await writeTrust("DELETE", "/info/truststore/" + encodeURIComponent(alias));
+    if (!r.ok) { tsMessage(`${alias}: ${r.text}`, "bad"); btn.disabled = false; btn.classList.remove("armed"); btn.textContent = "Delete"; return; }
+    await awaitPropagation(items => !items.some(i => i.alias === alias), r.text);
+  };
+  td.append(btn);
+  return td;
+}
+
+$("tsAdd").onclick = addCertificates;
+$("tsFile").onchange = async () => {
+  const f = $("tsFile").files[0];
+  if (f) $("tsPem").value = await f.text();
+};
 
 // ---------------------------------------------------------------- operations of one service
 const METHODS = ["get", "put", "post", "delete", "options", "head", "patch", "trace"];
@@ -674,14 +1343,16 @@ setInterval(() => { if (auth.token) renderAuth(); }, 15000);
 renderAuth();
 
 $("add").onclick = addNode;
-$("node").addEventListener("keydown", e => { if (e.key === "Enter") addNode(); });
+$("node").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); addNode(); } });
 $("run").onclick = () => run("routes");
 $("runInvalid").onclick = () => run("invalid");
+$("runTrust").onclick = () => { propagation++; run("truststore"); };
 $("filter").oninput = render;
 $("onlyDiff").onchange = render;
 $("opsOnlyDiff").onchange = renderOperations;
 $("opsClose").onclick = () => { $("ops").hidden = true; opsState = null; };
-load(); renderChips();
+load(); renderInstances();
+if (!instances.length) openInstance(null);
 </script>
 </body>
 </html>
