@@ -1,0 +1,687 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CAPI Routes</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --line: #e2e1dc;
+    --accent: #2f5fd0; --ok: #1f7a3f; --bad: #b3261e; --warn: #9a6200; --chip: #eef1fa;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161615; --panel: #1f1f1d; --text: #ecebe6; --muted: #9c9b95; --line: #33332f;
+      --accent: #7ea2ff; --ok: #6cc28a; --bad: #ff8a80; --warn: #e0b45a; --chip: #262a36;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+            padding: 16px; margin-bottom: 16px; }
+  label { display: block; font-weight: 600; margin-bottom: 6px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  input { flex: 1 1 260px; min-width: 0; padding: 8px 10px; border: 1px solid var(--line);
+          border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
+  button { padding: 8px 14px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer;
+           background: var(--panel); color: var(--text); font: inherit; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--chip);
+          border-radius: 999px; padding: 4px 6px 4px 12px; font-family: ui-monospace, monospace; font-size: 13px; }
+  .chip button { border: 0; background: transparent; padding: 0 6px; color: var(--muted); }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .summary { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .node { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; min-width: 180px; }
+  .node b { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { position: sticky; top: 0; background: var(--panel); }
+  td.mono, .mono { font-family: ui-monospace, monospace; }
+  .scroll { overflow-x: auto; }
+  .filters { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+  .filters label { display: inline-flex; gap: 6px; font-weight: 400; margin: 0; }
+  .align { margin: 0 0 12px; font-weight: 600; }
+  .delta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  button.link { border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer;
+                font: inherit; text-align: left; text-decoration: underline; text-underline-offset: 2px; }
+  .flags { display: grid; grid-template-columns: max-content 1fr max-content; gap: 4px 16px; margin-bottom: 14px; font-size: 13px; }
+  .flags .k { color: var(--muted); }
+  .method { display: inline-block; min-width: 56px; font-weight: 700; }
+  .close { float: right; }
+  header.top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+  header.top > div:first-child { flex: 1 1 420px; min-width: 0; }
+  header.top .sub { margin-bottom: 0; }
+  .auth { display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--line);
+          border-radius: 10px; padding: 8px 12px; font-size: 13px; }
+  .auth .who { font-family: ui-monospace, monospace; font-weight: 600; }
+  .auth .exp { color: var(--muted); }
+  dialog { border: 1px solid var(--line); border-radius: 12px; padding: 20px; width: min(460px, calc(100vw - 32px));
+           background: var(--panel); color: var(--text); }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  dialog h2 { font-size: 16px; margin: 0 0 14px; }
+  dialog label { margin: 12px 0 4px; }
+  dialog input, dialog textarea { width: 100%; }
+  dialog textarea { min-height: 70px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px;
+                    background: var(--bg); color: var(--text); font: 12px ui-monospace, monospace; }
+  .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  .err { color: var(--bad); font-size: 13px; margin-top: 10px; white-space: pre-wrap; }
+  details { margin-top: 14px; font-size: 13px; }
+  summary { cursor: pointer; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <header class="top">
+    <div>
+      <h1>CAPI Routes</h1>
+      <p class="sub">Compares <span class="mono">/info/routes</span> and <span class="mono">/info/invalid-services</span> across nodes. Click a route for its operations and security on every node.</p>
+    </div>
+    <div class="auth" id="authBox"></div>
+  </header>
+
+  <section>
+    <label for="node">Nodes</label>
+    <div class="row">
+      <input id="node" placeholder="http://capi-node-1.example.com:8381" autocomplete="off">
+      <button id="add">Add</button>
+    </div>
+    <div class="chips" id="chips"></div>
+    <div class="hint">Base URL of each node's admin port. The list is remembered in this browser; tokens and secrets are not.</div>
+  </section>
+
+  <section>
+    <div class="row">
+      <button class="primary" id="run">List routes</button>
+      <button id="runInvalid">Invalid services</button>
+    </div>
+  </section>
+
+  <dialog id="authDialog">
+    <form method="dialog" id="authForm">
+      <h2>Authenticate</h2>
+      <label for="issuer">Issuer</label>
+      <input id="issuer" placeholder="https://idp.example.com/realms/ops" autocomplete="off" required>
+      <label for="clientId">Client</label>
+      <input id="clientId" placeholder="capi-ops" autocomplete="off" required>
+      <label for="clientSecret">Secret</label>
+      <input id="clientSecret" type="password" autocomplete="off">
+      <div class="err" id="authErr"></div>
+      <details>
+        <summary>Paste a token instead</summary>
+        <textarea id="pasted" placeholder="eyJhbGciOi…"></textarea>
+        <div class="actions"><button type="button" id="usePasted">Use token</button></div>
+      </details>
+      <div class="actions">
+        <button type="button" id="authCancel">Cancel</button>
+        <button class="primary" type="submit" id="authGo">Authenticate</button>
+      </div>
+    </form>
+  </dialog>
+
+  <section id="results" hidden>
+    <h2 id="viewTitle" style="font-size:16px;margin:0 0 10px"></h2>
+    <div class="summary" id="summary"></div>
+    <p class="align" id="align"></p>
+    <div class="filters">
+      <input id="filter" placeholder="Filter" style="flex:1 1 240px">
+      <label><input type="checkbox" id="onlyDiff" style="flex:none"> Only rows that differ between nodes</label>
+    </div>
+    <div class="scroll"><table id="table"></table></div>
+  </section>
+
+  <section id="ops" hidden>
+    <button class="close" id="opsClose">Close</button>
+    <h2 id="opsTitle" style="font-size:16px;margin:0 0 10px"></h2>
+    <div class="summary" id="opsSummary"></div>
+    <div class="flags" id="opsFlags"></div>
+    <p class="align" id="opsAlign"></p>
+    <div class="filters">
+      <label><input type="checkbox" id="opsOnlyDiff" style="flex:none"> Only operations that differ between nodes</label>
+    </div>
+    <div class="scroll"><table id="opsTable"></table></div>
+  </section>
+</main>
+
+<script>
+const KEY = "capi-routes-viewer.nodes";
+const $ = id => document.getElementById(id);
+let nodes = [];
+let lastResults = null;
+
+function load() {
+  try { nodes = JSON.parse(localStorage.getItem(KEY)) || []; } catch { nodes = []; }
+}
+function save() {
+  try { localStorage.setItem(KEY, JSON.stringify(nodes)); } catch { /* storage unavailable */ }
+}
+function normalize(url) {
+  url = url.trim().replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(url)) url = "http://" + url;
+  return url;
+}
+function renderChips() {
+  const box = $("chips");
+  box.replaceChildren(...nodes.map((n, i) => {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.textContent = n;
+    const x = document.createElement("button");
+    x.textContent = "×";
+    x.title = "Remove";
+    x.onclick = () => { nodes.splice(i, 1); save(); renderChips(); };
+    chip.append(x);
+    return chip;
+  }));
+  $("run").disabled = nodes.length === 0;
+  $("runInvalid").disabled = nodes.length === 0;
+}
+function addNode() {
+  const raw = $("node").value;
+  raw.split(/[\s,]+/).filter(Boolean).forEach(v => {
+    const n = normalize(v);
+    if (!nodes.includes(n)) nodes.push(n);
+  });
+  $("node").value = "";
+  save(); renderChips();
+}
+
+const VIEWS = {
+  routes: {
+    path: "/info/routes",
+    button: "List routes",
+    noun: ["route", "routes"],
+    headers: ["Route", "Endpoints", "Aligned"],
+    key: item => item.id,
+    value: item => (item.endpoints || []).slice().sort().join(", "),
+    detail: () => null,
+    nodesLabel: (present, total, r) => `${r.agreeing}/${total}`,
+    nodesClass: r => r.missing ? "bad" : (r.differs ? "warn" : "ok"),
+    missingTitle: "Missing on:",
+    empty: "No routes match.",
+  },
+  invalid: {
+    path: "/info/invalid-services",
+    button: "Invalid services",
+    noun: ["invalid service", "invalid services"],
+    headers: ["Service", "Reason", "Invalid on"],
+    key: item => item.serviceId,
+    value: item => `${item.reason || "?"}: ${item.detail || ""}`.trim(),
+    detail: item => [item.openApiEndpoint && "spec: " + item.openApiEndpoint, item.detectedAt && "since: " + item.detectedAt]
+                      .filter(Boolean).join("\n"),
+    nodesLabel: (present, total) => `${present}/${total}`,
+    nodesClass: r => r.missing ? "warn" : "bad",
+    missingTitle: "Routed normally on:",
+    empty: "No invalid services.",
+  },
+};
+let view = "routes";
+const resultsByView = {};
+
+async function fetchNode(node, token, path) {
+  const started = performance.now();
+  try {
+    const res = await fetch("/proxy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ node, token, path }),
+    });
+    const body = await res.json();
+    const ms = Math.round(performance.now() - started);
+    if (body.error) return { node, ms, error: body.error };
+    if (body.status !== 200) return { node, ms, error: `HTTP ${body.status}: ${String(body.body).slice(0, 200)}` };
+    let items;
+    try { items = JSON.parse(body.body); } catch { return { node, ms, error: "Response is not JSON" }; }
+    return { node, ms, items: Array.isArray(items) ? items : [] };
+  } catch (e) {
+    return { node, ms: Math.round(performance.now() - started), error: "Local helper unreachable: " + e.message };
+  }
+}
+
+async function run(which) {
+  view = which;
+  const cfg = VIEWS[which];
+  const btn = which === "routes" ? $("run") : $("runInvalid");
+  btn.disabled = true; btn.textContent = "Loading…";
+  const token = await currentToken();
+  resultsByView[which] = await Promise.all(nodes.map(n => fetchNode(n, token, cfg.path)));
+  btn.disabled = false; btn.textContent = cfg.button;
+  render();
+}
+
+function render() {
+  const cfg = VIEWS[view];
+  const results = resultsByView[view];
+  if (!results) return;
+  $("results").hidden = false;
+  $("viewTitle").textContent = cfg.button === "List routes" ? "Routes" : "Invalid services";
+  const ok = results.filter(r => r.items);
+
+  $("summary").replaceChildren(...results.map(r => {
+    const d = document.createElement("div");
+    d.className = "node";
+    const name = document.createElement("b");
+    name.textContent = r.node;
+    const line = document.createElement("div");
+    if (r.error) { line.className = "bad"; line.textContent = r.error; }
+    else {
+      const n = r.items.length;
+      line.className = view === "invalid" && n > 0 ? "warn" : "ok";
+      line.textContent = `${n} ${cfg.noun[n === 1 ? 0 : 1]} · ${r.ms} ms`;
+    }
+    d.append(name, line);
+    if (r.items && ok.length > 1) {
+      const keys = new Set(r.items.map(cfg.key));
+      const others = new Set(ok.filter(o => o !== r).flatMap(o => o.items.map(cfg.key)));
+      const onlyHere = [...keys].filter(k => !others.has(k));
+      const missingHere = [...others].filter(k => !keys.has(k));
+      if (onlyHere.length || missingHere.length) {
+        const delta = document.createElement("div");
+        delta.className = "delta";
+        delta.textContent = [onlyHere.length && `${onlyHere.length} only here`, missingHere.length && `${missingHere.length} missing here`]
+          .filter(Boolean).join(" · ");
+        delta.title = [onlyHere.length && "Only here:\n" + onlyHere.join("\n"), missingHere.length && "Missing here:\n" + missingHere.join("\n")]
+          .filter(Boolean).join("\n\n");
+        d.append(delta);
+      }
+    }
+    return d;
+  }));
+
+  // key -> { node -> {value, detail} }
+  const byKey = new Map();
+  for (const r of ok) {
+    for (const item of r.items) {
+      const k = cfg.key(item);
+      if (!byKey.has(k)) byKey.set(k, new Map());
+      byKey.get(k).set(r.node, { value: cfg.value(item), detail: cfg.detail(item) });
+    }
+  }
+
+  const q = $("filter").value.trim().toLowerCase();
+  const onlyDiff = $("onlyDiff").checked;
+  const rows = [...byKey.keys()].sort().map(k => {
+    const perNode = byKey.get(k);
+    const values = ok.map(r => perNode.get(r.node)?.value);
+    const missing = values.filter(v => v === undefined).length;
+    const distinct = new Set(values.filter(v => v !== undefined)).size;
+    const differs = missing > 0 || distinct > 1;
+    const present = values.filter(v => v !== undefined);
+    const agreeing = present.length ? Math.max(...[...new Set(present)].map(v => present.filter(x => x === v).length)) : 0;
+    return { k, perNode, missing, agreeing, differs, text: (k + " " + values.join(" ")).toLowerCase() };
+  });
+  const differing = rows.filter(r => r.differs).length;
+  const failed = results.length - ok.length;
+  $("align").className = "align " + (differing || failed ? "warn" : "ok");
+  $("align").textContent = ok.length === 0 ? "" :
+    `${rows.length - differing} of ${rows.length} aligned on ${ok.length}/${results.length} nodes` +
+    (differing ? ` · ${differing} differ` : "") + (failed ? ` · ${failed} node${failed > 1 ? "s" : ""} not answering` : "");
+  const shown = rows.filter(r => (!q || r.text.includes(q)) && (!onlyDiff || r.differs));
+
+  const table = $("table");
+  const head = document.createElement("tr");
+  cfg.headers.forEach(t => { const th = document.createElement("th"); th.textContent = t; head.append(th); });
+  const body = shown.map(r => {
+    const tr = document.createElement("tr");
+    const keyCell = document.createElement("td");
+    keyCell.className = "mono";
+    if (view === "routes") {
+      const a = document.createElement("button");
+      a.className = "link mono"; a.textContent = r.k; a.title = "Operations and security on every node";
+      a.onclick = () => showOperations(r.k);
+      keyCell.append(a);
+    } else {
+      keyCell.textContent = r.k;
+    }
+    const valCell = document.createElement("td");
+    valCell.className = "mono";
+    const variants = new Map();
+    for (const res of ok) {
+      const v = r.perNode.get(res.node);
+      if (v === undefined) continue;
+      if (!variants.has(v.value)) variants.set(v.value, { nodes: [], detail: v.detail });
+      variants.get(v.value).nodes.push(res.node);
+    }
+    if (variants.size <= 1) {
+      const [only] = variants.entries();
+      valCell.textContent = only ? (only[0] || "—") : "—";
+      if (only && only[1].detail) valCell.title = only[1].detail;
+    } else {
+      for (const [v, info] of variants) {
+        const div = document.createElement("div");
+        div.className = "warn";
+        div.textContent = `${v || "(none)"}  ← ${info.nodes.length} node${info.nodes.length > 1 ? "s" : ""}`;
+        div.title = info.nodes.join("\n") + (info.detail ? "\n\n" + info.detail : "");
+        valCell.append(div);
+      }
+    }
+    const nodesCell = document.createElement("td");
+    nodesCell.textContent = cfg.nodesLabel(ok.length - r.missing, ok.length, r);
+    nodesCell.className = cfg.nodesClass(r);
+    if (r.missing) nodesCell.title = cfg.missingTitle + "\n" + ok.filter(res => !r.perNode.has(res.node)).map(res => res.node).join("\n");
+    tr.append(keyCell, valCell, nodesCell);
+    return tr;
+  });
+  if (body.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 3; td.textContent = ok.length ? cfg.empty : "No node answered.";
+    tr.append(td); body.push(tr);
+  }
+  table.replaceChildren(head, ...body);
+}
+
+
+// ---------------------------------------------------------------- operations of one service
+const METHODS = ["get", "put", "post", "delete", "options", "head", "patch", "trace"];
+let opsState = null;
+
+// Mirrors AccessGate.operationRequiresSecurity: own security, else the global one;
+// [] or a {} entry = anonymous.
+function specSecurity(spec, op) {
+  let req = op.security;
+  let source = "own";
+  if (req === undefined || req === null) { req = spec.security; source = "global"; }
+  if (!req || req.length === 0) return { secured: false, label: req ? "none ([])" : "none" };
+  if (req.some(r => !r || Object.keys(r).length === 0)) return { secured: false, label: "optional ({})" };
+  const schemes = [...new Set(req.flatMap(r => Object.keys(r)))].join(", ");
+  return { secured: true, label: `${schemes}${source === "global" ? " (global)" : ""}` };
+}
+
+// Mirrors AccessGate.requiresAuthorization + authorize, for a service with a loaded spec.
+function gate(meta, opSecured) {
+  const secured = !!meta.secured;
+  const needs = secured || opSecured;
+  if (!needs) return { cls: "ok", text: "anonymous" };
+  const rules = [meta.subscriptionGroup && `group ${meta.subscriptionGroup}`, meta.opaRego && `policy ${meta.opaRego}`].filter(Boolean);
+  if (rules.length === 0) return { cls: "bad", text: "refused (403, no rule)" };
+  return { cls: "warn", text: "token + " + rules.join(" + ") };
+}
+
+async function fetchObject(node, token, path) {
+  try {
+    const res = await fetch("/proxy", { method: "POST", headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({ node, token, path }) });
+    const body = await res.json();
+    if (body.error) return { error: body.error };
+    if (body.status !== 200) return { error: `HTTP ${body.status}`, status: body.status };
+    return { data: JSON.parse(body.body) };
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
+async function showOperations(routeId) {
+  const token = await currentToken();
+  const [a, b] = routeId.split(":");
+  const candidates = [routeId, `${b}:${a}`]; // route-group-first routes list as group:name
+  $("ops").hidden = false;
+  $("opsTitle").textContent = `Operations · ${routeId} · loading…`;
+  $("opsTable").replaceChildren(); $("opsFlags").replaceChildren(); $("opsSummary").replaceChildren(); $("opsAlign").textContent = "";
+  $("ops").scrollIntoView({ behavior: "smooth", block: "start" });
+
+  const perNode = await Promise.all(nodes.map(async node => {
+    let meta = null, id = null, err = null;
+    for (const c of candidates) {
+      const m = await fetchObject(node, token, `/info/routes/${c}`);
+      if (m.data) { meta = m.data.serviceMeta || {}; id = c; break; }
+      err = m.error;
+    }
+    if (!meta) return { node, error: "service: " + err };
+    const sp = await fetchObject(node, token, `/info/openapi/${id}`);
+    return { node, id, meta, spec: sp.data || null, specError: sp.data ? null : sp.error };
+  }));
+  opsState = { routeId, perNode };
+  renderOperations();
+}
+
+function renderOperations() {
+  if (!opsState) return;
+  const { routeId, perNode } = opsState;
+  const ok = perNode.filter(p => !p.error);
+  $("opsTitle").textContent = `Operations · ${routeId}`;
+
+  $("opsSummary").replaceChildren(...perNode.map(p => {
+    const d = document.createElement("div"); d.className = "node";
+    const name = document.createElement("b"); name.textContent = p.node;
+    const line = document.createElement("div");
+    if (p.error) { line.className = "bad"; line.textContent = p.error; }
+    else if (!p.spec) { line.className = "warn"; line.textContent = p.meta.openApi ? `spec declared, not loaded (${p.specError})` : "no OpenAPI spec"; }
+    else { const n = Object.values(p.spec.paths || {}).reduce((acc, it) => acc + METHODS.filter(m => it && it[m]).length, 0);
+           line.className = "ok"; line.textContent = `${n} operation${n === 1 ? "" : "s"}`; }
+    d.append(name, line); return d;
+  }));
+
+  // Service-level flags, compared across nodes.
+  const flags = [
+    ["secured", m => String(!!m.secured)],
+    ["subscription-group", m => m.subscriptionGroup || "—"],
+    ["opa-rego", m => m.opaRego || "—"],
+    ["open-api", m => m.openApi || "—"],
+    ["version", m => m.version || "—"],
+  ];
+  const flagCells = [];
+  for (const [label, get] of flags) {
+    const values = ok.map(p => get(p.meta));
+    const distinct = [...new Set(values)];
+    const k = document.createElement("span"); k.className = "k"; k.textContent = label;
+    const v = document.createElement("span"); v.className = "mono";
+    v.textContent = distinct.length <= 1 ? (distinct[0] ?? "—") : distinct.map(d => `${d} ← ${values.filter(x => x === d).length}`).join("   ");
+    if (distinct.length > 1) v.className = "mono warn";
+    const n = document.createElement("span");
+    const same = distinct.length <= 1 ? ok.length : Math.max(...distinct.map(d => values.filter(x => x === d).length));
+    n.textContent = `${same}/${ok.length}`; n.className = distinct.length > 1 ? "warn" : "ok";
+    flagCells.push(k, v, n);
+  }
+  $("opsFlags").replaceChildren(...flagCells);
+
+  // method+path -> node -> "spec security | gate"
+  const byOp = new Map();
+  const withSpec = ok.filter(p => p.spec);
+  for (const p of withSpec) {
+    for (const [path, item] of Object.entries(p.spec.paths || {})) {
+      for (const m of METHODS) {
+        const op = item && item[m];
+        if (!op) continue;
+        const key = `${m.toUpperCase()} ${path}`;
+        const sec = specSecurity(p.spec, op);
+        const g = gate(p.meta, sec.secured);
+        if (!byOp.has(key)) byOp.set(key, { method: m.toUpperCase(), path, nodes: new Map() });
+        byOp.get(key).nodes.set(p.node, { sec, g, value: `${sec.label} → ${g.text}` });
+      }
+    }
+  }
+  const rows = [...byOp.values()].sort((x, y) => x.path.localeCompare(y.path) || METHODS.indexOf(x.method.toLowerCase()) - METHODS.indexOf(y.method.toLowerCase()))
+    .map(r => {
+      const values = withSpec.map(p => r.nodes.get(p.node)?.value);
+      const missing = values.filter(v => v === undefined).length;
+      const present = values.filter(v => v !== undefined);
+      const distinct = new Set(present).size;
+      const agreeing = present.length ? Math.max(...[...new Set(present)].map(v => present.filter(x => x === v).length)) : 0;
+      return { ...r, missing, agreeing, differs: missing > 0 || distinct > 1 };
+    });
+  const differing = rows.filter(r => r.differs).length;
+  $("opsAlign").className = "align " + (differing || withSpec.length < perNode.length ? "warn" : "ok");
+  $("opsAlign").textContent = withSpec.length === 0 ? "No node has a spec loaded for this service — every call goes by secured alone." :
+    `${rows.length - differing} of ${rows.length} operations aligned on ${withSpec.length}/${perNode.length} nodes` + (differing ? ` · ${differing} differ` : "");
+
+  const head = document.createElement("tr");
+  ["Method", "Path", "Spec security", "Gate", "Aligned"].forEach(t => { const th = document.createElement("th"); th.textContent = t; head.append(th); });
+  const shown = rows.filter(r => !$("opsOnlyDiff").checked || r.differs);
+  const body = shown.map(r => {
+    const tr = document.createElement("tr");
+    const mCell = document.createElement("td"); mCell.className = "mono";
+    const ms = document.createElement("span"); ms.className = "method"; ms.textContent = r.method; mCell.append(ms);
+    const pCell = document.createElement("td"); pCell.className = "mono"; pCell.textContent = r.path;
+    const secCell = document.createElement("td"); secCell.className = "mono";
+    const gateCell = document.createElement("td");
+    // Each column groups nodes by its own value, so a column only splits where it really differs.
+    const fill = (cell, pick, okClass) => {
+      const groups = new Map();
+      for (const p of withSpec) {
+        const v = r.nodes.get(p.node); if (!v) continue;
+        const { text, cls } = pick(v);
+        if (!groups.has(text)) groups.set(text, { cls, nodes: [] });
+        groups.get(text).nodes.push(p.node);
+      }
+      for (const [text, g] of groups) {
+        const div = document.createElement("div");
+        div.textContent = groups.size > 1 ? `${text}  ← ${g.nodes.length}` : text;
+        div.className = groups.size > 1 ? "warn" : (okClass ? g.cls : "");
+        div.title = g.nodes.join("\n");
+        cell.append(div);
+      }
+    };
+    fill(secCell, v => ({ text: v.sec.label, cls: "" }), false);
+    fill(gateCell, v => ({ text: v.g.text, cls: v.g.cls }), true);
+    const nCell = document.createElement("td");
+    nCell.textContent = `${r.agreeing}/${withSpec.length}`;
+    nCell.className = r.missing ? "bad" : (r.differs ? "warn" : "ok");
+    nCell.title = r.differs
+      ? (r.missing ? "Missing on:\n" + withSpec.filter(p => !r.nodes.has(p.node)).map(p => p.node).join("\n") + "\n\n" : "")
+        + `${r.agreeing} of ${withSpec.length} nodes agree on spec security and gate`
+      : "Identical on every node";
+    tr.append(mCell, pCell, secCell, gateCell, nCell);
+    return tr;
+  });
+  if (body.length === 0) {
+    const tr = document.createElement("tr"); const td = document.createElement("td");
+    td.colSpan = 5; td.textContent = withSpec.length ? "No operations match." : "—"; tr.append(td); body.push(tr);
+  }
+  $("opsTable").replaceChildren(head, ...body);
+}
+
+
+// ---------------------------------------------------------------- authentication
+const AUTH_KEY = "capi-routes-viewer.auth";      // issuer + client id only; never the secret or token
+let auth = { token: "", claims: null, creds: null };   // creds (with the secret) live in memory only
+
+function decodeJwt(token) {
+  try {
+    const part = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const json = decodeURIComponent(atob(part + "===".slice((part.length + 3) % 4)).split("")
+      .map(c => "%" + c.charCodeAt(0).toString(16).padStart(2, "0")).join(""));
+    return JSON.parse(json);
+  } catch { return null; }
+}
+
+function setToken(token) {
+  auth.token = token;
+  auth.claims = decodeJwt(token);
+  renderAuth();
+}
+
+async function requestToken(creds) {
+  const res = await fetch("/token", { method: "POST", headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify(creds) });
+  const body = await res.json();
+  if (body.error || !body.access_token) throw new Error(body.error || "No token returned");
+  return body.access_token;
+}
+
+// The token to send; renewed silently when it is about to expire and the client credentials are known.
+async function currentToken() {
+  const exp = auth.claims && auth.claims.exp;
+  if (auth.token && auth.creds && exp && exp * 1000 - Date.now() < 30000) {
+    try { setToken(await requestToken(auth.creds)); } catch (e) { console.warn("Token renewal failed:", e.message); }
+  }
+  return auth.token;
+}
+
+function fmtRemaining(ms) {
+  if (ms <= 0) return "expired";
+  const m = Math.floor(ms / 60000);
+  if (m >= 60) return `in ${Math.floor(m / 60)} h ${m % 60} min`;
+  return m >= 1 ? `in ${m} min` : `in ${Math.ceil(ms / 1000)} s`;
+}
+
+function renderAuth() {
+  const box = $("authBox");
+  box.replaceChildren();
+  if (!auth.token) {
+    const span = document.createElement("span"); span.className = "exp"; span.textContent = "Not authenticated";
+    const btn = document.createElement("button"); btn.className = "primary"; btn.textContent = "Authenticate";
+    btn.onclick = openAuth;
+    box.append(span, btn);
+    return;
+  }
+  const c = auth.claims || {};
+  const who = document.createElement("span"); who.className = "who";
+  who.textContent = c.azp || c.client_id || c.sub || "token";
+  who.title = [c.iss && "iss: " + c.iss, c.sub && "sub: " + c.sub].filter(Boolean).join("\n");
+  const exp = document.createElement("span"); exp.className = "exp";
+  if (c.exp) {
+    const ms = c.exp * 1000 - Date.now();
+    exp.textContent = `expires ${new Date(c.exp * 1000).toLocaleTimeString()} (${fmtRemaining(ms)})`
+      + (auth.creds ? " · auto-renew" : "");
+    if (ms <= 0 && !auth.creds) exp.className = "bad";
+    else if (ms < 120000) exp.className = "warn";
+  } else {
+    exp.textContent = "no expiry";
+  }
+  const change = document.createElement("button"); change.textContent = "Change"; change.onclick = openAuth;
+  const out = document.createElement("button"); out.textContent = "Sign out";
+  out.onclick = () => { auth = { token: "", claims: null, creds: null }; renderAuth(); };
+  box.append(who, exp, change, out);
+}
+
+function openAuth() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(AUTH_KEY)) || {};
+    if (!$("issuer").value) $("issuer").value = saved.issuer || "";
+    if (!$("clientId").value) $("clientId").value = saved.clientId || "";
+  } catch { /* storage unavailable */ }
+  $("clientSecret").value = "";
+  $("pasted").value = "";
+  $("authErr").textContent = "";
+  $("authDialog").showModal();
+  ($("issuer").value ? ($("clientId").value ? $("clientSecret") : $("clientId")) : $("issuer")).focus();
+}
+
+$("authForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const creds = { issuer: $("issuer").value.trim().replace(/\/+$/, ""), clientId: $("clientId").value.trim(),
+                  clientSecret: $("clientSecret").value };
+  $("authErr").textContent = ""; $("authGo").disabled = true; $("authGo").textContent = "Authenticating…";
+  try {
+    setToken(await requestToken(creds));
+    auth.creds = creds;
+    renderAuth();
+    try { localStorage.setItem(AUTH_KEY, JSON.stringify({ issuer: creds.issuer, clientId: creds.clientId })); } catch { /* ignore */ }
+    $("clientSecret").value = "";
+    $("authDialog").close();
+  } catch (err) {
+    $("authErr").textContent = err.message;
+  } finally {
+    $("authGo").disabled = false; $("authGo").textContent = "Authenticate";
+  }
+});
+$("usePasted").onclick = () => {
+  const t = $("pasted").value.trim().replace(/^Bearer\s+/i, "");
+  if (!decodeJwt(t)) { $("authErr").textContent = "That does not look like a JWT."; return; }
+  auth.creds = null;
+  setToken(t);
+  $("authDialog").close();
+};
+$("authCancel").onclick = () => $("authDialog").close();
+setInterval(() => { if (auth.token) renderAuth(); }, 15000);
+renderAuth();
+
+$("add").onclick = addNode;
+$("node").addEventListener("keydown", e => { if (e.key === "Enter") addNode(); });
+$("run").onclick = () => run("routes");
+$("runInvalid").onclick = () => run("invalid");
+$("filter").oninput = render;
+$("onlyDiff").onchange = render;
+$("opsOnlyDiff").onchange = renderOperations;
+$("opsClose").onclick = () => { $("ops").hidden = true; opsState = null; };
+load(); renderChips();
+</script>
+</body>
+</html>
