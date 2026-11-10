@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """
 Local helper for capi-routes-viewer.html: serves the page and forwards its calls to each node's
-GET /info/routes and /info/invalid-services.
+admin API (routes, invalid services, per-service detail and the trust store).
 
 The admin API sends no CORS headers, so a browser page cannot call it directly. This helper runs on
-your machine, listens on 127.0.0.1 only, and forwards to fixed read-only paths (/info/routes, /info/invalid-services, and
-/info/routes/<id> and /info/openapi/<id> for one service) — it is not
-a general proxy. It also performs the client-credentials grant for the page (POST /token): the
+your machine, listens on 127.0.0.1 only, and forwards to a fixed set of paths — it is not a general
+proxy. Reads: /info/routes, /info/invalid-services, /info/truststore, /info/capi, /info/health, and /info/routes/<id> and
+/info/openapi/<id> for one service. Writes, the trust store only: PUT /info/truststore (one PEM
+certificate) and DELETE /info/truststore/<alias>.
+
+POST /discover lists the nodes of one CAPI instance from the capi-admin registrations that the admin
+MCP writes to its Consul (admin.mcp.consul). The Consul token is used for that one read and never
+written or logged. It also performs the client-credentials grant for the page (POST /token): the
 issuer's token endpoint is found by OIDC discovery, and the secret is used for that one request and
 never written or logged. Tokens are sent per request from the page and never written anywhere.
 Standard library only — nothing to install.
@@ -27,9 +32,33 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-ALLOWED_PATHS = ("/info/routes", "/info/invalid-services")
+ALLOWED_PATHS = ("/info/routes", "/info/invalid-services", "/info/truststore", "/info/capi", "/info/health")
 # Per-service detail: the cached service (meta) and the spec CAPI loaded for it.
 SERVICE_PATH = re.compile(r"^/info/(routes|openapi)/[A-Za-z0-9._~-]+:[A-Za-z0-9._~-]+$")
+TRUSTSTORE = "/info/truststore"
+# One percent-encoded alias (encodeURIComponent output); checked again after decoding.
+TRUSTSTORE_ALIAS = re.compile(r"^/info/truststore/[A-Za-z0-9._~%!'()*-]+$")
+MAX_PEM = 16 * 1024
+
+
+def allowed(method, path, body):
+    """The only calls the page may forward. Returns an error message, or None when allowed."""
+    if method == "GET":
+        return None if path in ALLOWED_PATHS or SERVICE_PATH.match(path) else "Path not allowed"
+    if method == "PUT":
+        if path != TRUSTSTORE:
+            return "PUT is only allowed on /info/truststore"
+        if not body or len(body) > MAX_PEM or body.count("BEGIN CERTIFICATE") != 1:
+            return "PUT body must be exactly one PEM certificate"
+        return None
+    if method == "DELETE":
+        if not TRUSTSTORE_ALIAS.match(path):
+            return "DELETE is only allowed on /info/truststore/<alias>"
+        alias = urllib.parse.unquote(path[len(TRUSTSTORE) + 1:])
+        if alias in (".", "..") or any(c in alias for c in "/\\") or any(ord(c) < 32 or ord(c) == 127 for c in alias):
+            return "Invalid alias"
+        return None
+    return "Method not allowed"
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "capi-routes-viewer.html")
 MAX_BODY = 64 * 1024
 
@@ -99,7 +128,7 @@ def make_handler(ssl_context, timeout):
                 self._send(404, "text/plain", "Not found")
 
         def do_POST(self):
-            if self.path not in ("/proxy", "/token"):
+            if self.path not in ("/proxy", "/token", "/discover"):
                 self._send(404, "text/plain", "Not found")
                 return
             # Same-origin only: refuse calls from other pages open in the browser.
@@ -114,11 +143,17 @@ def make_handler(ssl_context, timeout):
             if self.path == "/token":
                 self._token(length)
                 return
+            if self.path == "/discover":
+                self._discover(length)
+                return
             try:
                 req = json.loads(self.rfile.read(length))
                 node = str(req.get("node", "")).strip().rstrip("/")
                 token = str(req.get("token") or "").strip()
                 path = str(req.get("path") or ALLOWED_PATHS[0])
+                method = str(req.get("method") or "GET").upper()
+                body = req.get("body")
+                body = str(body) if body is not None else None
             except (ValueError, AttributeError):
                 self._send(400, "text/plain", "Bad request")
                 return
@@ -129,21 +164,82 @@ def make_handler(ssl_context, timeout):
                 self._json({"error": "Node must be a base URL like http://host:8381"})
                 return
 
-            if path not in ALLOWED_PATHS and not SERVICE_PATH.match(path):
-                self._json({"error": "Path not allowed"})
+            refused = allowed(method, path, body)
+            if refused:
+                self._json({"error": refused})
                 return
             url = f"{parsed.scheme}://{parsed.netloc}{path}"
             headers = {"Accept": "application/json"}
             if token:
                 headers["Authorization"] = "Bearer " + token
+            data = None
+            if method == "PUT":
+                data = body.encode("utf-8")
+                headers["Content-Type"] = "application/x-pem-file"
+            if method != "GET":
+                self.log_message("%s %s%s", method, parsed.netloc, path)
             try:
-                with urllib.request.urlopen(urllib.request.Request(url, headers=headers),
+                with urllib.request.urlopen(urllib.request.Request(url, data=data, headers=headers, method=method),
                                             timeout=timeout, context=ssl_context) as resp:
                     self._json({"status": resp.status, "body": resp.read().decode("utf-8", "replace")})
             except urllib.error.HTTPError as e:
                 self._json({"status": e.code, "body": e.read().decode("utf-8", "replace")})
             except Exception as e:  # connection refused, DNS, TLS, timeout
                 self._json({"error": f"{type(e).__name__}: {getattr(e, 'reason', e)}"})
+
+        def _discover(self, length):
+            """The capi-admin registrations in one Consul: every node of the requested CAPI instance
+            (meta capi-cluster), with its health, plus the names of the other instances registered there."""
+            try:
+                req = json.loads(self.rfile.read(length))
+                consul = str(req.get("consul", "")).strip().rstrip("/")
+                token = str(req.get("token") or "").strip()
+                cluster = str(req.get("cluster") or "").strip() or "default"
+            except (ValueError, AttributeError):
+                self._send(400, "text/plain", "Bad request")
+                return
+            parsed = urllib.parse.urlparse(consul)
+            if parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.path not in ("", "/") \
+                    or parsed.query or parsed.fragment:
+                self._json({"error": "Consul must be a base URL like https://consul.example.com:8500"})
+                return
+            # Not ?passing: a node failing its TTL check is shown, unselected, rather than hidden.
+            url = f"{parsed.scheme}://{parsed.netloc}/v1/health/service/capi-admin"
+            headers = {"Accept": "application/json"}
+            if token:
+                headers["Authorization"] = "Bearer " + token   # as CAPI itself calls Consul
+            try:
+                with urllib.request.urlopen(urllib.request.Request(url, headers=headers),
+                                            timeout=timeout, context=ssl_context) as resp:
+                    entries = json.loads(resp.read())
+            except urllib.error.HTTPError as e:
+                self._json({"error": f"Consul answered HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:200]}"})
+                return
+            except Exception as e:  # DNS, TLS, timeout, bad JSON
+                self._json({"error": f"{url}: {type(e).__name__}: {getattr(e, 'reason', e)}"})
+                return
+            nodes, clusters = [], {}
+            for entry in entries if isinstance(entries, list) else []:
+                svc = entry.get("Service") or {}
+                meta = svc.get("Meta") or {}
+                name = meta.get("capi-cluster") or "default"
+                clusters[name] = clusters.get(name, 0) + 1
+                if name != cluster:
+                    continue
+                address = svc.get("Address") or (entry.get("Node") or {}).get("Address") or ""
+                port = svc.get("Port") or 0
+                if not address or not port:
+                    continue
+                scheme = "https" if meta.get("admin-scheme") == "https" else "http"
+                host = f"[{address}]" if ":" in address else address
+                checks = entry.get("Checks") or []
+                status = "passing" if all(c.get("Status") == "passing" for c in checks) else \
+                    next((c.get("Status") for c in checks if c.get("Status") == "critical"), "warning")
+                nodes.append({"id": svc.get("ID"), "url": f"{scheme}://{host}:{port}", "status": status,
+                              "version": meta.get("capi-version"),
+                              "consulNode": (entry.get("Node") or {}).get("Node")})
+            nodes.sort(key=lambda n: (n["status"] != "passing", n["url"]))
+            self._json({"cluster": cluster, "nodes": nodes, "clusters": clusters})
 
         def _token(self, length):
             """Client-credentials grant against the issuer's token endpoint (found by OIDC discovery).
@@ -191,7 +287,7 @@ def make_handler(ssl_context, timeout):
 
 
 def main():
-    p = argparse.ArgumentParser(description="Serve capi-routes-viewer.html and forward /info/routes and /info/invalid-services calls.")
+    p = argparse.ArgumentParser(description="Serve capi-routes-viewer.html and forward its calls to the CAPI admin API.")
     p.add_argument("--port", type=int, default=8399)
     p.add_argument("--ca-file", help="PEM bundle to trust for https nodes (internal CA)")
     p.add_argument("--insecure", action="store_true", help="skip TLS certificate verification")
