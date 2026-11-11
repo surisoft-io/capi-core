@@ -68,7 +68,7 @@ Consul, identity provider, OPA bundle URLs, IP addresses, DNS names in certifica
 keeping ports and paths. The address fields in the dialogs are masked as you type. Route names,
 versions and settings stay visible.
 
-The eye button next to **Authenticate** shows the real addresses until the page is reloaded; the
+**Show addresses** (next to **Authenticate**) shows the real ones until the page is reloaded; the
 choice is deliberately not remembered, so the page never opens with addresses on screen. Masking is
 for the screen only — the page still sends the real addresses to the nodes.
 

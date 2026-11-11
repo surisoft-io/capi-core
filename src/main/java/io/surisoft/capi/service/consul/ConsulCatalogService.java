@@ -162,6 +162,7 @@ public class ConsulCatalogService {
         try {
             invalidServiceMap.clear();
             CycleResult result = fetchAndUnion();
+            publishInvalidRegistrations(result);
             Map<String, Service> incoming = buildServices(result.reconciledObjects());
             // Drop mismatch state for services that no longer exist, so a deregistered service
             // does not keep a backoff entry alive forever.
@@ -270,7 +271,13 @@ public class ConsulCatalogService {
 
         Map<String, List<ConsulObject>> perService = new HashMap<>();
         Set<String> emptyFromConsul = new HashSet<>();
-        int failed = 0;
+        // Two kinds of failure, kept apart because they mean different things. "Could not ask"
+        // (timeout, connection, Consul 5xx) leaves this node's view incomplete. "Consul answered,
+        // but the registration is unusable" (bad meta value, ACL 403, malformed key) is that one
+        // service's problem: the view is complete, the service just cannot be routed.
+        Set<String> failedNames = new HashSet<>();
+        Map<String, String> invalidRegistrations = new HashMap<>();
+        int transportFailures = 0;
 
         for (Map.Entry<String, CompletableFuture<HttpResponse<String>>> e : futures.entrySet()) {
             String name = e.getKey();
@@ -278,33 +285,78 @@ public class ConsulCatalogService {
             if (budgetMs <= 0) {
                 // Host budget exhausted. Stop waiting and cancel everything still pending so
                 // this thread returns NOW instead of grinding through the rest. Abandoned
-                // lookups count as failures, which makes result.clean() false and skips route
-                // cleanup (§7.1) — we never delete live routes off a partial view.
-                int abandoned = cancelPending(futures);
-                failed += abandoned;
+                // lookups are transport failures: their services keep their routes (§7.1, per
+                // service) and the node does not report ready off this cycle.
+                List<String> abandoned = cancelPending(futures);
+                failedNames.addAll(abandoned);
+                transportFailures += abandoned.size();
                 log.warn("Consul host {} exceeded its {}ms budget; abandoned {} pending lookup(s) to free the cycle",
-                        host.getEndpoint(), PER_HOST_TIMEOUT.toMillis(), abandoned);
+                        host.getEndpoint(), PER_HOST_TIMEOUT.toMillis(), abandoned.size());
                 break;
             }
+            HttpResponse<String> response;
             try {
-                HttpResponse<String> response = e.getValue().get(budgetMs, TimeUnit.MILLISECONDS);
-                PerServiceOutcome outcome = processServiceByName(name, response.body());
+                response = e.getValue().get(budgetMs, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                failedNames.add(name);
+                transportFailures++;
+                break;
+            } catch (Exception ex) {   // timeout, connection, TLS, GOAWAY after the retry
+                failedNames.add(name);
+                transportFailures++;
+                logPerServiceFailure(name, ex);
+                continue;
+            }
+            int status = response.statusCode();
+            if (status >= 500) {
+                failedNames.add(name);
+                transportFailures++;
+                log.error("Failed to fetch service {}: Consul answered HTTP {}", name, status);
+                continue;
+            }
+            if (status != 200) {
+                // 4xx: Consul refused this one service (typically an ACL without read on it).
+                // Never parse the error body as a service list.
+                failedNames.add(name);
+                invalidRegistrations.put(name, "Consul answered HTTP " + status + " to the lookup: "
+                        + abbreviate(response.body()));
+                continue;
+            }
+            try {
+                PerServiceOutcome outcome = processServiceByName(name, response.body(), invalidRegistrations);
                 switch (outcome) {
                     case PerServiceOutcome.Kept k -> perService.put(name, k.entries());
                     case PerServiceOutcome.EmptyFromConsul ignored -> emptyFromConsul.add(name);
                     case PerServiceOutcome.FilteredEmpty ignored -> { /* authoritative: not ours */ }
                     case PerServiceOutcome.Failed f -> {
-                        failed++;
-                        logPerServiceFailure(name, f.cause());
+                        failedNames.add(name);
+                        invalidRegistrations.put(name, "Registration could not be read: " + rootMessage(f.cause()));
                     }
                 }
             } catch (Exception ex) {
-                failed++;
-                logPerServiceFailure(name, ex);
+                // Anything thrown while interpreting one service's registration is that service's
+                // problem. It used to escape as an unexplained failed lookup and, with it, keep the
+                // whole node DOWN and every route from being cleaned up.
+                failedNames.add(name);
+                invalidRegistrations.put(name, "Registration could not be read: " + rootMessage(ex));
             }
         }
 
-        return new HostResult(host, catalogNames, perService, emptyFromConsul, failed, false);
+        return new HostResult(host, catalogNames, perService, emptyFromConsul, failedNames.size(), false,
+                failedNames, transportFailures, invalidRegistrations);
+    }
+
+    private static String rootMessage(Throwable t) {
+        Throwable root = unwrap(t);
+        String msg = root.getMessage();
+        return root.getClass().getSimpleName() + (msg != null ? ": " + abbreviate(msg) : "");
+    }
+
+    private static String abbreviate(String s) {
+        if (s == null) return "";
+        String one = s.replaceAll("\\s+", " ").trim();
+        return one.length() > 300 ? one.substring(0, 300) + "…" : one;
     }
 
     /** Millis left until {@code deadlineNanos}, never negative. */
@@ -318,12 +370,12 @@ public class ConsulCatalogService {
      * {@code .timeout(PER_REQUEST_TIMEOUT)} so any that ignore the cancel still self-terminate
      * within seconds rather than holding the connection for the rest of the (sequential) loop.
      */
-    private int cancelPending(Map<String, CompletableFuture<HttpResponse<String>>> futures) {
-        int cancelled = 0;
-        for (CompletableFuture<HttpResponse<String>> f : futures.values()) {
-            if (!f.isDone()) {
-                f.cancel(true);
-                cancelled++;
+    private List<String> cancelPending(Map<String, CompletableFuture<HttpResponse<String>>> futures) {
+        List<String> cancelled = new ArrayList<>();
+        for (Map.Entry<String, CompletableFuture<HttpResponse<String>>> e : futures.entrySet()) {
+            if (!e.getValue().isDone()) {
+                e.getValue().cancel(true);
+                cancelled.add(e.getKey());
             }
         }
         return cancelled;
@@ -346,6 +398,9 @@ public class ConsulCatalogService {
         Set<String> emptyUnion = new HashSet<>();
         int totalFailed = 0;
         int hostsFailed = 0;
+        Set<String> failedNames = new HashSet<>();
+        int transportFailures = 0;
+        Map<String, String> invalidRegistrations = new HashMap<>();
 
         for (HostResult h : hostResults) {
             if (h.catalogFetchFailed()) {
@@ -355,11 +410,15 @@ public class ConsulCatalogService {
             catalogUnion.addAll(h.catalogNames());
             emptyUnion.addAll(h.emptyFromConsul());
             totalFailed += h.failedServiceLookups();
+            failedNames.addAll(h.failedNames());
+            transportFailures += h.transportFailures();
+            h.invalidRegistrations().forEach(invalidRegistrations::putIfAbsent);
             for (Map.Entry<String, List<ConsulObject>> e : h.perServiceObjects().entrySet()) {
                 mergedPerService.computeIfAbsent(e.getKey(), k -> new ArrayList<>()).addAll(e.getValue());
             }
         }
-        return new CycleResult(catalogUnion, mergedPerService, emptyUnion, totalFailed, hostsFailed, hostResults.size());
+        return new CycleResult(catalogUnion, mergedPerService, emptyUnion, totalFailed, hostsFailed, hostResults.size(),
+                failedNames, transportFailures, invalidRegistrations);
     }
 
     // -------------------------------------------------------------------------
@@ -373,7 +432,7 @@ public class ConsulCatalogService {
         record Failed(Throwable cause) implements PerServiceOutcome {}
     }
 
-    private PerServiceOutcome processServiceByName(String serviceName, String body) {
+    private PerServiceOutcome processServiceByName(String serviceName, String body, Map<String, String> invalidRegistrations) {
         List<ConsulObject> parsed;
         try {
             parsed = objectMapper.readValue(body, new TypeReference<List<ConsulObject>>() {});
@@ -382,6 +441,20 @@ public class ConsulCatalogService {
         }
         if (parsed.isEmpty()) {
             return new PerServiceOutcome.EmptyFromConsul();
+        }
+        // A capi-instance-* key that is not capi-instance-<instance>-<property> is skipped by the
+        // mapper but still restricts the service (fail closed): report it, the lookup itself is fine.
+        Set<String> malformed = new TreeSet<>();
+        for (ConsulObject o : parsed) {
+            if (o.getServiceMeta() == null) continue;
+            o.getServiceMeta().getUnknownProperties().keySet().stream()
+                    .filter(ServiceCapiInstanceMapper::isMalformed)
+                    .forEach(malformed::add);
+        }
+        if (!malformed.isEmpty()) {
+            invalidRegistrations.put(serviceName, "Ignored meta key(s) " + malformed
+                    + ": expected capi-instance-<instance>-<property>. A capi-instance-* key restricts the service"
+                    + " to the instances named by well-formed keys; to route on one instance only, use capi-instance: <name>");
         }
 
         List<ConsulObject> kept = new ArrayList<>();
@@ -811,10 +884,11 @@ public class ConsulCatalogService {
             }
         }
 
-        if (!result.clean()) {
-            // §7.1: partial view of Consul → skip removal phase entirely to preserve live routes.
-            log.warn("Consul discovery cycle had {} failed lookup(s) across {} host(s); skipping route cleanup",
-                    result.totalFailedLookups() + result.hostsFailed(), result.hostsTotal());
+        if (!result.catalogComplete()) {
+            // §7.1: a host's catalog could not be read, so the set of names is partial — we cannot
+            // tell "deregistered" from "not seen". Skip removal entirely to preserve live routes.
+            log.warn("Consul catalog unreadable on {} of {} host(s); skipping route cleanup",
+                    result.hostsFailed(), result.hostsTotal());
             return new ServiceDelta(added, changed, List.of());
         }
 
@@ -823,6 +897,12 @@ public class ConsulCatalogService {
             if (incoming.containsKey(e.getKey())) continue;
             Service cached = serviceCache.get(e.getKey());
             if (cached == null) continue;
+            if (result.failedNames().contains(cached.getName())) {
+                // §7.1, per service: this name is in the catalog but its lookup failed, so its
+                // current state is unknown. Keep its route; everything else is cleaned up normally.
+                log.debug("Preserving {} — lookup for {} failed this cycle", e.getKey(), cached.getName());
+                continue;
+            }
             if (result.emptyFromConsul().contains(cached.getName())) {
                 // §7.2: Consul returned empty per-service response for this name; preserve.
                 log.debug("Preserving {} — Consul returned empty for name {}", e.getKey(), cached.getName());
@@ -868,8 +948,38 @@ public class ConsulCatalogService {
     // Readiness latch + summary
     // -------------------------------------------------------------------------
 
+    /**
+     * Since when each service's registration has been unusable. Outside {@link #invalidServiceMap},
+     * which is cleared every cycle, so the date stays the first detection and the warning is logged
+     * once per problem rather than every cycle.
+     */
+    private final Map<String, InvalidService> registrationProblems = new ConcurrentHashMap<>();
+
+    private void publishInvalidRegistrations(CycleResult result) {
+        // Forget a problem only once the registration was read and found usable. A host that did
+        // not answer, or a lookup that failed this cycle, says nothing about whether it was fixed.
+        if (result.catalogComplete()) {
+            registrationProblems.keySet().removeIf(name -> !result.invalidRegistrations().containsKey(name)
+                    && !result.failedNames().contains(name));
+        }
+        result.invalidRegistrations().forEach((name, detail) -> {
+            InvalidService known = registrationProblems.get(name);
+            if (known == null || !known.detail().equals(detail)) {
+                log.warn("Consul registration of service {} cannot be used: {}", name, detail);
+                known = new InvalidService(name, null, null, InvalidService.Reason.CONSUL_INVALID_REGISTRATION,
+                        detail, known != null ? known.detectedAt() : Instant.now());
+                registrationProblems.put(name, known);
+            }
+        });
+        // Keyed by name: the group is unknown when the registration could not be read, and a
+        // "name:group" key from the other reasons can never collide with a bare name.
+        registrationProblems.forEach(invalidServiceMap::putIfAbsent);
+    }
+
     private void maybeFlipReadinessLatch(CycleResult result) {
-        if (!connectedToConsul && result.clean()) {
+        // Not result.clean(): one service with an unusable registration must not keep the node
+        // DOWN forever while it routes everything else. Only a lookup that could not be made counts.
+        if (!connectedToConsul && result.readyForTraffic()) {
             connectedToConsul = true;
             log.info("Consul readiness latch flipped true — node is ready to serve");
         }
@@ -883,7 +993,7 @@ public class ConsulCatalogService {
                 delta.added().size(),
                 delta.changed().size(),
                 delta.gone().size(),
-                !result.clean(),
+                !result.catalogComplete(),
                 durationMs);
     }
 
