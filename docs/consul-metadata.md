@@ -330,9 +330,14 @@ spelling is kebab-case (`route-group-first`, not `routeGroupFirst`).
 
 > ⚠️ **Every `capi-instance-*` key must include a property suffix.**
 > A bare `capi-instance-production` (with no `-<property>`) — for example an attempt to pass a JSON
-> object as the value — cannot be parsed and raises an error that causes the **whole service to be
-> skipped for that discovery cycle**. Earlier versions of this page documented such a JSON form; it
-> was never supported. Use the flat keys shown above.
+> object as the value — cannot be parsed. Since 2.25.4 it is ignored and the service is listed
+> under [`/info/invalid-services`](admin-api.md#invalid-services) as `CONSUL_INVALID_REGISTRATION`.
+> The key still counts as a `capi-instance-*` key, so it still restricts the service to the
+> instances named by **well-formed** keys: a service whose only such key is malformed is routed on
+> no instance. Before 2.25.4 it raised an error that failed the service's lookup on every node,
+> kept the nodes' health DOWN and stopped route cleanup. Earlier versions of this page documented
+> such a JSON form; it was never supported. Use the flat keys shown above, or `capi-instance: <name>`
+> to route on one instance only.
 
 ### 10. Control Route Path Order
 

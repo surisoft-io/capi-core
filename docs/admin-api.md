@@ -39,7 +39,11 @@ Returns links to all available admin endpoints:
 curl http://localhost:8381/info/health
 ```
 
-Returns `200` with `{"status":"UP"}` when connected to Consul, or `503` with `{"status":"DOWN"}` otherwise.
+Returns `200` with `{"status":"UP"}` once the node has completed a discovery cycle in which every
+Consul host's catalog was read and every service lookup could be made, or `503` with
+`{"status":"DOWN"}` until then. It is a one-way latch: it does not go back to DOWN later. A service
+whose registration CAPI cannot use does not keep the node DOWN; it is listed under
+[`/info/invalid-services`](#invalid-services) instead.
 
 Used as the Kubernetes **liveness probe** in the Helm chart.
 
@@ -193,6 +197,7 @@ curl http://localhost:8381/info/invalid-services
 | `OPENAPI_FETCH_FAILED` | The spec could not be retrieved — timeout, connection refused, malformed URL. |
 | `OPENAPI_INVALID_SPEC` | Retrieved, but not parseable as OpenAPI, or the endpoint returned a non-200. |
 | `OPENAPI_VERSION_MISMATCH` | Parsed, but `info.version` did not match the `version` metadata on a service that set `match-openapi-version`. See [Consul metadata](consul-metadata.md#12-guard-against-stale-specs-during-a-rolling-deploy). |
+| `CONSUL_INVALID_REGISTRATION` | Consul answered the lookup, but the registration cannot be used as registered: a meta value of the wrong type (`secured: yes`), a 4xx such as an ACL refusal, or a malformed `capi-instance-*` key (anything that is not `capi-instance-<instance>-<property>`). Keyed by service **name**, with no `group`. A malformed `capi-instance-*` key still restricts the service to the instances named by well-formed keys, so a service with only a malformed one is routed nowhere. `detectedAt` is the first detection. |
 
 Two things to know when reading this list:
 

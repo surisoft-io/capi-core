@@ -25,5 +25,12 @@ public record InvalidService(
          * hostname, and resolving it by map iteration order would silently serve one service's
          * collection from another's backend, so all but one are refused.
          */
-        WEBDAV_HOST_COLLISION }
+        WEBDAV_HOST_COLLISION,
+        /**
+         * Consul answered the lookup, but the registration cannot be used as registered: a meta
+         * value of the wrong type, a 4xx such as an ACL refusal, or a malformed
+         * {@code capi-instance-*} key. Keyed by service name, without a group, because the group
+         * may be exactly what could not be read. A route the service already had is kept.
+         */
+        CONSUL_INVALID_REGISTRATION }
 }

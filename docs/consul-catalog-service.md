@@ -152,7 +152,10 @@ Once all host futures have resolved or timed out, the scheduler thread merges th
 - `catalogUnion` — union of service names seen across healthy hosts.
 - `mergedPerService` — per service name, concatenated list of `ConsulObject` entries across hosts.
 - `emptyFromConsul` — service names where Consul returned an empty array (different from "not in catalog" — see §7.2 below).
-- `totalFailed`, `hostsFailed` — bookkeeping that drives the §7.1 cleanup-skip guard later.
+- `totalFailed`, `hostsFailed` — bookkeeping for the summary line and the §7.1 guard.
+- `failedNames` — services whose per-service lookup failed on at least one host. Cleanup preserves them (§7.1).
+- `transportFailures` — failed lookups where the host could not be asked: timeout, connection error, Consul 5xx, or abandoned on the host budget. These block readiness (§7.3).
+- `invalidRegistrations` — services whose lookup Consul *answered*, with a registration CAPI cannot use: a meta value of the wrong type, a 4xx such as an ACL refusal, or a malformed `capi-instance-*` key. Published to `/info/invalid-services` as `CONSUL_INVALID_REGISTRATION`, keyed by service name; logged once per problem, not every cycle.
 
 ### Step 3: Shape into `Service` objects
 
@@ -187,13 +190,18 @@ For each incoming service, compare against the cached one (`serviceCache.peek(..
 #### §7.1 — cleanup-skip on partial failure
 
 ```java
-if (!result.clean()) {
-    log.warn("Consul discovery cycle had {} failed lookup(s) across {} host(s); skipping route cleanup", ...);
+if (!result.catalogComplete()) {
+    log.warn("Consul catalog unreadable on {} of {} host(s); skipping route cleanup", ...);
     return new ServiceDelta(added, changed, List.of());
 }
 ```
 
-If any host failed or any per-service lookup failed, **the removal phase is skipped entirely**. Returning a delta with empty `gone` guarantees that a partial view of Consul never triggers mass deletions. The trade-off: stale entries may linger for a cycle or two, in exchange for never wiping live routes on a network blip.
+Two levels:
+
+- **A host's catalog could not be read** → the set of service names is partial, so "deregistered" cannot be told from "not seen". **The removal phase is skipped entirely.** Returning a delta with empty `gone` guarantees that a partial view never triggers mass deletions.
+- **The catalogs were read, but some per-service lookups failed** → only those services are in an unknown state. Each one in `failedNames` keeps its cached route; every other service is cleaned up normally.
+
+Before 2.25.4 the second case also skipped all cleanup. One service whose lookup failed on every cycle — a registration CAPI could not read is enough — then stopped deregistered services from being removed on every node, indefinitely.
 
 #### §7.2 — preserve on empty-from-Consul
 
@@ -290,7 +298,9 @@ Until `afterCycle()` runs, `RestGateway` continues to serve from the previous cy
 maybeFlipReadinessLatch(result);
 ```
 
-If this is the first clean cycle since process start, set `connectedToConsul = true` permanently. The flag drives `/info/health` on the admin port — it is a one-way latch and does not reset on subsequent failures (§7.3).
+If this is the first cycle since process start in which every host's catalog was read and every lookup could be made (`result.readyForTraffic()`), set `connectedToConsul = true` permanently. The flag drives `/info/health` on the admin port and `/health` on the REST port — it is a one-way latch and does not reset on subsequent failures (§7.3).
+
+An unusable registration (`invalidRegistrations`) does not block it: Consul answered, and the problem is that one service's. A lookup that could not be made (`transportFailures`) does, because the node's view really is incomplete. Before 2.25.4 any failed lookup blocked it, so one bad registration kept a node DOWN forever while it routed every other service.
 
 ### Step 8: Summary log
 
@@ -337,9 +347,9 @@ Only the scheduler thread writes to `serviceCache` and `restClientMap`. There is
 ## Invariants
 
 - **Service IDs are stable** — `name:group`, never flipped. Cache lookups are consistent regardless of `routeGroupFirst`.
-- **§7.1 cleanup-skip** — never remove services on a partial Consul view. Costs occasional stale entries; saves against mass-deregistration storms.
+- **§7.1 cleanup-skip** — never remove services on a partial Consul view: everything when a catalog is unreadable, only the affected services when individual lookups fail. Costs occasional stale entries; saves against mass-deregistration storms.
 - **§7.2 empty-from-Consul preservation** — `[]` from Consul means "no live instances right now," not "service gone." Preserve cached entries.
-- **§7.3 readiness latch** — once Consul has been reachable, the node stays ready even if later cycles degrade.
+- **§7.3 readiness latch** — once Consul has been reachable, the node stays ready even if later cycles degrade. An unusable registration never blocks it; a lookup that could not be made does.
 - **§7.5 GOAWAY tolerance** — ALB connection rotation is not an error. `sendWithGoawayRetry` retries once silently and logs at DEBUG.
 - **§7.8 host independence** — per-host failures are isolated. The cycle continues with whatever hosts responded.
 - **OpenAPI fetch on diff only** — added services and changed services where the endpoint URL changed. Otherwise the cached spec is carried over.

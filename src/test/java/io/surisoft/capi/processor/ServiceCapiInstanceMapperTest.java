@@ -119,4 +119,33 @@ class ServiceCapiInstanceMapperTest {
         assertFalse(instance.isOpaRegoOverridden());
         assertNull(instance.getOpaRego());
     }
+
+    @Test
+    void malformedKeys_areSkipped_neverThrown() {
+        // "capi-instance-default" used to throw StringIndexOutOfBounds ("Range [0, -1) out of
+        // bounds for length 7") and fail the whole service lookup on every node.
+        Map<String, String> flat = new HashMap<>();
+        flat.put("capi-instance-default", "true");
+        flat.put("capi-instance-", "x");
+        flat.put("capi-instance--secured", "true");
+        flat.put("capi-instance-internal-", "x");
+        flat.put("capi-instance-internal-secured", "true");
+
+        ServiceCapiInstances result = assertDoesNotThrow(() -> new ServiceCapiInstanceMapper().convert(flat));
+
+        assertEquals(java.util.Set.of("internal"), result.getInstances().keySet());
+        assertTrue(result.getInstances().get("internal").isSecured());
+    }
+
+    @Test
+    void split_andIsMalformed() {
+        assertArrayEquals(new String[]{"internal", "opa-rego"}, ServiceCapiInstanceMapper.split("capi-instance-internal-opa-rego"));
+        assertNull(ServiceCapiInstanceMapper.split("capi-instance-default"));
+        assertNull(ServiceCapiInstanceMapper.split("capi-instance--secured"));
+        assertNull(ServiceCapiInstanceMapper.split("capi-instance-internal-"));
+        assertTrue(ServiceCapiInstanceMapper.isMalformed("capi-instance-default"));
+        assertFalse(ServiceCapiInstanceMapper.isMalformed("capi-instance-internal-secured"));
+        assertFalse(ServiceCapiInstanceMapper.isMalformed("capi-instance"), "the single-instance key is not a per-instance key");
+        assertFalse(ServiceCapiInstanceMapper.isMalformed("group"));
+    }
 }
