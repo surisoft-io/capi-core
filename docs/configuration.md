@@ -462,13 +462,18 @@ Not to be confused with the [Admin MCP server](#admin-mcp-server) (`admin.mcp.*`
 
 ## Reverse Proxy Headers
 
-CAPI automatically sets the following headers on proxied requests:
+CAPI sets the following headers on proxied requests (REST, WebSocket, WebDAV and gRPC):
 
 | Header | Value |
 |--------|-------|
+| `X-Forwarded-For` | The chain the request arrived with, with CAPI's direct peer appended: `client, proxy1, …, peer`. Without an inbound header, just the peer |
+| `X-Forwarded-Proto` | The scheme of `publicEndpoint` when it is set, otherwise the scheme the request arrived with |
 | `X-Forwarded-Host` | Original client host (or `reverseProxyHost` if configured) |
-| `X-Forwarded-Prefix` | Service context path prefix |
-| `X-Forwarded-For` | Client IP address |
-| `X-Forwarded-Proto` | Protocol scheme |
-| `X-Forwarded-Server` | CAPI server hostname |
-| `X-Forwarded-Port` | CAPI server port |
+| `X-Forwarded-Prefix` | Service context path prefix, when `reverseProxyHost` is configured |
+
+Inbound `X-Forwarded-Server` and `X-Forwarded-Port` are removed, not passed on.
+
+The leftmost `X-Forwarded-For` entries are whatever the hops before CAPI wrote, and a client
+calling CAPI directly can put any value there. A backend should take the client address from the
+right: skip the entries added by proxies it trusts (CAPI, then your load balancer) and use the
+next one.

@@ -36,6 +36,7 @@ import java.security.cert.CertificateEncodingException;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.StringJoiner;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -166,6 +167,29 @@ public final class CAPIProxyHandler implements HttpHandler {
             }
             f = from.fiNextNonEmpty(f);
         }
+    }
+
+    /**
+     * The X-Forwarded-For chain a request arrived with, oldest hop first, or "" when it had none.
+     * Several header lines are one list (RFC 9110 §5.3), so they are joined in order; blank
+     * entries are dropped. The values are passed on as received: the leftmost entries are whatever
+     * the hops before CAPI wrote, and only the ones added by proxies the backend trusts are reliable.
+     */
+    static String inboundForwardedFor(final HeaderMap inbound) {
+        HeaderValues values = inbound.get(Headers.X_FORWARDED_FOR);
+        if (values == null || values.isEmpty()) {
+            return "";
+        }
+        StringJoiner chain = new StringJoiner(", ");
+        for (String line : values) {
+            for (String hop : line.split(",")) {
+                String trimmed = hop.trim();
+                if (!trimmed.isEmpty()) {
+                    chain.add(trimmed);
+                }
+            }
+        }
+        return chain.toString();
     }
 
     public ProxyClient getProxyClient() {
@@ -390,13 +414,13 @@ public final class CAPIProxyHandler implements HttpHandler {
 
                 request.putAttachment(ProxiedRequestAttachments.REMOTE_HOST, remoteHost);
 
-                // X-Forwarded-For: append client IP to chain
-                String existing = request.getRequestHeaders().getFirst(Headers.X_FORWARDED_FOR);
-                if (existing != null && !existing.isEmpty()) {
-                    request.getRequestHeaders().put(Headers.X_FORWARDED_FOR, existing + "," + remoteHost);
-                } else {
-                    request.getRequestHeaders().put(Headers.X_FORWARDED_FOR, remoteHost);
-                }
+                // X-Forwarded-For: append our peer to the chain the request arrived with. Read the
+                // chain from the INBOUND request: copyHeaders leaves X-Forwarded-For out of the
+                // outbound one (FILTERED_HEADERS), so reading it there always found nothing and the
+                // backend got only our direct peer — the load balancer — never the client.
+                String existing = inboundForwardedFor(inboundRequestHeaders);
+                outboundRequestHeaders.put(Headers.X_FORWARDED_FOR,
+                        existing.isEmpty() ? remoteHost : existing + ", " + remoteHost);
 
                 //if we don't support push set a header saying so
                 //this is non standard, and a problem with the HTTP2 spec, but they did not want to listen
