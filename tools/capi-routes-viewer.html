@@ -33,6 +33,10 @@
                  border-radius: 10px; color: var(--muted); }
   button.theme:hover { color: var(--text); }
   button.theme svg { width: 18px; height: 18px; }
+  button.privacy { height: 38px; display: inline-flex; align-items: center; gap: 6px; border-radius: 10px;
+                   white-space: nowrap; }
+  button.privacy svg { width: 16px; height: 16px; flex: none; }
+  button.privacy.revealed { color: var(--warn); border-color: var(--warn); }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text);
          font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
@@ -145,6 +149,7 @@
     </div>
     <div class="header-right">
       <div class="auth" id="authBox"></div>
+      <button class="privacy" id="privacyToggle" type="button"></button>
       <button class="theme" id="themeToggle" type="button"></button>
     </div>
   </header>
@@ -903,6 +908,130 @@ function renderNodeInfo() {
   ].filter(Boolean).join(" · ") || "No node answered.";
 }
 $("runInfo").onclick = runNodeInfo;
+
+// ---------------------------------------------------------------- hide addresses (screen sharing)
+// Masked by default on every load, and the choice is not remembered: a page opened for a screen
+// share must never start out showing the infrastructure. "Show" reveals for this visit only.
+//
+// Rather than patching every place that prints an address, a MutationObserver rewrites text and
+// tooltips inside the regions that show live data, as they are added. Observer callbacks run before
+// the browser paints, so an address is never on screen even for a frame. Revealing re-renders those
+// regions from the data, which still holds the real values.
+let masked = true;
+const MASKED_REGIONS = ["#instTabs", "#chips", "#draftChips", "#discFound", "#discMsg", "#instMsg", "#instErr",
+                        "#authErr", "#authBox", "#nodeInfo", "#results", "#ops", "#tsVia"].join(",");
+const ADDRESS_INPUTS = ["node", "discConsul", "issuer"];
+const HIDDEN = "•••";
+const FILE_EXT = /^(gz|tgz|tar|zip|json|ya?ml|pem|crt|cer|der|key|jks|p12|js|html?|py|md|txt|xml|wasm|rego|log|sh|jar)$/i;
+
+// Each node URL known to the page -> a stable label: "node 2" in the selected instance,
+// "<instance> node 2" for the others, so a reader can still tell nodes apart.
+function nodeAliases() {
+  const aliases = new Map();
+  const add = (url, label) => {
+    if (!url || aliases.has(url)) return;
+    aliases.set(url, label);
+    try {
+      const u = new URL(url);
+      if (!aliases.has(u.host)) aliases.set(u.host, label);
+      if (!aliases.has(u.hostname)) aliases.set(u.hostname, label);
+    } catch { /* not a URL */ }
+  };
+  nodes.forEach((n, i) => add(n, `node ${i + 1}`));
+  instances.forEach(inst => inst.nodes.forEach((n, i) => add(n, `${inst.name} node ${i + 1}`)));
+  draft.forEach((n, i) => add(n, `new node ${i + 1}`));
+  found.forEach((n, i) => add(n.url, `found node ${i + 1}`));
+  return [...aliases.entries()].sort((a, b) => b[0].length - a[0].length);   // longest first
+}
+
+let aliasCache = null;   // computed once per masking pass, not once per text node
+function maskText(text) {
+  if (!text) return text;
+  let out = text;
+  for (const [address, label] of aliasCache || nodeAliases()) {
+    if (address.length > 3) out = out.split(address).join(label);
+  }
+  return out
+    .replace(/\b(https?|wss?):\/\/[^\s/"'<>,;)\]]+/gi, `$1://${HIDDEN}`)                           // any other URL's host
+    .replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, HIDDEN)                                                 // IPv4
+    .replace(/\[[0-9a-f:]+\]/gi, HIDDEN)                                                             // bracketed IPv6
+    .replace(/\bip-\d+-\d+-\d+-\d+\b/gi, HIDDEN)                                                      // cloud host names
+    .replace(/\b(?=[\w.-]*[a-z])[a-z0-9][a-z0-9.-]*:(\d{2,5})\b/gi, `${HIDDEN}:$1`)                 // host:port
+    .replace(/\*?\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.){2,}([a-z][a-z0-9-]*)\b/gi,                 // a.b.c names
+             (m, last) => FILE_EXT.test(last) ? m : HIDDEN);
+}
+
+const inMaskedRegion = node => {
+  const el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+  return !!el && !!el.closest(MASKED_REGIONS);
+};
+function maskNode(node) {
+  if (node.nodeType === Node.TEXT_NODE) {
+    const v = maskText(node.nodeValue);
+    if (v !== node.nodeValue) node.nodeValue = v;   // only on change: our own write must not loop
+    return;
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) return;
+  const all = [node, ...node.querySelectorAll("[title]")];
+  for (const el of all) {
+    if (el.hasAttribute("title")) {
+      const t = maskText(el.getAttribute("title"));
+      if (t !== el.getAttribute("title")) el.setAttribute("title", t);
+    }
+  }
+  const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+  for (let t = walker.nextNode(); t; t = walker.nextNode()) maskNode(t);
+}
+function maskRegions() {
+  aliasCache = nodeAliases();
+  try { document.querySelectorAll(MASKED_REGIONS).forEach(maskNode); } finally { aliasCache = null; }
+}
+
+new MutationObserver(mutations => {
+  if (!masked) return;
+  aliasCache = nodeAliases();
+  try {
+  for (const m of mutations) {
+    if (!inMaskedRegion(m.target)) continue;
+    if (m.type === "childList") m.addedNodes.forEach(maskNode);
+    else if (m.type === "characterData") maskNode(m.target);
+    else if (m.type === "attributes") maskNode(m.target.nodeType === Node.ELEMENT_NODE ? m.target : m.target.parentElement);
+  }
+  } finally { aliasCache = null; }
+}).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["title"] });
+
+const EYE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYE_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.9 5.1A10.4 10.4 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-2.2 3.1M6.6 6.6A17 17 0 0 0 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M14.1 14.1a3 3 0 0 1-4.2-4.2"/><path d="M2 2l20 20"/></svg>';
+
+function renderPrivacyToggle() {
+  const btn = $("privacyToggle");
+  // The icon shows the action, like the label: an open eye to show, a crossed one to hide.
+  btn.innerHTML = masked ? EYE : EYE_OFF;   // static markup, no user input
+  btn.append(masked ? "Show addresses" : "Hide addresses");
+  btn.classList.toggle("revealed", !masked);
+  btn.title = masked ? "Addresses are hidden for screen sharing — show the real ones until the page is reloaded"
+                     : "Real addresses are on screen — hide them";
+  // Address fields: typed values are hidden too, without changing what they hold.
+  ADDRESS_INPUTS.forEach(id => { $(id).type = masked ? "password" : "text"; });
+}
+
+// Re-draw everything that shows addresses from the data; messages that were only text stay masked.
+function rerenderAll() {
+  renderInstances();
+  if (resultsByView[view]) render();
+  renderNodeInfo();
+  renderOperations();
+  renderAuth();
+  renderDraft();
+  renderFound();
+}
+
+$("privacyToggle").onclick = () => {
+  masked = !masked;
+  renderPrivacyToggle();
+  if (masked) maskRegions(); else rerenderAll();
+};
+renderPrivacyToggle();
 
 // ---------------------------------------------------------------- theme
 const THEME_KEY = "capi-routes-viewer.theme";

@@ -57,8 +57,20 @@ a pod or private IP is not reachable from a laptop without a VPN or port-forward
 Instances are kept in the browser's local storage. **Export** downloads them as JSON (names, node
 URLs, Consul URL — never a token) to hand to a colleague, who loads it with **Import**.
 
-The page follows the system's light or dark setting; the button next to **Authenticate** switches
-between them, and the choice is remembered in the browser.
+The page follows the system's light or dark setting; the sun/moon button next to **Authenticate**
+switches between them, and the choice is remembered in the browser.
+
+### Screen sharing
+
+Addresses are **hidden by default**, so the page is safe to share. Nodes appear as `node 1`,
+`node 2` (`<instance> node 1` for other instances), and every other host — backend endpoints,
+Consul, identity provider, OPA bundle URLs, IP addresses, DNS names in certificates — as `•••`,
+keeping ports and paths. The address fields in the dialogs are masked as you type. Route names,
+versions and settings stay visible.
+
+The eye button next to **Authenticate** shows the real addresses until the page is reloaded; the
+choice is deliberately not remembered, so the page never opens with addresses on screen. Masking is
+for the screen only — the page still sends the real addresses to the nodes.
 
 ### Authentication
 
