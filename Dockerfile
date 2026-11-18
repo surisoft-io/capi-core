@@ -23,4 +23,4 @@ USER 1000
 #   env  MALLOC_ARENA_MAX=2                 # cap glibc malloc arenas
 #   jvm  -XX:NativeMemoryTracking=summary   # native growth visible via `jcmd VM.native_memory`
 # See tools/capi-rss-watch.sh.
-ENTRYPOINT ["java", "-XX:+UseG1GC", "-XX:MaxGCPauseMillis=100", "-Xms512m", "-Xmx512m", "-XX:+HeapDumpOnOutOfMemoryError", "-XX:HeapDumpPath=/capi/logs/heap-dump.hprof", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-XX:+UseG1GC", "-XX:-UseBASE64Intrinsics", "-XX:MaxGCPauseMillis=100", "-Xms512m", "-Xmx512m", "-XX:+HeapDumpOnOutOfMemoryError", "-XX:HeapDumpPath=/capi/logs/heap-dump.hprof", "-jar", "app.jar"]
