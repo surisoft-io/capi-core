@@ -7,7 +7,7 @@ upgrade to the current release to receive a fix.
 
 | Version          | Supported          |
 | ---------------- | ------------------ |
-| Latest (2.24.x)  | :white_check_mark: |
+| Latest (2.25.x)  | :white_check_mark: |
 | Older releases   | :x:                |
 
 ## Reporting a Vulnerability
