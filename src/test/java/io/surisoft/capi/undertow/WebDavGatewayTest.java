@@ -7,6 +7,7 @@ import io.undertow.util.HeaderMap;
 import io.undertow.util.Headers;
 import io.surisoft.capi.service.OpaWasmService;
 import io.surisoft.capi.utils.HttpUtils;
+import io.surisoft.capi.utils.TestJwts;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
@@ -213,12 +214,88 @@ class WebDavGatewayTest {
     }
 
     @Test
-    void policyDeclaredButOpaDisabled_isOpen() throws Exception {
-        // No OPA engine configured, so there is no policy to consult and nothing to enforce.
+    void policyDeclaredButOpaDisabled_isRefused_notOpen() throws Exception {
+        // CAPI-02: this used to assert the service was open. A declared policy that cannot be
+        // evaluated is a refusal, as on every other listener.
         WebDavClient c = client("/files/v1", null);
         c.setRequiresSubscription(false);
         c.setOpaRego("capi/files_policy");
-        assertTrue(authorize(gatewayWithOpa(false, null), c));
+        assertFalse(authorize(gatewayWithVerifier(false, null, TestJwts.token(KEY, "alice", 300)), c));
+    }
+
+    // ---- CAPI-02: the token is verified before any policy sees its claims ----
+
+    private static final com.nimbusds.jose.jwk.RSAKey KEY = TestJwts.newKey();
+
+    /** Real RS256 verification; only the token extraction is stubbed, because the exchange is a mock. */
+    private static WebDavGateway gatewayWithVerifier(boolean opaEnabled, Boolean verdict, String tokenPresented) throws Exception {
+        WebDavGateway g = gateway(config("both"));
+        HttpUtils httpUtils = spy(new HttpUtils(null, java.util.List.of(TestJwts.processorFor(KEY))));
+        doReturn(tokenPresented).when(httpUtils).processAuthorizationAccessToken(any(HttpServerExchange.class));
+        g.setHttpUtils(httpUtils);
+        if (opaEnabled) {
+            OpaWasmService opa = mock(OpaWasmService.class);
+            when(opa.isReady()).thenReturn(true);
+            when(opa.hasPolicy(any())).thenReturn(true);
+            if (verdict != null) {
+                io.surisoft.capi.schema.OpaResult result = new io.surisoft.capi.schema.OpaResult();
+                result.setResult(verdict);
+                when(opa.evaluate(any(), any(), any(), anyBoolean(), any())).thenReturn(result);
+            }
+            g.setOpaWasmService(opa);
+        } else {
+            g.setOpaWasmService(null);
+        }
+        return g;
+    }
+
+    private static WebDavClient unsecuredWithPolicy() {
+        WebDavClient c = client("/files/v1", null);
+        c.setRequiresSubscription(false);
+        c.setOpaRego("capi/files_policy");
+        return c;
+    }
+
+    @Test
+    void forgedClaims_neverReachThePolicy() throws Exception {
+        // The CAPI-02 attack: secured: false + opa-rego, and an unsigned token claiming whatever
+        // the policy wants. The policy would allow; the gate must refuse before asking it.
+        java.util.Base64.Encoder b64 = java.util.Base64.getUrlEncoder().withoutPadding();
+        String forged = b64.encodeToString("{\"alg\":\"none\"}".getBytes()) + "."
+                + b64.encodeToString("{\"azp\":\"trusted-client\"}".getBytes()) + ".";
+        WebDavGateway g = gatewayWithVerifier(true, true, forged);
+
+        assertFalse(authorize(g, unsecuredWithPolicy()));
+        verify(opaOf(g), never()).evaluate(any(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void tokenFromUntrustedKey_isRefused() throws Exception {
+        WebDavGateway g = gatewayWithVerifier(true, true, TestJwts.token(TestJwts.newKey(), "mallory", 300));
+        assertFalse(authorize(g, unsecuredWithPolicy()));
+        verify(opaOf(g), never()).evaluate(any(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void verifiedToken_policyDecides() throws Exception {
+        String token = TestJwts.token(KEY, "alice", 300);
+        assertTrue(authorize(gatewayWithVerifier(true, true, token), unsecuredWithPolicy()));
+        assertFalse(authorize(gatewayWithVerifier(true, false, token), unsecuredWithPolicy()));
+    }
+
+    @Test
+    void securedService_subscriptionGroupIsEnforced() throws Exception {
+        WebDavClient c = client("/files/v1", null);
+        c.setRequiresSubscription(true);
+        c.setSubscriptionRole("files-editors");
+        assertFalse(authorize(gatewayWithVerifier(false, null, TestJwts.tokenWithSubscriptions(KEY, "alice", 300, "other")), c));
+        assertTrue(authorize(gatewayWithVerifier(false, null, TestJwts.tokenWithSubscriptions(KEY, "alice", 300, "files-editors")), c));
+    }
+
+    private static OpaWasmService opaOf(WebDavGateway g) throws Exception {
+        java.lang.reflect.Field f = WebDavGateway.class.getDeclaredField("opaWasmService");
+        f.setAccessible(true);
+        return (OpaWasmService) f.get(g);
     }
 
     @Test

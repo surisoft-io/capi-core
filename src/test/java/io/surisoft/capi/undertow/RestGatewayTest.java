@@ -1561,7 +1561,7 @@ class RestGatewayTest {
         denied.setResult(false);
         when(opaWasmService.isReady()).thenReturn(true);
         when(opaWasmService.hasPolicy("my-rego-policy")).thenReturn(true);
-        when(opaWasmService.evaluate("opa-svc:v1", "my-rego-policy", "opa-token", true)).thenReturn(denied);
+        when(opaWasmService.evaluate(eq("opa-svc:v1"), eq("my-rego-policy"), eq("opa-token"), eq(true), any())).thenReturn(denied);
 
         runningGateway = createGateway(port);
         runningGateway.setOpaWasmService(opaWasmService);
@@ -1594,7 +1594,7 @@ class RestGatewayTest {
         allowed.setResult(true);
         when(opaWasmService.isReady()).thenReturn(true);
         when(opaWasmService.hasPolicy("my-rego-policy")).thenReturn(true);
-        when(opaWasmService.evaluate("opa-svc:v1", "my-rego-policy", "opa-token", true)).thenReturn(allowed);
+        when(opaWasmService.evaluate(eq("opa-svc:v1"), eq("my-rego-policy"), eq("opa-token"), eq(true), any())).thenReturn(allowed);
 
         runningGateway = createGateway(port);
         runningGateway.setOpaWasmService(opaWasmService);
@@ -1633,7 +1633,7 @@ class RestGatewayTest {
         String forged = io.surisoft.capi.utils.TestJwts.token(io.surisoft.capi.utils.TestJwts.newKey(), "admin", 300);
         assertEquals(401, getWithBearer(port, "/api/opa-svc/v1/x", forged));
         assertTrue(seen.isEmpty());
-        verify(opaWasmService, never()).evaluate(anyString(), anyString(), anyString(), anyBoolean());
+        verify(opaWasmService, never()).evaluate(anyString(), anyString(), anyString(), anyBoolean(), any());
     }
 
     @Test

@@ -84,7 +84,8 @@ public class WebsocketUtils {
         webSocketClient.getMappingList().forEach((m) -> {
             String scheme = service.getServiceMeta().getScheme() == null ? HttpProtocol.HTTP.getProtocol() : service.getServiceMeta().getScheme();
             if(xnioSsl != null) {
-                loadBalancingProxyClient.addHost(URI.create(scheme + "://" + m.getHostname() + ":" + m.getPort()), xnioSsl);
+                loadBalancingProxyClient.addHost(URI.create(scheme + "://" + m.getHostname() + ":" + m.getPort()), null, xnioSsl,
+                        BackendTls.withHostnameVerification(OptionMap.EMPTY));
             } else {
                 loadBalancingProxyClient.addHost(URI.create(scheme + "://" + m.getHostname() + ":" + m.getPort()));
             }

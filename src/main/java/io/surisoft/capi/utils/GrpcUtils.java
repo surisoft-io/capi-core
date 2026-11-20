@@ -51,7 +51,7 @@ public class GrpcUtils {
             String scheme = configuredScheme.equalsIgnoreCase(HttpProtocol.HTTPS.getProtocol()) ? HttpProtocol.HTTPS.getProtocol() : "h2c-prior";
             URI hostUri = URI.create(scheme + "://" + m.getHostname() + ":" + m.getPort());
             if(xnioSsl != null) {
-                loadBalancingProxyClient.addHost(hostUri, null, xnioSsl, http2Options);
+                loadBalancingProxyClient.addHost(hostUri, null, xnioSsl, BackendTls.withHostnameVerification(http2Options));
             } else {
                 loadBalancingProxyClient.addHost(hostUri, null, null, http2Options);
             }

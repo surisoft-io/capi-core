@@ -1,5 +1,7 @@
 package io.surisoft.capi.undertow;
 
+import com.nimbusds.jose.jwk.RSAKey;
+import io.surisoft.capi.utils.TestJwts;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.surisoft.capi.configuration.CAPIConfiguration;
 import io.surisoft.capi.schema.*;
@@ -22,6 +24,7 @@ import io.undertow.util.StatusCodes;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
 
 import java.net.ServerSocket;
 import java.net.URI;
@@ -32,9 +35,18 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
+import static org.mockito.ArgumentMatchers.eq;
 import static org.junit.jupiter.api.Assertions.*;
 
 class McpGatewayTest {
+
+    /** Tokens these tests send are really signed and really verified: no mocking verification away. */
+    private static final RSAKey JWT_KEY = TestJwts.newKey();
+
+    private static HttpUtils verifyingHttpUtils() {
+        return new HttpUtils(null, java.util.List.of(TestJwts.processorFor(JWT_KEY)));
+    }
+
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private McpGateway mcpGateway;
@@ -625,12 +637,15 @@ class McpGatewayTest {
             oauth2.setEnabled(false);
             opaConfig.setOauth2(oauth2);
 
+            String token = TestJwts.token(JWT_KEY, "alice", 300);
             OpaWasmService opaWasmService = mock(OpaWasmService.class);
+            when(opaWasmService.isReady()).thenReturn(true);
+            when(opaWasmService.hasPolicy("test-policy")).thenReturn(true);
             OpaResult denied = new OpaResult();
             denied.setResult(false);
-            when(opaWasmService.evaluate("opa-deny-svc", "test-policy", "test-token-12345", true)).thenReturn(denied);
+            when(opaWasmService.evaluate(eq("opa-deny-svc"), eq("test-policy"), eq(token), eq(true), any())).thenReturn(denied);
 
-            HttpUtils opaHttpUtils = new HttpUtils(null, null);
+            HttpUtils opaHttpUtils = verifyingHttpUtils();
 
             try (McpGateway opaGw = new McpGateway(gatewayPort, null,
                     new McpToolRegistry(opaSvcCache), opaHttpUtils,
@@ -664,7 +679,7 @@ class McpGatewayTest {
                         .uri(URI.create("http://localhost:" + gatewayPort + "/mcp"))
                         .header("Content-Type", "application/json")
                         .header("Mcp-Session-Id", sessionId)
-                        .header("Authorization", "Bearer test-token-12345")
+                        .header("Authorization", "Bearer " + token)
                         .POST(HttpRequest.BodyPublishers.ofString(body))
                         .build();
                 HttpResponse<String> response = client.send(callReq, HttpResponse.BodyHandlers.ofString());
@@ -698,16 +713,19 @@ class McpGatewayTest {
             opaConfig.setOauth2(oauth2);
 
             // Mock OPA: good-token allows "allow-svc" / denies "deny-svc"
+            String goodToken = TestJwts.token(JWT_KEY, "alice", 300);
             OpaWasmService opaWasmService = mock(OpaWasmService.class);
+            when(opaWasmService.isReady()).thenReturn(true);
+            when(opaWasmService.hasPolicy(any())).thenReturn(true);
             OpaResult allowResult = new OpaResult();
             allowResult.setResult(true);
             OpaResult denyResult = new OpaResult();
             denyResult.setResult(false);
-            when(opaWasmService.evaluate("allow-svc", "allow-policy", "good-token", true)).thenReturn(allowResult);
-            when(opaWasmService.evaluate("deny-svc", "deny-policy", "good-token", true)).thenReturn(denyResult);
+            when(opaWasmService.evaluate(eq("allow-svc"), eq("allow-policy"), eq(goodToken), eq(true), any())).thenReturn(allowResult);
+            when(opaWasmService.evaluate(eq("deny-svc"), eq("deny-policy"), eq(goodToken), eq(true), any())).thenReturn(denyResult);
 
             try (McpGateway opaGw = new McpGateway(gatewayPort, null,
-                    new McpToolRegistry(opaSvcCache), new HttpUtils(null, null),
+                    new McpToolRegistry(opaSvcCache), verifyingHttpUtils(),
                     opaWasmService, HttpClient.newHttpClient(), new LocalMcpSessionStore(opaSessCache), opaConfig,
                     new McpBackendLoadBalancer(30000))) {
                 opaGw.start();
@@ -740,7 +758,7 @@ class McpGatewayTest {
                         .uri(URI.create("http://localhost:" + gatewayPort + "/mcp"))
                         .header("Content-Type", "application/json")
                         .header("Mcp-Session-Id", sessionId)
-                        .header("Authorization", "Bearer good-token")
+                        .header("Authorization", "Bearer " + goodToken)
                         .POST(HttpRequest.BodyPublishers.ofString(listBody)).build(),
                         HttpResponse.BodyHandlers.ofString());
                 assertEquals(200, withGood.statusCode());
@@ -954,6 +972,11 @@ class McpGatewayTest {
     }
 
     private McpGateway createOauthGateway(int oauthPort, Cache<String, Service> svcCache, Cache<String, McpSession> sessCache) {
+        return createOauthGateway(oauthPort, svcCache, sessCache, new HttpUtils(null, null));
+    }
+
+    private McpGateway createOauthGateway(int oauthPort, Cache<String, Service> svcCache, Cache<String, McpSession> sessCache,
+                                          HttpUtils httpUtils) {
         CAPIConfiguration oauthConfig = new CAPIConfiguration();
         CAPIConfiguration.Mcp mcp = new CAPIConfiguration.Mcp();
         mcp.setEnabled(true);
@@ -966,7 +989,7 @@ class McpGatewayTest {
         oauth2.setEnabled(true);
         oauthConfig.setOauth2(oauth2);
         return new McpGateway(oauthPort, null,
-                new McpToolRegistry(svcCache), new HttpUtils(null, null),
+                new McpToolRegistry(svcCache), httpUtils,
                 null, HttpClient.newHttpClient(), new LocalMcpSessionStore(sessCache), oauthConfig,
                 new McpBackendLoadBalancer(30000));
     }
@@ -1157,37 +1180,49 @@ class McpGatewayTest {
     }
 
     @Test
-    void initialize_withOauth2Enabled_validToken_returnsSession() throws Exception {
+    void initialize_withOauth2Enabled_unverifiedToken_isRejected() throws Exception {
+        // CAPI-01: this test used to assert 200 for an arbitrary bearer string.
+        assertInitialize("Bearer valid-test-token-1234567890", 401, "Invalid authentication");
+    }
+
+    @Test
+    void initialize_withOauth2Enabled_tokenFromUntrustedKey_isRejected() throws Exception {
+        assertInitialize("Bearer " + TestJwts.token(TestJwts.newKey(), "mallory", 300), 401, "Invalid authentication");
+    }
+
+    @Test
+    void initialize_withOauth2Enabled_expiredToken_isRejected() throws Exception {
+        assertInitialize("Bearer " + TestJwts.token(JWT_KEY, "alice", -60), 401, "Invalid authentication");
+    }
+
+    @Test
+    void initialize_withOauth2Enabled_verifiedToken_returnsSession() throws Exception {
+        HttpResponse<String> response = assertInitialize("Bearer " + TestJwts.token(JWT_KEY, "alice", 300), 200, "protocolVersion");
+        assertTrue(response.headers().firstValue("Mcp-Session-Id").isPresent());
+    }
+
+    private HttpResponse<String> assertInitialize(String authorization, int expectedStatus, String expectedBody) throws Exception {
         int oauthPort = findFreePort();
         Cache<String, Service> svcCache = new Cache2kBuilder<String, Service>() {}
-                .name("testOauth2Valid-" + System.currentTimeMillis())
+                .name("testOauth2Init-" + System.nanoTime())
                 .eternal(true).entryCapacity(100).storeByReference(true).build();
         Cache<String, McpSession> sessCache = new Cache2kBuilder<String, McpSession>() {}
-                .name("testOauth2ValidSess-" + System.currentTimeMillis())
+                .name("testOauth2InitSess-" + System.nanoTime())
                 .expireAfterWrite(1800000, TimeUnit.MILLISECONDS)
                 .entryCapacity(100).storeByReference(true).build();
-
-        try (McpGateway gw = createOauthGateway(oauthPort, svcCache, sessCache)) {
+        try (McpGateway gw = createOauthGateway(oauthPort, svcCache, sessCache, verifyingHttpUtils())) {
             gw.start();
-
-            HttpClient client = HttpClient.newHttpClient();
             String initBody = objectMapper.writeValueAsString(Map.of("jsonrpc", "2.0", "method", "initialize", "id", 1));
-            HttpRequest request = HttpRequest.newBuilder()
+            HttpResponse<String> response = HttpClient.newHttpClient().send(HttpRequest.newBuilder()
                     .uri(URI.create("http://localhost:" + oauthPort + "/mcp"))
                     .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer valid-test-token-1234567890")
+                    .header("Authorization", authorization)
                     .POST(HttpRequest.BodyPublishers.ofString(initBody))
-                    .build();
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-
-            // With OAuth2 enabled and HttpUtils returning null for an unverifiable token,
-            // this should return unauthorized
-            assertEquals(200, response.statusCode());
-            String body = response.body();
-            // Should either succeed with session or fail with auth error
-            assertTrue(body.contains("Mcp-Session-Id") || body.contains("protocolVersion")
-                    || body.contains("Authorization required") || body.contains("Invalid authorization"),
-                    "Unexpected response: " + body);
+                    .build(), HttpResponse.BodyHandlers.ofString());
+            assertEquals(expectedStatus, response.statusCode(), response.body());
+            assertTrue(response.body().contains(expectedBody), "Unexpected response: " + response.body());
+            assertEquals(expectedStatus == 200 ? 1 : 0, sessCache.asMap().size(), "a session only for a verified token");
+            return response;
         } finally {
             svcCache.close();
             sessCache.close();

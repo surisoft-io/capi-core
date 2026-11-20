@@ -61,7 +61,7 @@ public class WebDavUtils {
                     : service.getServiceMeta().getScheme();
             URI hostUri = URI.create(scheme + "://" + m.getHostname() + ":" + m.getPort());
             if (xnioSsl != null) {
-                loadBalancingProxyClient.addHost(hostUri, null, xnioSsl, OptionMap.EMPTY);
+                loadBalancingProxyClient.addHost(hostUri, null, xnioSsl, BackendTls.withHostnameVerification(OptionMap.EMPTY));
             } else {
                 loadBalancingProxyClient.addHost(hostUri, null, null, OptionMap.EMPTY);
             }

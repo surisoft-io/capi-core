@@ -121,6 +121,15 @@ public final class AccessGate {
      */
     public Decision authorize(String serviceId, @Nullable String subscriptionGroup, @Nullable String opaRego,
                               @Nullable String accessToken) {
+        return authorize(serviceId, subscriptionGroup, opaRego, accessToken, null, null);
+    }
+
+    /**
+     * As {@link #authorize(String, String, String, String)}, telling the policy which request it is
+     * deciding on: {@code input.method} and {@code input.path}, as documented.
+     */
+    public Decision authorize(String serviceId, @Nullable String subscriptionGroup, @Nullable String opaRego,
+                              @Nullable String accessToken, @Nullable String method, @Nullable String path) {
         if (isBlank(subscriptionGroup) && isBlank(opaRego)) {
             return new Decision(Outcome.FORBIDDEN, NO_RULE, null);
         }
@@ -144,7 +153,14 @@ public final class AccessGate {
             if (!opaWasmService.hasPolicy(opaRego)) {
                 return new Decision(Outcome.FORBIDDEN, OPA_UNKNOWN + opaRego, claims);
             }
-            OpaResult result = opaWasmService.evaluate(serviceId, opaRego, accessToken, true);
+            java.util.Map<String, Object> request = new java.util.LinkedHashMap<>();
+            if (method != null) {
+                request.put("method", method);
+            }
+            if (path != null) {
+                request.put("path", path);
+            }
+            OpaResult result = opaWasmService.evaluate(serviceId, opaRego, accessToken, true, request);
             if (result == null || !result.isAllowed()) {
                 return new Decision(Outcome.FORBIDDEN, OPA_DENIED, claims);
             }

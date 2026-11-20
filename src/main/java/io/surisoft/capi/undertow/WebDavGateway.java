@@ -4,6 +4,7 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.surisoft.capi.configuration.CAPIConfiguration;
 import io.surisoft.capi.exception.AuthorizationException;
+import io.surisoft.capi.oidc.AccessGate;
 import io.surisoft.capi.schema.OpaResult;
 import io.surisoft.capi.schema.WebDavClient;
 import io.surisoft.capi.service.OpaWasmService;
@@ -469,11 +470,19 @@ public class WebDavGateway {
         return ticketStore.redeem(values.getFirst());
     }
 
+    /**
+     * Authorization through the shared {@link AccessGate}: the rules of REST, WebSocket and gRPC.
+     * The token is verified (signature, expiry) before any policy sees its claims, {@code secured}
+     * needs a {@code subscription-group} or an {@code opa-rego}, and a policy with no engine to
+     * evaluate it is a refusal.
+     *
+     * <p>This replaced a bespoke check that only verified the token inside the subscription branch:
+     * with {@code secured: false} and {@code opa-rego}, OPA was handed an unverified token, and with
+     * no OPA engine configured the service was open (CAPI-02).
+     */
     private boolean authorize(HttpServerExchange exchange, WebDavClient client) {
-        boolean policyGoverned = opaWasmService != null
-                && client.getOpaRego() != null
-                && !client.getOpaRego().isBlank();
-        if (!client.requiresSubscription() && !policyGoverned) {
+        String opaRego = client.getOpaRego() == null || client.getOpaRego().isBlank() ? null : client.getOpaRego();
+        if (!AccessGate.requiresAuthorization(client.requiresSubscription(), false, false, opaRego)) {
             return true;
         }
 
@@ -510,47 +519,30 @@ public class WebDavGateway {
             return false;
         }
 
-        if (client.requiresSubscription()) {
-            if (client.getSubscriptionRole() == null || client.getSubscriptionRole().isBlank()) {
-                // Distinct from "the token lacks the group": the service is secured but declares no
-                // group to check against, so every request is refused however good the token is.
-                log.warn("WebDAV service {} is secured but declares no subscriptionGroup — every "
-                       + "request will be refused. Set subscriptionGroup in its Consul metadata.",
-                        client.getServiceId());
-                deny(exchange, "no-subscription-group-configured");
+        AccessGate.Decision decision = new AccessGate(httpUtils, opaWasmService)
+                .authorize(client.getServiceId(), client.getSubscriptionRole(), opaRego, accessToken,
+                        exchange.getRequestMethod() != null ? exchange.getRequestMethod().toString() : null,
+                        exchange.getRequestPath());
+        switch (decision.outcome()) {
+            case ALLOWED -> {
+                return true;
+            }
+            case UNAUTHENTICATED -> {
+                challenge(exchange, client, decision.message());
                 return false;
             }
-            if (!httpUtils.isAuthorized(accessToken, client.getSubscriptionRole())) {
-                log.debug("WebDAV call to {} denied: token not in subscription group {}",
-                        client.getServiceId(), client.getSubscriptionRole());
-                deny(exchange, "token-not-in-subscription-group:" + client.getSubscriptionRole());
+            case POLICY_UNAVAILABLE -> {
+                // Transient: the OPA bundle is not loaded yet.
+                log.debug("WebDAV call to {} refused: {}", client.getServiceId(), decision.message());
+                exchange.getResponseHeaders().put(Headers.RETRY_AFTER, "1");
+                exchange.setStatusCode(io.undertow.util.StatusCodes.SERVICE_UNAVAILABLE);
+                exchange.endExchange();
                 return false;
             }
-        }
-
-        if (policyGoverned && !policyAllows(client, accessToken)) {
-            deny(exchange, "policy-denied:" + client.getOpaRego());
-            return false;
-        }
-        return true;
-    }
-
-    /**
-     * A missing policy decision is a refusal, never a pass. Mirrors the MCP gateway after SEC-01:
-     * no token means no claims, and no claims means no decision.
-     */
-    private boolean policyAllows(WebDavClient client, String accessToken) {
-        try {
-            OpaResult result = opaWasmService.evaluate(
-                    client.getServiceId(), client.getOpaRego(), accessToken, true);
-            if (result == null || !result.isAllowed()) {
-                log.debug("WebDAV call to {} denied by policy {}", client.getServiceId(), client.getOpaRego());
+            default -> {
+                deny(exchange, decision.message() + " (" + client.getServiceId() + ")");
                 return false;
             }
-            return true;
-        } catch (Exception e) {
-            log.warn("WebDAV policy evaluation failed for {} ({}): refusing", client.getServiceId(), e.getMessage());
-            return false;
         }
     }
 

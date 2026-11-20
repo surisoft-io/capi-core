@@ -46,10 +46,16 @@ public class McpResourceRegistry {
      * Each resource's {@code uri} field is prefixed with the service id.
      */
     public List<Map<String, Object>> getAllResources() {
+        return getAllResources(service -> true);
+    }
+
+    /** Only from services {@code visible} accepts — the caller's authorization filter. */
+    public List<Map<String, Object>> getAllResources(java.util.function.Predicate<Service> visible) {
         if (mcpServerClient == null) return List.of();
         List<Map<String, Object>> aggregated = new ArrayList<>();
         for (Service service : serviceCache.asMap().values()) {
             if (!McpServerClient.isMcpServerBackend(service)) continue;
+            if (!visible.test(service)) continue;
             try {
                 List<Map<String, Object>> resources = mcpServerClient.forwardResourcesList(service, defaultTimeoutMs);
                 for (Map<String, Object> r : resources) {

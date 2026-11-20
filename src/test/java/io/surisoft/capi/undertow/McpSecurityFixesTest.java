@@ -1,23 +1,28 @@
 package io.surisoft.capi.undertow;
 
+import com.nimbusds.jose.jwk.RSAKey;
 import io.surisoft.capi.configuration.CAPIConfiguration;
+import io.surisoft.capi.oidc.AccessGate;
 import io.surisoft.capi.schema.OpaResult;
 import io.surisoft.capi.schema.Service;
 import io.surisoft.capi.schema.ServiceMeta;
 import io.surisoft.capi.service.OpaWasmService;
 import io.surisoft.capi.utils.HttpUtils;
+import io.surisoft.capi.utils.TestJwts;
+import io.undertow.util.Headers;
 import io.undertow.server.HttpServerExchange;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 /**
- * The MCP-side security fixes: the OPA bypass on {@code tools/call}, and the bounds on request body
- * size and session count.
+ * The MCP-side security fixes: token verification and per-service authorization through the shared
+ * AccessGate (CAPI-01, and SEC-01 before it), and the bounds on request body size and session count.
  */
 class McpSecurityFixesTest {
 
@@ -48,90 +53,159 @@ class McpSecurityFixesTest {
         return service;
     }
 
-    private static boolean isOpaAllowed(McpGateway gateway, HttpServerExchange exchange, Service service) throws Exception {
-        Method m = McpGateway.class.getDeclaredMethod("isOpaAllowed", HttpServerExchange.class, Service.class);
+    /** Real RS256 verification: the processor trusts {@link #KEY} only. */
+    private static final RSAKey KEY = TestJwts.newKey();
+    private static final RSAKey OTHER_KEY = TestJwts.newKey();
+
+    private static HttpUtils verifyingHttpUtils() {
+        return new HttpUtils(null, List.of(TestJwts.processorFor(KEY)));
+    }
+
+    /** A gateway with the real verifier, the shared AccessGate and the given OPA engine (may be null). */
+    private static McpGateway gateway(OpaWasmService opa) throws Exception {
+        McpGateway gateway = bareGateway();
+        HttpUtils httpUtils = verifyingHttpUtils();
+        set(gateway, "httpUtils", httpUtils);
+        set(gateway, "opaWasmService", opa);
+        set(gateway, "accessGate", new AccessGate(httpUtils, opa));
+        return gateway;
+    }
+
+    private static OpaWasmService readyOpa(Boolean verdict) {
+        OpaWasmService opa = mock(OpaWasmService.class);
+        when(opa.isReady()).thenReturn(true);
+        when(opa.hasPolicy(any())).thenReturn(true);
+        if (verdict != null) {
+            OpaResult result = new OpaResult();
+            result.setResult(verdict);
+            when(opa.evaluate(any(), any(), any(), anyBoolean(), any())).thenReturn(result);
+        }
+        return opa;
+    }
+
+    private static Service service(boolean secured, String subscriptionGroup, String opaRego) {
+        ServiceMeta meta = new ServiceMeta();
+        meta.setSecured(secured);
+        meta.setSubscriptionGroup(subscriptionGroup);
+        meta.setOpaRego(opaRego);
+        Service service = new Service();
+        service.setId("svc:v1");
+        service.setServiceMeta(meta);
+        return service;
+    }
+
+    private static HttpServerExchange exchange(String bearer) {
+        HttpServerExchange exchange = new HttpServerExchange(null);
+        if (bearer != null) {
+            exchange.getRequestHeaders().put(Headers.AUTHORIZATION, "Bearer " + bearer);
+        }
+        return exchange;
+    }
+
+    private static AccessGate.Decision authorize(McpGateway gateway, HttpServerExchange exchange, Service service) throws Exception {
+        Method m = McpGateway.class.getDeclaredMethod("authorizeService", HttpServerExchange.class, Service.class);
         m.setAccessible(true);
-        return (boolean) m.invoke(gateway, exchange, service);
+        return (AccessGate.Decision) m.invoke(gateway, exchange, service);
     }
 
-    // ---- SEC-01: a missing token must not mean "allowed" ----
-
-    @Test
-    void missingToken_isRefused_notAllowed() throws Exception {
-        // The bypass: authenticate once to get a session, then drop the Authorization header on
-        // tools/call. The session was valid, so the request proceeded — and the policy, which
-        // decides on token claims, was never consulted.
-        McpGateway gateway = bareGateway();
-        HttpUtils httpUtils = mock(HttpUtils.class);
-        when(httpUtils.processAuthorizationAccessToken(any(HttpServerExchange.class))).thenReturn(null);
-        OpaWasmService opa = mock(OpaWasmService.class);
-        set(gateway, "httpUtils", httpUtils);
-        set(gateway, "opaWasmService", opa);
-
-        assertFalse(isOpaAllowed(gateway, mock(HttpServerExchange.class), serviceWithPolicy("capi/admin_only")));
-        verify(opa, never()).evaluate(any(), any(), any(), anyBoolean());
+    private static boolean isVerified(McpGateway gateway, String token) throws Exception {
+        Method m = McpGateway.class.getDeclaredMethod("isVerified", String.class);
+        m.setAccessible(true);
+        return (boolean) m.invoke(gateway, token);
     }
 
-    @Test
-    void tokenPresentAndPolicyAllows_isAllowed() throws Exception {
-        McpGateway gateway = bareGateway();
-        HttpUtils httpUtils = mock(HttpUtils.class);
-        when(httpUtils.processAuthorizationAccessToken(any(HttpServerExchange.class))).thenReturn("tok");
-        OpaWasmService opa = mock(OpaWasmService.class);
-        OpaResult allowed = new OpaResult();
-        allowed.setResult(true);
-        when(opa.evaluate("svc:v1", "capi/admin_only", "tok", true)).thenReturn(allowed);
-        set(gateway, "httpUtils", httpUtils);
-        set(gateway, "opaWasmService", opa);
+    /** An unsigned token whose payload claims whatever the caller wants: what CAPI-01 accepted. */
+    private static String forged(String payloadJson) {
+        java.util.Base64.Encoder b64 = java.util.Base64.getUrlEncoder().withoutPadding();
+        return b64.encodeToString("{\"alg\":\"none\"}".getBytes()) + "."
+                + b64.encodeToString(payloadJson.getBytes()) + ".";
+    }
 
-        assertTrue(isOpaAllowed(gateway, mock(HttpServerExchange.class), serviceWithPolicy("capi/admin_only")));
+    // ---- CAPI-01: a token is verified before anything trusts it ----
+
+    @Test
+    void gate_rejectsAnythingThatIsNotAVerifiedToken() throws Exception {
+        McpGateway gateway = gateway(null);
+        assertFalse(isVerified(gateway, "valid-test-token-1234567890"), "an arbitrary bearer string");
+        assertFalse(isVerified(gateway, forged("{\"sub\":\"admin\",\"realm_access\":{\"roles\":[\"admin\"]}}")),
+                "an unsigned token with forged claims");
+        assertFalse(isVerified(gateway, TestJwts.token(OTHER_KEY, "alice", 300)), "signed by an untrusted key");
+        assertFalse(isVerified(gateway, TestJwts.token(KEY, "alice", -60)), "expired");
+        assertFalse(isVerified(gateway, null));
+        assertTrue(isVerified(gateway, TestJwts.token(KEY, "alice", 300)), "a real, current token");
     }
 
     @Test
-    void tokenPresentAndPolicyDenies_isRefused() throws Exception {
-        McpGateway gateway = bareGateway();
-        HttpUtils httpUtils = mock(HttpUtils.class);
-        when(httpUtils.processAuthorizationAccessToken(any(HttpServerExchange.class))).thenReturn("tok");
-        OpaWasmService opa = mock(OpaWasmService.class);
-        OpaResult denied = new OpaResult();
-        denied.setResult(false);
-        when(opa.evaluate(any(), any(), any(), anyBoolean())).thenReturn(denied);
-        set(gateway, "httpUtils", httpUtils);
-        set(gateway, "opaWasmService", opa);
+    void forgedClaims_neverReachThePolicy() throws Exception {
+        // The CAPI-01 attack: claims that satisfy any policy, in a token nobody signed.
+        OpaWasmService opa = readyOpa(true);
+        McpGateway gateway = gateway(opa);
 
-        assertFalse(isOpaAllowed(gateway, mock(HttpServerExchange.class), serviceWithPolicy("capi/admin_only")));
+        AccessGate.Decision d = authorize(gateway, exchange(forged("{\"azp\":\"trusted-client\"}")),
+                service(false, null, "capi/admin_only"));
+
+        assertEquals(AccessGate.Outcome.UNAUTHENTICATED, d.outcome());
+        verify(opa, never()).evaluate(any(), any(), any(), anyBoolean(), any());
     }
 
     @Test
-    void nullEvaluation_isRefused() throws Exception {
-        McpGateway gateway = bareGateway();
-        HttpUtils httpUtils = mock(HttpUtils.class);
-        when(httpUtils.processAuthorizationAccessToken(any(HttpServerExchange.class))).thenReturn("tok");
-        OpaWasmService opa = mock(OpaWasmService.class);
-        when(opa.evaluate(any(), any(), any(), anyBoolean())).thenReturn(null);
-        set(gateway, "httpUtils", httpUtils);
-        set(gateway, "opaWasmService", opa);
+    void verifiedToken_policyAllows_isAllowed() throws Exception {
+        String token = TestJwts.token(KEY, "alice", 300);
+        OpaWasmService opa = readyOpa(true);
 
-        assertFalse(isOpaAllowed(gateway, mock(HttpServerExchange.class), serviceWithPolicy("capi/admin_only")));
+        AccessGate.Decision d = authorize(gateway(opa), exchange(token), service(false, null, "capi/admin_only"));
+
+        assertTrue(d.allowed());
+        verify(opa).evaluate(eq("svc:v1"), eq("capi/admin_only"), eq(token), eq(true), any());
     }
 
     @Test
-    void serviceWithNoPolicy_isUnaffected() throws Exception {
-        // No opa-rego declared, so there is no policy to consult and nothing to bypass.
-        McpGateway gateway = bareGateway();
-        set(gateway, "httpUtils", mock(HttpUtils.class));
-        set(gateway, "opaWasmService", mock(OpaWasmService.class));
-
-        assertTrue(isOpaAllowed(gateway, mock(HttpServerExchange.class), serviceWithPolicy(null)));
+    void verifiedToken_policyDenies_isRefused() throws Exception {
+        AccessGate.Decision d = authorize(gateway(readyOpa(false)), exchange(TestJwts.token(KEY, "alice", 300)),
+                service(false, null, "capi/admin_only"));
+        assertEquals(AccessGate.Outcome.FORBIDDEN, d.outcome());
     }
 
     @Test
-    void opaNotConfiguredAtAll_isUnaffected() throws Exception {
-        McpGateway gateway = bareGateway();
-        set(gateway, "httpUtils", mock(HttpUtils.class));
-        set(gateway, "opaWasmService", null);
+    void missingToken_onGovernedService_isRefused() throws Exception {
+        // Authenticate once, then drop the Authorization header: the session-based revision would
+        // otherwise authorize the call by Mcp-Session-Id alone (SEC-01).
+        OpaWasmService opa = readyOpa(true);
+        AccessGate.Decision d = authorize(gateway(opa), exchange(null), service(false, null, "capi/admin_only"));
+        assertEquals(AccessGate.Outcome.UNAUTHENTICATED, d.outcome());
+        verify(opa, never()).evaluate(any(), any(), any(), anyBoolean(), any());
+    }
 
-        assertTrue(isOpaAllowed(gateway, mock(HttpServerExchange.class), serviceWithPolicy("capi/admin_only")));
+    @Test
+    void policyDeclared_butNoOpaEngine_isRefused_notOpen() throws Exception {
+        // CAPI-01 part 3: this used to return "allowed".
+        AccessGate.Decision d = authorize(gateway(null), exchange(TestJwts.token(KEY, "alice", 300)),
+                service(false, null, "capi/admin_only"));
+        assertEquals(AccessGate.Outcome.FORBIDDEN, d.outcome());
+    }
+
+    @Test
+    void securedService_subscriptionGroupIsEnforced() throws Exception {
+        // CAPI-01: the MCP gateway used to ignore secured and subscription-group altogether.
+        McpGateway gateway = gateway(null);
+        Service svc = service(true, "orders-readers", null);
+
+        assertEquals(AccessGate.Outcome.FORBIDDEN,
+                authorize(gateway, exchange(TestJwts.tokenWithSubscriptions(KEY, "alice", 300, "other")), svc).outcome());
+        assertTrue(authorize(gateway, exchange(TestJwts.tokenWithSubscriptions(KEY, "alice", 300, "orders-readers")), svc).allowed());
+    }
+
+    @Test
+    void securedService_withNoRule_isRefused_likeRest() throws Exception {
+        AccessGate.Decision d = authorize(gateway(null), exchange(TestJwts.token(KEY, "alice", 300)), service(true, null, null));
+        assertEquals(AccessGate.Outcome.FORBIDDEN, d.outcome());
+    }
+
+    @Test
+    void serviceWithNoRule_isOpen_andNeedsNoToken() throws Exception {
+        OpaWasmService opa = readyOpa(true);
+        assertTrue(authorize(gateway(opa), exchange(null), service(false, null, null)).allowed());
+        verify(opa, never()).evaluate(any(), any(), any(), anyBoolean(), any());
     }
 
     // ---- session identity is derived one way, so mint and check agree ----

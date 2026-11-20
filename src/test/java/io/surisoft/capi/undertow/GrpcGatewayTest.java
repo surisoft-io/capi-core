@@ -299,7 +299,7 @@ class GrpcGatewayTest {
         when(opa.hasPolicy("capi/greeter")).thenReturn(true);
         io.surisoft.capi.schema.OpaResult allow = new io.surisoft.capi.schema.OpaResult();
         allow.setResult(true);
-        when(opa.evaluate(eq("greeter:v1"), eq("capi/greeter"), anyString(), eq(true))).thenReturn(allow);
+        when(opa.evaluate(eq("greeter:v1"), eq("capi/greeter"), anyString(), eq(true), any())).thenReturn(allow);
 
         int port = io.surisoft.capi.TestPorts.next();
         GrpcGateway gateway = new GrpcGateway(port, clients, null);

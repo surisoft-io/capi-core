@@ -804,7 +804,7 @@ class WebsocketGatewayTest {
         when(opa.hasPolicy("capi/ws")).thenReturn(true);
         io.surisoft.capi.schema.OpaResult allow = new io.surisoft.capi.schema.OpaResult();
         allow.setResult(true);
-        when(opa.evaluate(eq("test:v1"), eq("capi/ws"), anyString(), eq(true))).thenReturn(allow);
+        when(opa.evaluate(eq("test:v1"), eq("capi/ws"), anyString(), eq(true), any())).thenReturn(allow);
 
         runningGateway = new WebsocketGateway(port, 2, webSocketClients, websocketUtils, null, accessControlAllowHeaders, null);
         runningGateway.setHttpUtils(new io.surisoft.capi.utils.HttpUtils(null,

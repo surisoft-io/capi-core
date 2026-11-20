@@ -7,7 +7,7 @@
 # the capi_requests_total counter that CAPI emits via Micrometer/Prometheus.
 
 prometheus:
-  url: http://prometheus-server.capi-load-monitoring.svc  # adjust to your Prometheus service URL
+  url: http://prometheus-server.capi-load-monitoring.svc  # adjust to your Prometheus service URL (kube-prometheus-stack: http://<release>-kube-prometheus-prometheus.<ns>.svc, port 9090)
   port: 80
 
 rules:
@@ -19,4 +19,7 @@ rules:
           pod: {resource: "pod"}
       name:
         as: "capi_requests_per_second"
-      metricsQuery: 'rate(capi_requests_total{<<.LabelMatchers>>}[2m])'
+      # capi_requests_total has one series per service/method/status on every pod: sum them,
+      # or the HPA gets many values per pod instead of one requests-per-second figure.
+      # Counts REST traffic only (WebSocket and gRPC are not in this counter).
+      metricsQuery: 'sum(rate(capi_requests_total{<<.LabelMatchers>>}[2m])) by (<<.GroupBy>>)'

@@ -95,7 +95,7 @@ class RestGatewayAccessTest {
     private void policyAllows(boolean allowed) {
         OpaResult result = new OpaResult();
         result.setResult(allowed);
-        when(opa.evaluate(anyString(), eq(POLICY), anyString(), anyBoolean())).thenReturn(result);
+        when(opa.evaluate(anyString(), eq(POLICY), anyString(), anyBoolean(), any())).thenReturn(result);
     }
 
     private RestClient service(boolean secured, String group, String rego) {
@@ -237,7 +237,7 @@ class RestGatewayAccessTest {
         start();
         assertEquals(401, status("/x", null));
         assertEquals(200, status("/x", bearer()));
-        verify(opa).evaluate(eq("orders:v1"), eq(POLICY), anyString(), eq(true));
+        verify(opa).evaluate(eq("orders:v1"), eq(POLICY), anyString(), eq(true), any());
     }
 
     // ------------------------------------------------------------ secured: false, with spec
@@ -258,7 +258,7 @@ class RestGatewayAccessTest {
         service(false, GROUP, POLICY).setOpenAPI(spec());
         start();
         assertEquals(200, status("/public", null));
-        verify(opa, never()).evaluate(anyString(), anyString(), anyString(), anyBoolean());
+        verify(opa, never()).evaluate(anyString(), anyString(), anyString(), anyBoolean(), any());
 
         assertEquals(401, status("/private", null));
         assertEquals(403, status("/private", bearer("basic")));
@@ -273,7 +273,7 @@ class RestGatewayAccessTest {
         service(false, null, POLICY).setOpenAPI(spec());
         start();
         assertEquals(200, status("/private", bearer()));
-        verify(opa, times(1)).evaluate(anyString(), anyString(), anyString(), anyBoolean());
+        verify(opa, times(1)).evaluate(anyString(), anyString(), anyString(), anyBoolean(), any());
     }
 
     @Test
@@ -323,6 +323,45 @@ class RestGatewayAccessTest {
         assertEquals(403, status("/items/search", bearer()), "and its policy is evaluated");
         assertEquals(200, status("/items/42", null), "the templated operation stays anonymous");
         assertFalse(seen.stream().anyMatch(u -> u.endsWith("/items/search")), "nothing reached the backend for search");
+    }
+
+    /**
+     * CAPI-03, as it actually reproduces. Undertow itself parses {@code ;name=value} out of every
+     * segment ({@code /items/admin;v=1/details} arrives as {@code /items/admin/details}), so the form
+     * in the report already met the protected operation. An encoded {@code %3B} does not: it decodes
+     * into the segment, {@code admin;v=1} then missed the literal {@code admin} and matched the
+     * anonymous {@code {id}} operation. Matching on the segment up to its first {@code ;} closes both.
+     */
+    @Test
+    void pathParameters_cannotDodgeTheProtectedLiteralOperation() throws Exception {
+        Paths paths = new Paths();
+        paths.addPathItem("/items/{id}/details", new PathItem().get(new Operation().security(List.of())));
+        paths.addPathItem("/items/admin/details", new PathItem().get(new Operation()
+                .security(List.of(new SecurityRequirement().addList("bearer")))));
+        service(false, null, POLICY).setOpenAPI(new OpenAPI().paths(paths));
+        start();
+
+        assertEquals(401, status("/items/admin%3Bv=1/details", null), "an encoded ';' must not skip the check");
+        assertEquals(401, status("/items/admin;v=1/details", null), "the plain form (Undertow strips it)");
+        assertFalse(seen.stream().anyMatch(u -> u.contains("/items/admin")), "nothing reached the backend for admin");
+        assertEquals(200, status("/items/42;v=1/details", null), "the templated operation stays anonymous");
+    }
+
+    /** CAPI-03: the service prefix is stripped literally, so the forwarded path is the one authorized. */
+    @Test
+    void encodedServicePrefix_isRefused_notForwardedUnstripped() throws Exception {
+        service(false, null, null);
+        start();
+
+        // "%6Frders" decodes to "orders": routed on the decoded prefix, but the raw URI no longer
+        // starts with it, so there is no faithful path to forward.
+        HttpResponse<String> response = HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/%6Frders/v1/public")).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertEquals(400, response.statusCode());
+        assertTrue(seen.isEmpty(), "nothing was forwarded");
+        assertEquals(200, status("/public", null), "the normal form still works");
+        assertEquals(List.of("/public"), seen);
     }
 
     /** More literal segments win, compared left to right: {@code /a/{x}/c} beats {@code /a/{x}/{y}}. */

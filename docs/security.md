@@ -167,21 +167,35 @@ rejected with `403 Unknown policy`.
 
 ### OPA Input
 
-CAPI sends the following input to OPA:
+CAPI sends the following input to OPA. The token is verified (signature and expiry) before OPA is
+consulted, so every claim here comes from a token CAPI accepted.
 
 ```json
 {
   "input": {
-    "path": "/api/order-service/v1/orders/123",
-    "method": "GET",
+    "sub": "user-id",
+    "azp": "client-id",
+    "realm_access": { "roles": ["admin"] },
     "token": {
       "sub": "user-id",
       "azp": "client-id",
       "realm_access": { "roles": ["admin"] }
-    }
+    },
+    "service": "order-service:v1",
+    "method": "GET",
+    "path": "/api/order-service/v1/orders/123"
   }
 }
 ```
+
+- `token`: the token's claims. The same claims also appear at the top level (`input.azp`), which is
+  what policies written before 2.25.6 read; both forms keep working.
+- `service`: the service the call is for, as `name:group`.
+- `method` and `path`: the HTTP method and the request path, on REST and WebDAV calls. They are
+  written after the claims, so a token carrying a `method`, `path` or `service` claim cannot stand in
+  for them.
+
+Before 2.25.6 only `service` and the top-level claims were sent, despite what this page said.
 
 ### Example Rego Policy
 

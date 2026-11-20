@@ -19,6 +19,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import jakarta.annotation.Nullable;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -116,6 +117,17 @@ public class OpaWasmService {
      * in the bundle, or wasm evaluation throws.
      */
     public OpaResult evaluate(String serviceId, String opaRego, String value, boolean isAccessToken) {
+        return evaluate(serviceId, opaRego, value, isAccessToken, null);
+    }
+
+    /**
+     * Like {@link #evaluate(String, String, String, boolean)}, with the request the decision is about.
+     *
+     * @param request {@code method} and {@code path} of the call, or null when there is none to give;
+     *                written after the token claims, so a claim can never stand in for them
+     */
+    public OpaResult evaluate(String serviceId, String opaRego, String value, boolean isAccessToken,
+                              @Nullable Map<String, Object> request) {
         if (!hasPolicy(opaRego)) {
             log.trace("OPA Wasm evaluate skipped — policy {} not in bundle (entrypoints={})",
                     opaRego, bundleEntrypoints);
@@ -134,7 +146,7 @@ public class OpaWasmService {
             return null;
         }
         try {
-            String input = buildInput(serviceId, value, isAccessToken);
+            String input = buildInput(serviceId, value, isAccessToken, request);
             String entrypoint = opaRego + "/allow";
             log.trace("OPA Wasm evaluate entrypoint={} input={}", entrypoint, input);
             String resultJson = policy.entrypoint(entrypoint).evaluate(input);
@@ -417,7 +429,14 @@ public class OpaWasmService {
                 poolSize, poolSize * POOL_CEILING_FACTOR, dataJson != null ? "present" : "absent", bundle.entrypoints());
     }
 
-    private String buildInput(String serviceId, String value, boolean isAccessToken) {
+    /**
+     * The OPA input. For a token: its claims at the top level (what existing policies read, e.g.
+     * {@code input.azp}), the same claims under {@code input.token} (the documented shape), then
+     * {@code service}, {@code method} and {@code path}. Those last three are written after the
+     * claims, so a token carrying a {@code service}, {@code method} or {@code path} claim cannot
+     * impersonate the request (CAPI-05).
+     */
+    String buildInput(String serviceId, String value, boolean isAccessToken, @Nullable Map<String, Object> request) {
         try {
             Map<String, Object> input = new java.util.LinkedHashMap<>();
             if (isAccessToken) {
@@ -427,7 +446,11 @@ public class OpaWasmService {
                         String payloadJson = new String(java.util.Base64.getUrlDecoder().decode(parts[1]));
                         Map<String, Object> payload = objectMapper.readValue(payloadJson, new com.fasterxml.jackson.core.type.TypeReference<>() {});
                         input.putAll(payload);
+                        input.put("token", payload);
                         input.put("service", serviceId);
+                        if (request != null) {
+                            input.putAll(request);
+                        }
                     }
                 } catch (Exception e) {
                     log.trace("Could not decode JWT for Wasm input: {}", e.getMessage());

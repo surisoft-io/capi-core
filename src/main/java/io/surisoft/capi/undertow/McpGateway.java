@@ -6,6 +6,7 @@ import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.context.Scope;
 import io.surisoft.capi.configuration.CAPIConfiguration;
 import io.surisoft.capi.exception.AuthorizationException;
+import io.surisoft.capi.oidc.AccessGate;
 import io.surisoft.capi.schema.*;
 import io.surisoft.capi.service.McpBackendLoadBalancer;
 import io.surisoft.capi.service.McpPromptRegistry;
@@ -65,6 +66,8 @@ public class McpGateway implements AutoCloseable {
     private final McpBackendLoadBalancer loadBalancer;
     private final McpServerClient mcpServerClient;
     private final OpaWasmService opaWasmService;
+    /** The same per-service rules as REST, WebSocket and gRPC: subscription group, opa-rego, fail closed. */
+    private final AccessGate accessGate;
     private final OpenApiCallBuilder openApiCallBuilder = new OpenApiCallBuilder();
     private McpTracer mcpTracer;
     private McpResourceRegistry resourceRegistry;
@@ -98,6 +101,7 @@ public class McpGateway implements AutoCloseable {
         this.toolRegistry = toolRegistry;
         this.httpUtils = httpUtils;
         this.opaWasmService = opaWasmService;
+        this.accessGate = new AccessGate(httpUtils, opaWasmService);
         this.httpClient = httpClient;
         this.sessionStore = sessionStore;
         this.configuration = configuration;
@@ -317,6 +321,17 @@ public class McpGateway implements AutoCloseable {
                             JsonRpcResponse.error(request.getId(), -32000, "Authorization required"));
                     return;
                 }
+                // Extracting a token is not verifying it. Without this, any non-empty bearer string
+                // minted a session (CAPI-01).
+                if (!isVerified(accessToken)) {
+                    if (mcpTracer != null) {
+                        mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_UNAUTHORIZED);
+                        mcpTracer.setHttpStatus(span, StatusCodes.UNAUTHORIZED);
+                    }
+                    sendJsonRpc(exchange, StatusCodes.UNAUTHORIZED,
+                            JsonRpcResponse.error(request.getId(), -32000, "Invalid authentication"));
+                    return;
+                }
             }
 
             int maxSessions = configuration.getMcp().getMaxSessions();
@@ -385,6 +400,8 @@ public class McpGateway implements AutoCloseable {
             List<McpTool> tools = new ArrayList<>(toolRegistry.getAllTools());
             tools.sort(Comparator.comparing(McpTool::getName, Comparator.nullsLast(Comparator.naturalOrder())));
             List<Map<String, Object>> toolList = new ArrayList<>();
+            // One decision per service, not per tool: a service exposing many tools is verified once.
+            Map<String, Boolean> visible = new HashMap<>();
             int filtered = 0;
             for (McpTool tool : tools) {
                 // Per-service OPA visibility filter. A tool whose service declares an
@@ -393,7 +410,8 @@ public class McpGateway implements AutoCloseable {
                 // must not leak inventory to unidentified callers. Services without a
                 // rego are unaffected.
                 McpToolRegistry.McpToolResolution resolution = toolRegistry.resolveToolByName(tool.getName());
-                if (resolution != null && !isOpaAllowed(exchange, resolution.getService())) {
+                if (resolution != null && !visible.computeIfAbsent(resolution.getService().getId(),
+                        id -> authorizeService(exchange, resolution.getService()).allowed())) {
                     filtered++;
                     continue;
                 }
@@ -484,10 +502,15 @@ public class McpGateway implements AutoCloseable {
             Service service = resolution.getService();
             if (mcpTracer != null) mcpTracer.setToolType(span, tool.isMcpServer());
 
-            if (!isOpaAllowed(exchange, service)) {
+            AccessGate.Decision access = authorizeService(exchange, service);
+            if (!access.allowed()) {
                 if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_POLICY_DENIED);
-                sendJsonRpc(exchange, StatusCodes.OK,
-                        JsonRpcResponse.error(request.getId(), -32000, "Access denied by policy"));
+                if (access.outcome() == AccessGate.Outcome.UNAUTHENTICATED) {
+                    sendUnauthorized(exchange, request, access.message());
+                } else {
+                    sendJsonRpc(exchange, StatusCodes.OK,
+                            JsonRpcResponse.error(request.getId(), -32000, access.message()));
+                }
                 return;
             }
 
@@ -560,35 +583,62 @@ public class McpGateway implements AutoCloseable {
         }
     }
 
+    /** A decision for services that declare no authorization rule. */
+    private static final AccessGate.Decision OPEN = new AccessGate.Decision(AccessGate.Outcome.ALLOWED, null, null);
+
     /**
-     * Whether the service's OPA policy allows this request.
+     * Whether this request may use the service: the shared {@link AccessGate}, so the MCP gateway
+     * applies exactly the rules of REST, WebSocket and gRPC — {@code secured} needs a
+     * {@code subscription-group} or an {@code opa-rego}, the token is verified before any policy
+     * sees its claims, and a policy with no engine to evaluate it is a refusal.
      *
-     * <p>A missing token is a <strong>refusal</strong>. There used to be a call-time variant that
-     * returned "allowed" instead, on the reasoning that the call was already gated upstream by
-     * OAuth2 and session validation. That reasoning does not hold for the session-based revision:
-     * {@code initialize} requires a token, but every later request is authorized by the
-     * {@code Mcp-Session-Id} alone, so a caller could authenticate once and then simply
-     * <em>omit the Authorization header</em> on {@code tools/call} — and the policy was never
-     * consulted. Policies like {@code admin_only} or {@code owner_only} decide on token claims, so
-     * no token means no decision, and no decision means no.
+     * <p>This replaced a bespoke OPA check that handed the <em>unverified</em> token to OPA and
+     * allowed the call when no OPA engine was configured (CAPI-01). A missing token is still a
+     * refusal for a governed service: the session-based revision authorizes later requests by
+     * {@code Mcp-Session-Id} alone, so the token must be presented again for every call that needs it.
      */
-    private boolean isOpaAllowed(HttpServerExchange exchange, Service service) {
-        String opaRego = service.getServiceMeta().getOpaRego();
-        if (opaWasmService == null || opaRego == null) {
-            return true;   // no policy declared for this service
+    private AccessGate.Decision authorizeService(HttpServerExchange exchange, Service service) {
+        ServiceMeta meta = service.getServiceMeta();
+        String opaRego = meta.getOpaRego() == null || meta.getOpaRego().isBlank() ? null : meta.getOpaRego();
+        if (!AccessGate.requiresAuthorization(meta.isSecured(), false, false, opaRego)) {
+            return OPEN;
         }
         String accessToken = null;
-        try {
-            accessToken = httpUtils.processAuthorizationAccessToken(exchange);
-        } catch (AuthorizationException e) {
-            // no usable token available — falls through to the refusal below
+        if (httpUtils != null) {
+            try {
+                accessToken = httpUtils.processAuthorizationAccessToken(exchange);
+            } catch (AuthorizationException e) {
+                // unusable credential: the gate answers UNAUTHENTICATED
+            }
         }
-        if (accessToken == null) {
-            log.warn("OPA policy {} for {} could not be evaluated: no token on the request", opaRego, service.getId());
-            return false;
+        AccessGate.Decision decision = accessGate.authorize(service.getId(), meta.getSubscriptionGroup(), opaRego, accessToken);
+        if (!decision.allowed()) {
+            log.debug("MCP access to {} refused: {}", service.getId(), decision.message());
         }
-        OpaResult opaResult = opaWasmService.evaluate(service.getId(), opaRego, accessToken, true);
-        return opaResult != null && opaResult.isAllowed();
+        return decision;
+    }
+
+    /**
+     * {@link #authorizeService} for a single-item request; writes the refusal and returns false.
+     * Same answers as {@code tools/call}: 401 when the caller is not authenticated, otherwise the
+     * gate's reason as a JSON-RPC error.
+     */
+    private boolean requireServiceAccess(HttpServerExchange exchange, JsonRpcRequest request, Service service) {
+        AccessGate.Decision access = authorizeService(exchange, service);
+        if (access.allowed()) {
+            return true;
+        }
+        if (access.outcome() == AccessGate.Outcome.UNAUTHENTICATED) {
+            sendUnauthorized(exchange, request, access.message());
+        } else {
+            sendJsonRpc(exchange, StatusCodes.OK, JsonRpcResponse.error(request.getId(), -32000, access.message()));
+        }
+        return false;
+    }
+
+    /** Signature, expiry and the configured JWT processors — not just "a token is present". */
+    private boolean isVerified(String accessToken) {
+        return accessToken != null && !accessToken.isBlank() && httpUtils != null && httpUtils.isTokenValid(accessToken);
     }
 
     private boolean isStreamingRequest(McpTool tool, HttpServerExchange exchange) {
@@ -899,7 +949,7 @@ public class McpGateway implements AutoCloseable {
                 if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_SUCCESS);
                 return;
             }
-            List<Map<String, Object>> resources = resourceRegistry.getAllResources();
+            List<Map<String, Object>> resources = resourceRegistry.getAllResources(svc -> authorizeService(exchange, svc).allowed());
             if (span != null) span.setAttribute("mcp.resources.count", resources.size());
             if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_SUCCESS);
             sendJsonRpc(exchange, StatusCodes.OK,
@@ -958,6 +1008,9 @@ public class McpGateway implements AutoCloseable {
                         JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INVALID_PARAMS, "Resource not found: " + uri));
                 return;
             }
+            if (!requireServiceAccess(exchange, request, resolved.getService())) {
+                return;
+            }
             int timeout = configuration.getMcp().getToolCallTimeout();
             try {
                 Object result = resourceRegistry.readResource(resolved, timeout);
@@ -1012,7 +1065,7 @@ public class McpGateway implements AutoCloseable {
                 if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_SUCCESS);
                 return;
             }
-            List<Map<String, Object>> prompts = promptRegistry.getAllPrompts();
+            List<Map<String, Object>> prompts = promptRegistry.getAllPrompts(svc -> authorizeService(exchange, svc).allowed());
             if (span != null) span.setAttribute("mcp.prompts.count", prompts.size());
             if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_SUCCESS);
             sendJsonRpc(exchange, StatusCodes.OK,
@@ -1070,6 +1123,9 @@ public class McpGateway implements AutoCloseable {
                 if (mcpTracer != null) mcpTracer.setOutcome(span, Constants.CAPI_OUTCOME_PROMPT_NOT_FOUND);
                 sendJsonRpc(exchange, StatusCodes.OK,
                         JsonRpcResponse.error(request.getId(), Constants.JSONRPC_INVALID_PARAMS, "Prompt not found: " + name));
+                return;
+            }
+            if (!requireServiceAccess(exchange, request, resolved.getService())) {
                 return;
             }
             int timeout = configuration.getMcp().getToolCallTimeout();
@@ -1138,6 +1194,10 @@ public class McpGateway implements AutoCloseable {
                 sendUnauthorized(exchange, request, "Authorization required");
                 return null;
             }
+            if (!isVerified(accessToken)) {
+                sendUnauthorized(exchange, request, "Invalid authentication");
+                return null;
+            }
             clientIdentity = clientIdentityOf(accessToken);
         }
         // Not stored: nothing outlives the request on this path. It exists only so the
@@ -1204,6 +1264,18 @@ public class McpGateway implements AutoCloseable {
             if (callerIdentity == null || !callerIdentity.equals(session.getClientIdentity())) {
                 log.warn("MCP session {} presented by a different identity than it was issued to", sessionId);
                 sendUnauthorized(exchange, request, "Session does not belong to this caller");
+                return null;
+            }
+            // Same token as at initialize, but it may have expired since: a session never outlives
+            // the credential it was minted from.
+            String presented;
+            try {
+                presented = httpUtils.processAuthorizationAccessToken(exchange);
+            } catch (AuthorizationException e) {
+                presented = null;
+            }
+            if (!isVerified(presented)) {
+                sendUnauthorized(exchange, request, "Invalid authentication");
                 return null;
             }
         }

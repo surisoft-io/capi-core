@@ -37,10 +37,16 @@ public class McpPromptRegistry {
     }
 
     public List<Map<String, Object>> getAllPrompts() {
+        return getAllPrompts(service -> true);
+    }
+
+    /** Only from services {@code visible} accepts — the caller's authorization filter. */
+    public List<Map<String, Object>> getAllPrompts(java.util.function.Predicate<Service> visible) {
         if (mcpServerClient == null) return List.of();
         List<Map<String, Object>> aggregated = new ArrayList<>();
         for (Service service : serviceCache.asMap().values()) {
             if (!McpServerClient.isMcpServerBackend(service)) continue;
+            if (!visible.test(service)) continue;
             try {
                 List<Map<String, Object>> prompts = mcpServerClient.forwardPromptsList(service, defaultTimeoutMs);
                 for (Map<String, Object> p : prompts) {

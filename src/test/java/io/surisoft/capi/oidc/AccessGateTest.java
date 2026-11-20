@@ -41,7 +41,7 @@ class AccessGateTest {
     private void allowByPolicy(boolean allowed) {
         OpaResult result = new OpaResult();
         result.setResult(allowed);
-        when(opa.evaluate(anyString(), eq(POLICY), anyString(), anyBoolean())).thenReturn(result);
+        when(opa.evaluate(anyString(), eq(POLICY), anyString(), anyBoolean(), any())).thenReturn(result);
     }
 
     private String token(String... groups) {
@@ -134,7 +134,7 @@ class AccessGateTest {
         AccessGate gate = new AccessGate(new HttpUtils(null, null), opa);
         assertEquals(UNAUTHENTICATED, gate.authorize(SERVICE, null, POLICY, token()).outcome());
         assertEquals(UNAUTHENTICATED, new AccessGate(null, opa).authorize(SERVICE, null, POLICY, token()).outcome());
-        verify(opa, never()).evaluate(anyString(), anyString(), anyString(), anyBoolean());
+        verify(opa, never()).evaluate(anyString(), anyString(), anyString(), anyBoolean(), any());
     }
 
     @Test
@@ -159,7 +159,7 @@ class AccessGateTest {
     @Test
     void policyAlone_isARule() {
         assertEquals(ALLOWED, decide(null, POLICY, token()));
-        verify(opa).evaluate(eq(SERVICE), eq(POLICY), anyString(), eq(true));
+        verify(opa).evaluate(eq(SERVICE), eq(POLICY), anyString(), eq(true), any());
         allowByPolicy(false);
         assertEquals(FORBIDDEN, decide(null, POLICY, token()));
     }
@@ -167,7 +167,7 @@ class AccessGateTest {
     @Test
     void groupIsCheckedBeforeThePolicy_soARefusedCallerCostsNoEvaluation() {
         assertEquals(FORBIDDEN, decide("premium", POLICY, token("basic")));
-        verify(opa, never()).evaluate(anyString(), anyString(), anyString(), anyBoolean());
+        verify(opa, never()).evaluate(anyString(), anyString(), anyString(), anyBoolean(), any());
     }
 
     @Test
@@ -193,7 +193,7 @@ class AccessGateTest {
 
     @Test
     void evaluationFailure_isRefused() {
-        when(opa.evaluate(anyString(), eq(POLICY), anyString(), anyBoolean())).thenReturn(null);
+        when(opa.evaluate(anyString(), eq(POLICY), anyString(), anyBoolean(), any())).thenReturn(null);
         assertEquals(FORBIDDEN, decide(null, POLICY, token()));
     }
 

@@ -305,17 +305,10 @@ public class RestGateway {
             // Add CORS headers to all responses (not just OPTIONS)
             addCorsHeaders(exchange, effectiveCorsPolicy(routedClient));
 
-            // Unfinished: /session, needs review
-            /* We want to provide a way for CAPI to set a cookie for human/browser legit request
-            *  Services will need to request this feature via ServiceMeta.browser-session-enabled
-            *  If a valid origin is found in the request, then CAPI will create a session signature valid for
-            *  ServiceMeta.browser-session-duration and set a cookie with that expiration. for the gateway domain
-            *  and Service context path.
-            *  The browser will then send the cookie for every service call: ex: capi/service/dev/get
-            *  If this feature is enable for the given service, CAPI will not allow any calls without the session header.
-            *  CAPI will never control if a session request is coming from a human //Check if its possible to control, via form hidden field maybe
-            *  The browser should only POST to CAPI /session endpoint if a human is actually holding the browser session.
-            */
+            // Unfinished: the /session browser-clearance endpoint (always refuses for now). A service
+            // will opt in through its metadata; CAPI then issues a short-lived signed session cookie,
+            // scoped to the gateway domain and the service context path, to a browser that proves it
+            // is one, and requires that cookie on the service's calls.
             if (requestPath.equals("/session")) {
                 handleSession(exchange, requestPath);
                 return;
@@ -450,7 +443,8 @@ public class RestGateway {
                     httpErrorHandler.sendError(exchange, 503, "API definition not available");
                     return;
                 }
-                Operation operation = matchOperation(exchange, spec, stripToApiPath(restClient, requestPath));
+                String apiPath = stripToApiPath(restClient, requestPath);
+                Operation operation = apiPath == null ? null : matchOperation(exchange, spec, apiPath);
                 if (operation == null) {
                     httpErrorHandler.sendError(exchange, 400, "Call not allowed");
                     return;
@@ -492,7 +486,8 @@ public class RestGateway {
                         return;
                     }
                     AccessGate.Decision decision = accessGate().authorize(restClient.getCanonicalServiceId(),
-                            restClient.getSubscriptionGroup(), restClient.getOpaRego(), accessToken);
+                            restClient.getSubscriptionGroup(), restClient.getOpaRego(), accessToken,
+                            exchange.getRequestMethod().toString(), requestPath);
                     switch (decision.outcome()) {
                         case ALLOWED -> exchange.putAttachment(TOKEN_VERIFIED, Boolean.TRUE);
                         case UNAUTHENTICATED -> {
@@ -551,7 +546,14 @@ public class RestGateway {
             if (restClient.isKeepGroup()) {
                 exchange.getRequestHeaders().put(HttpString.tryFromString(Constants.CAPI_GROUP_HEADER), restClient.getServiceId());
             }
-            String forwardPath = normalizePathForForwarding(restClient, exchange.getRequestURI());
+            String forwardPath = normalizePathForForwarding(restClient, rawPath(exchange));
+            if (forwardPath == null) {
+                // The raw URI does not start with the service prefix the decoded path was routed on:
+                // the prefix itself was percent-encoded. Forwarding it would send the backend a path
+                // other than the one authorized, so it is refused rather than guessed at.
+                httpErrorHandler.sendError(exchange, 400, "Bad request");
+                return;
+            }
             exchange.setRequestURI(forwardPath);
             exchange.setRelativePath(forwardPath);
             proxyWithTracing(exchange, restClient, requestPath);
@@ -649,8 +651,14 @@ public class RestGateway {
         if (contextPath != null && path.startsWith(contextPath)) {
             path = path.substring(contextPath.length());
         }
-        // Strip service ID
-        path = path.replaceFirst(restClient.getServiceId(), "");
+        // Strip the service ID as a literal prefix. This was replaceFirst, a regular expression that
+        // could match later in the path or not at all, leaving the forwarded path out of step with
+        // the one the security check saw (CAPI-03).
+        String serviceId = restClient.getServiceId();
+        if (!path.startsWith(serviceId)) {
+            return null;
+        }
+        path = path.substring(serviceId.length());
         return path.isEmpty() ? "/" : path;
     }
 
@@ -660,6 +668,9 @@ public class RestGateway {
      */
     private String normalizePathForForwarding(RestClient restClient, String requestPath) {
         String path = stripToApiPath(restClient, requestPath);
+        if (path == null) {
+            return null;
+        }
         // Prepend root context if set
         if (restClient.getRootContext() != null && !restClient.getRootContext().isEmpty()
                 && !restClient.getRootContext().equals("/")) {
@@ -828,13 +839,33 @@ public class RestGateway {
 
         for (int i = 0; i < reqSegments.length; i++) {
             String defSeg = defSegments[i];
-            if (defSeg.equals(reqSegments[i])) continue;
+            // Compare without path parameters. Undertow keeps ";v=1" in the segment, Tomcat (and so
+            // Spring Boot) strips it before routing: "admin;v=1" must match the literal "admin"
+            // operation the backend will run, not a looser "{id}" one (CAPI-03).
+            if (defSeg.equals(withoutPathParameters(reqSegments[i]))) continue;
             boolean isPathParam = defSeg.length() >= 2
                     && defSeg.charAt(0) == '{'
                     && defSeg.charAt(defSeg.length() - 1) == '}';
             if (!isPathParam) return false;
         }
         return true;
+    }
+
+    /** The raw (still encoded) request path, without scheme and authority for an absolute-form request. */
+    static String rawPath(HttpServerExchange exchange) {
+        String uri = exchange.getRequestURI();
+        if (exchange.isHostIncludedInRequestURI()) {
+            int scheme = uri.indexOf("://");
+            int slash = scheme < 0 ? -1 : uri.indexOf('/', scheme + 3);
+            return slash < 0 ? "/" : uri.substring(slash);
+        }
+        return uri;
+    }
+
+    /** The segment up to its first {@code ;}: what Tomcat routes on. */
+    static String withoutPathParameters(String segment) {
+        int semicolon = segment.indexOf(';');
+        return semicolon < 0 ? segment : segment.substring(0, semicolon);
     }
 
     private void handleHealth(HttpServerExchange exchange) {
@@ -954,7 +985,7 @@ public class RestGateway {
         return addr != null ? addr.getHostAddress() : "unknown";
     }
 
-    // Unfinished: /session, needs review
+    // Unfinished: see the /session note in handleRequest.
     private void handleSession(HttpServerExchange exchange, String requestPath) {
         //need service authorized hosts
         String origin = exchange.getRequestHeaders().getFirst("Origin");
