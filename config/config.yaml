@@ -1,5 +1,5 @@
 capi:
-  version: 2.23.5
+  version: 2.25.7
   instanceName: default
   strictToInstanceName: false
   publicEndpoint: http://localhost:8380/api/
