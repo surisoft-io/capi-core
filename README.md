@@ -19,6 +19,8 @@
 
 CAPI is a lightweight API Gateway and load balancer built on Undertow's async proxy architecture. Services register themselves in HashiCorp Consul, and CAPI automatically discovers them, creates proxy handlers, and applies security, throttling, and observability policies — no database required.
 
+CAPI is the policy enforcement point in front of your services: it validates OAuth2/OIDC tokens, evaluates OPA policies, enforces the security each OpenAPI operation declares, and verifies the TLS certificates of the backends it calls, so every service behind it gets the same checks.
+
 ## Features
 
 * REST, WebSocket, and SSE gateway with fully async proxying (zero threads blocked during backend calls)
@@ -33,6 +35,7 @@ CAPI is a lightweight API Gateway and load balancer built on Undertow's async pr
 * Prometheus metrics
 * OpenAPI spec aggregation from upstream services
 * TLS termination and dynamic truststore management (via Consul KV hot-reload)
+* Backend TLS verification: certificate chain and hostname, always on
 * CORS management
 * Admin API with health, metrics, and route inspection
 * **Admin MCP server** — read-only, cluster-wide MCP server over the Admin API: AI agents can ask why a service does not route, whether all nodes are aligned, which certificates expire, and where the 5xx come from
